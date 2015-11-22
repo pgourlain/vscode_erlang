@@ -1,7 +1,8 @@
 {
 	"name": "erlang",
-	"description": "builder for erlang",
-	"version": "0.0.1",
+	"description": "Erlang language extension for Visual Studio Code",
+	"version": "0.0.2",
+	"icon": "images/icon.png",
 	"publisher": "pgourlain",
 	"engines": {
 		"vscode": "^0.10.1"
