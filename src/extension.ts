@@ -13,37 +13,41 @@ export function activate(context: vscode.ExtensionContext) {
 	// This line of code will only be executed once when your extension is activated
 	console.log('Congratulations, your extension "erlang" is now active!'); 
 
+	var disposables=[];
 	// The command has been defined in the package.json file
 	// Now provide the implementation of the command with  registerCommand
 	// The commandId parameter must match the command field in package.json
-	var disposable = vscode.commands.registerCommand('extension.rebarBuild', () => {
-		// The code you place here will be executed every time your command is executed
-		var runner = new RebarRunner();
-		try {
-			runner.runScript(vscode.workspace.rootPath);
-      	} catch (e) {
-        	vscode.window.showErrorMessage('Couldn\'t execute rebar.\n' + e);
-      	}
-	});
+	disposables.push(vscode.commands.registerCommand('extension.rebarBuild', () => { runRebarCommand('compile');}));
+	disposables.push(vscode.commands.registerCommand('extension.rebarGetDeps', () => { runRebarCommand('get-deps');}));
+	disposables.push(vscode.commands.registerCommand('extension.rebarUpdateDeps', () => { runRebarCommand('update-deps');}));
+	disposables.forEach((disposable => context.subscriptions.push(disposable)));
+}
 
-	context.subscriptions.push(disposable);
+
+function runRebarCommand(command: string) {
+	var runner = new RebarRunner();
+	try {
+		runner.runScript(vscode.workspace.rootPath, command);
+	} catch (e) {
+		vscode.window.showErrorMessage('Couldn\'t execute rebar.\n' + e);
+	}	
 }
 
 class RebarRunner {
-	public runScript(dirName: string): void {
+	public runScript(dirName: string, command: string): void {
 		var rebarFileName = path.join(dirName, 'rebar');
-		let args = ['compile'];
+		let args = [command];
 		let rebar = child_process.spawn(rebarFileName, args, { cwd: dirName, stdio:'pipe' });
 		var outputChannel = vscode.window.createOutputChannel('rebar');
 		outputChannel.show();
-		outputChannel.appendLine('starting rebar...');
+		outputChannel.appendLine('starting rebar '+ command + ' ...');
 
 		rebar.stdout.on('data', buffer => {
-			console.log(buffer.toString());
+			//console.log(buffer.toString());
 			outputChannel.appendLine(buffer.toString());
 		});
 		rebar.stderr.on('data', buffer => {
-			console.log(buffer.toString());
+			//console.log(buffer.toString());
 			outputChannel.appendLine(buffer.toString());
 		});
 

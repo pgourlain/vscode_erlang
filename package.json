@@ -11,7 +11,9 @@
 		"Languages"
 	],
 	"activationEvents": [
-		"onCommand:extension.rebarBuild"
+		"onCommand:extension.rebarBuild",
+		"onCommand:extension.rebarGetDeps",
+		"onCommand:extension.rebarUpdateDeps"		
 	],
 	"main": "./out/src/extension",
 	"contributes": {
@@ -38,7 +40,13 @@
 		],		
 		"commands": [{
 			"command": "extension.rebarBuild",
-			"title": "Erlang build (rebar)"
+			"title": "Erlang: rebar compile"
+		},{
+			"command": "extension.rebarGetDeps",
+			"title": "Erlang: rebar get-deps"
+		},{
+			"command": "extension.rebarUpdateDeps",
+			"title": "Erlang: rebar update-deps"
 		}],
 		"configuration": {
         	"type": "object",
