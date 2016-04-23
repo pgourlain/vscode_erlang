@@ -70,6 +70,6 @@
 	},
 	"devDependencies": {
 		"typescript": "^1.6.2",
-		"vscode": "0.10.x"
+		"vscode": "0.11.x"
 	}
 }

@@ -12,14 +12,25 @@ export function activate(context: vscode.ExtensionContext) {
 	// Use the console to output diagnostic information (console.log) and errors (console.error)
 	// This line of code will only be executed once when your extension is activated
 	console.log('Congratulations, your extension "erlang" is now active!'); 
-
+	//configuration of erlang language -> documentation : https://code.visualstudio.com/Docs/extensionAPI/vscode-api#LanguageConfiguration
+	languages.setLanguageConfiguration('erlang', {			
+			brackets: [
+				['{', '}'],
+				['[', ']'],
+				['(', ')'],
+				['<<', '>>']
+			],
+			comments: {
+				lineComment: '%'
+			}
+		});
 	var disposables=[];
 	// The command has been defined in the package.json file
 	// Now provide the implementation of the command with  registerCommand
 	// The commandId parameter must match the command field in package.json
-	disposables.push(vscode.commands.registerCommand('extension.rebarBuild', () => { runRebarCommand('compile');}));
-	disposables.push(vscode.commands.registerCommand('extension.rebarGetDeps', () => { runRebarCommand('get-deps');}));
-	disposables.push(vscode.commands.registerCommand('extension.rebarUpdateDeps', () => { runRebarCommand('update-deps');}));
+	disposables.push(vscode.commands.registerCommand('extension.rebarBuild', () => { runRebarCommand(['get-deps', 'compile']);}));
+	disposables.push(vscode.commands.registerCommand('extension.rebarGetDeps', () => { runRebarCommand(['get-deps']);}));
+	disposables.push(vscode.commands.registerCommand('extension.rebarUpdateDeps', () => { runRebarCommand(['update-deps']);}));
 	disposables.forEach((disposable => context.subscriptions.push(disposable)));
 }
 
@@ -34,13 +45,13 @@ function runRebarCommand(command: string) {
 }
 
 class RebarRunner {
-	public runScript(dirName: string, command: string): void {
+	public runScript(dirName: string, commands: string[]): void {
 		var rebarFileName = path.join(dirName, 'rebar');
-		let args = [command];
+		let args = commands;
 		let rebar = child_process.spawn(rebarFileName, args, { cwd: dirName, stdio:'pipe' });
 		var outputChannel = vscode.window.createOutputChannel('rebar');
 		outputChannel.show();
-		outputChannel.appendLine('starting rebar '+ command + ' ...');
+		outputChannel.appendLine('starting rebar '+ commands + ' ...');
 
 		rebar.stdout.on('data', buffer => {
 			//console.log(buffer.toString());
