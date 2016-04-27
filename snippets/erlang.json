@@ -1,0 +1,25 @@
+{
+    "erlang gen_server behavior" : {
+        "prefix" : "erl-gen_server-behavior",
+        "body"  : [
+            "-behaviour(gen_server).",
+            "",
+            "%% API",
+            "-export([start/1, stop/1, start_link/2, start_link/4]).",
+            "-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).",
+            "-record(state, {dummy}).",
+            "start(Name) ->",
+            "   $1_sup:start_child(Name).",
+            "",
+            "stop(Name) ->",
+            "   gen_server:call(Name, stop).",
+            "",
+            "start_link(Name) ->",
+            "   gen_server:start_link({local, Name}, ?MODULE, [], []).",
+            "",
+            "init(_Args) ->",
+            "   {ok, #state{dummy=1}}."            
+        ],
+        "description" : "generate an empty gen_server" 
+    }
+}

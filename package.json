@@ -1,14 +1,15 @@
 {
 	"name": "erlang",
 	"description": "Erlang language extension for Visual Studio Code",
-	"version": "0.0.2",
+	"version": "0.0.3",
 	"icon": "images/icon.png",
 	"publisher": "pgourlain",
 	"engines": {
-		"vscode": "^0.10.1"
+		"vscode": "^0.10.6"
 	},
 	"categories": [
-		"Languages"
+		"Languages",
+		"Snippets"
 	],
 	"activationEvents": [
 		"onCommand:extension.rebarBuild",
@@ -26,11 +27,16 @@
 				],
 				"extensions": [
 					".erl",
-					".hrl"
+					".hrl",
+					".yrl", 
+					".escript", 
+					".app.src",
+					"rebar.config"
 				],
 				"configuration": "./erlang.configuration.json"
 			}
 		],
+		
 		"grammars": [
 			{
 				"language": "erlang",
@@ -48,6 +54,12 @@
 			"command": "extension.rebarUpdateDeps",
 			"title": "Erlang: rebar update-deps"
 		}],
+		"snippets": [
+            {
+                "language": "erlang",
+                "path": "./snippets/erlang.json"
+            }
+        ],
 		"configuration": {
         	"type": "object",
         	"title": "rebar configuration",
@@ -66,10 +78,11 @@
 	},
 	"scripts": {
 		"vscode:prepublish": "node ./node_modules/vscode/bin/compile",
-		"compile": "node ./node_modules/vscode/bin/compile -watch -p ./"
+		"compile": "node ./node_modules/vscode/bin/compile -watch -p ./",
+		"postinstall": "node ./node_modules/vscode/bin/install"
 	},
 	"devDependencies": {
-		"typescript": "^1.6.2",
+		"typescript": "^1.7.5",
 		"vscode": "0.11.x"
 	}
 }

@@ -1,0 +1,134 @@
+{
+    "version": "0.1.0",
+    "isShellCommand": true,
+    "windows": {
+        //you should have bash.exe, change the path if needed
+        "command": "C:\\Program Files\\Git\\usr\\bin\\bash.exe",
+		"suppressTaskName": true,
+		"options": {
+			"cwd": "${workspaceRoot}"
+		},				
+		"tasks": [
+			{
+				"taskName": "build",
+				"isBuildCommand": true,
+                "args": [ "-c", "'./rebar", "get-deps", "compile'"],
+				//matcher of warnings and errors
+				"problemMatcher": [
+					{			
+						"fileLocation": ["relative", "${workspaceRoot}"],
+						"severity": "warning",
+						"pattern": {
+							"regexp": "^(.*):(\\d+):(.*)Warning:(.*)$",
+							"file" : 1,
+							"line" : 2,
+							"message": 4         
+						}
+					},
+					{
+						"fileLocation": ["relative", "${workspaceRoot}"],
+						"severity": "error",
+						"pattern": {
+							"regexp": "^(.*):(\\d+):(.*)$",
+							"file" : 1,
+							"line" : 2,
+							"message": 3         
+						}
+					}
+				]  
+			},
+			{
+				"taskName": "test",
+				"isTestCommand": true,
+                "args": [ "-c", "'./rebar", "eunit'"],
+				//matcher of warnings and errors
+				"problemMatcher": [
+					{			
+						"fileLocation": ["absolute"],
+						"severity": "warning",
+						"pattern": {
+							"regexp": "^(.*):(\\d+):(.*)Warning:(.*)$",
+							"file" : 1,
+							"line" : 2,
+							"message": 4         
+						}
+					},
+					{
+						"fileLocation": ["absolute"],
+						"severity": "error",
+						"pattern": {
+							"regexp": "^(.*):(\\d+):(.*)$",
+							"file" : 1,
+							"line" : 2,
+							"message": 3         
+						}
+					}
+				]  
+			}
+		]
+    },
+    "osx": {
+        "command": "${workspaceRoot}/rebar",
+		"suppressTaskName": true,
+		"tasks": [
+			{
+				"taskName": "build",
+				"isBuildCommand": true,
+                "args": ["get-deps", "compile"],
+				//matcher of warnings and errors
+				"problemMatcher": [
+					{			
+						"fileLocation": ["relative", "${workspaceRoot}"],
+						"severity": "warning",
+						"pattern": {
+							"regexp": "^(.*):(\\d+):(.*)Warning:(.*)$",
+							"file" : 1,
+							"line" : 2,
+							"message": 4         
+						}
+					},
+					{
+						"fileLocation": ["relative", "${workspaceRoot}"],
+						"severity": "error",
+						"pattern": {
+							"regexp": "^(.*):(\\d+):(.*)$",
+							"file" : 1,
+							"line" : 2,
+							"message": 3         
+						}
+					}
+				]  
+			},
+			{
+				"taskName": "test",
+				"isTestCommand": true,
+				"args": ["eunit"],
+				//matcher of warnings and errors
+				"problemMatcher": [
+					{			
+						"fileLocation": ["absolute"],
+						"severity": "warning",
+						"pattern": {
+							"regexp": "^(.*):(\\d+):(.*)Warning:(.*)$",
+							"file" : 1,
+							"line" : 2,
+							"message": 4         
+						}
+					},
+					{
+						"fileLocation": ["absolute"],
+						"severity": "error",
+						"pattern": {
+							"regexp": "^(.*):(\\d+):(.*)$",
+							"file" : 1,
+							"line" : 2,
+							"message": 3         
+						}
+					}
+				]  
+			}
+		]
+    },
+    "showOutput": "always",
+    "suppressTaskName": true
+}

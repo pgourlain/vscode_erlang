@@ -13,17 +13,6 @@ export function activate(context: vscode.ExtensionContext) {
 	// This line of code will only be executed once when your extension is activated
 	console.log('Congratulations, your extension "erlang" is now active!'); 
 	//configuration of erlang language -> documentation : https://code.visualstudio.com/Docs/extensionAPI/vscode-api#LanguageConfiguration
-	languages.setLanguageConfiguration('erlang', {			
-			brackets: [
-				['{', '}'],
-				['[', ']'],
-				['(', ')'],
-				['<<', '>>']
-			],
-			comments: {
-				lineComment: '%'
-			}
-		});
 	var disposables=[];
 	// The command has been defined in the package.json file
 	// Now provide the implementation of the command with  registerCommand
@@ -35,7 +24,7 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 
-function runRebarCommand(command: string) {
+function runRebarCommand(command: string[]) {
 	var runner = new RebarRunner();
 	try {
 		runner.runScript(vscode.workspace.rootPath, command);
