@@ -1,7 +1,7 @@
 {
 	"name": "erlang",
 	"description": "Erlang language extension for Visual Studio Code",
-	"version": "0.0.3",
+	"version": "0.0.4",
 	"icon": "images/icon.png",
 	"publisher": "pgourlain",
 	"engines": {
@@ -14,7 +14,8 @@
 	"activationEvents": [
 		"onCommand:extension.rebarBuild",
 		"onCommand:extension.rebarGetDeps",
-		"onCommand:extension.rebarUpdateDeps"		
+		"onCommand:extension.rebarUpdateDeps",		
+		"onCommand:extension.erleunit"		
 	],
 	"main": "./out/src/extension",
 	"contributes": {
@@ -53,7 +54,22 @@
 		},{
 			"command": "extension.rebarUpdateDeps",
 			"title": "Erlang: rebar update-deps"
+		},{
+			"command": "extension.rebareunit",
+			"title": "Erlang: rebar eunit"
+		},{
+			"command":"extension.erleunit",
+			"title": "Erlang: run eunit tests with erlang shell"
 		}],
+		"menus": {
+			"explorer/context": [
+				{
+					"when": "resourceLangId == erlang",
+					"command": "extension.erleunit",
+					"group": "compile"
+				}
+			]
+		},
 		"snippets": [
             {
                 "language": "erlang",
@@ -62,13 +78,14 @@
         ],
 		"configuration": {
         	"type": "object",
-        	"title": "rebar configuration",
+        	"title": "erlang configuration",
         	"properties": {
-            "rebar.erlangPath": {
-                "type": "string",
-                "default": "",
-                "description": "Location of escript (should be in erlang path)."
-	            }
+				"erlang.erlangPath": {				
+					"type": "string",
+					"default": "",
+					"description": "Directory location of erl/escript.",
+					"title": "Path of erlang binaries"
+				}
         	}
     	}
 	},
