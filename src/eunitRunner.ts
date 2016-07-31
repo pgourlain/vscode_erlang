@@ -42,7 +42,7 @@ export function setExtensionPath(extensionPath : string) {
     myExtensionPath = extensionPath;
 }
 
-function joinPath(x : string, y : string) : string {
+function joinPath(x : String, y : String) : string {
     return x + "/" + y;
 }
 
