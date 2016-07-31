@@ -69,10 +69,17 @@ init(Options) ->
 
 -define(record_to_tuplelist(Rec, Ref), lists:zip(record_info(fields, Rec),tl(tuple_to_list(Ref)))).
 
+%because lists:join is recently added to erlang (doesn't exists in 6.4), I pick up the code source
+lists_join(_Sep, []) -> [];
+lists_join(Sep, [H|T]) -> [H|join_prepend(Sep, T)].
+
+join_prepend(_Sep, []) -> [];
+join_prepend(Sep, [H|T]) -> [Sep,H|join_prepend(Sep,T)].
+
 tuple_to_json({Name, Value}) ->
     "\""++io_lib:print(Name)++"\":" ++ to_json(Value).
 record_to_json(R) ->
-    ["{"] ++ lists:join(",", lists:map(fun(X)-> tuple_to_json(X) end, R)) ++ ["}"].
+    ["{"] ++ lists_join(",", lists:map(fun(X)-> tuple_to_json(X) end, R)) ++ ["}"].
 
 to_json(TS) when is_record(TS, testsuite) ->
     Json = record_to_json(?record_to_tuplelist(testsuite, TS)),

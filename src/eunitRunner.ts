@@ -18,7 +18,7 @@ export function runEUnitCommand() {
     })
         .then(v => {
             //add file type to compile
-            v.TestDirs = v.TestDirs.map(x => path.join(x, "*.erl"));
+            v.TestDirs = v.TestDirs.map(x => joinPath(x, "*.erl"));
             return v;
         })
         .then(x => {
@@ -40,6 +40,10 @@ export function runEUnitCommand() {
 
 export function setExtensionPath(extensionPath : string) {
     myExtensionPath = extensionPath;
+}
+
+function joinPath(x : string, y : string) : string {
+    return x + "/" + y;
 }
 
 function logTitle(title: string) {
@@ -125,13 +129,13 @@ function relativePathTo(ref: string, value: string): string {
 function findErlangFiles(dirAndPattern: string): Thenable<String[]> {
     //find file from the root of current workspace
     return vscode.workspace.findFiles(dirAndPattern, "").then((files: vscode.Uri[]) => {
-        return files.map((v, i, a) => relativeTo(vscode.workspace.rootPath, v.path));
+        return files.map((v, i, a) => relativeTo(vscode.workspace.rootPath, v.fsPath));
     });
 }
 
 function mapToFirstDirLevel(x: vscode.Uri): String {
-    var y = relativeTo(vscode.workspace.rootPath, x.path);
-    return y.split("/")[0];
+    var y = relativeTo(vscode.workspace.rootPath, x.fsPath);    
+    return y.split(path.sep)[0];
 }
 
 function findIncludeDirectories(): Thenable<string[]> {
