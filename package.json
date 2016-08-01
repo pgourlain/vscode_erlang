@@ -1,7 +1,7 @@
 {
 	"name": "erlang",
 	"description": "Erlang language extension for Visual Studio Code",
-	"version": "0.0.5",
+	"version": "0.0.6",
 	"icon": "images/icon.png",
 	"publisher": "pgourlain",
 	"engines": {
@@ -61,6 +61,10 @@
 			"command":"extension.erleunit",
 			"title": "Erlang: run eunit tests with erlang shell"
 		}],
+		"keybindings": [
+			{ "command": "extension.rebarBuild", "mac": "shift+cmd+b", "key": "ctrl+shift+b"},
+			{ "command": "extension.erleunit", "mac": "shift+cmd+t", "key": "ctrl+shift+t"}
+		],
 		"menus": {
 			"explorer/context": [
 				{

@@ -14,8 +14,10 @@ This extension adds support for the Erlang language to VS Code, including:
 
 
 ## Versions
+* 0.0.6
+	- Fix 'rebar' spawning on windows
 * 0.0.5
-	- Add eunit run command without rebar (use an erlang shell) 
+	- Add eunit run command without rebar (use an erlang shell)
 
 ## Credits
 File 'Erlang.tmLanguage' is inspired from https://github.com/textmate/erlang.tmbundle/blob/master/Syntaxes/Erlang.plist

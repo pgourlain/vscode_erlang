@@ -23,7 +23,7 @@ export function activate(context: vscode.ExtensionContext) {
 	// The command has been defined in the package.json file
 	// Now provide the implementation of the command with  registerCommand
 	// The commandId parameter must match the command field in package.json
-	disposables.push(vscode.commands.registerCommand('extension.rebarBuild', () => { runRebarCommand(['get-deps', 'compile']);}));
+	disposables.push(vscode.commands.registerCommand('extension.rebarBuild', () => { runRebarCommand(['compile']);}));
 	disposables.push(vscode.commands.registerCommand('extension.rebarGetDeps', () => { runRebarCommand(['get-deps']);}));
 	disposables.push(vscode.commands.registerCommand('extension.rebarUpdateDeps', () => { runRebarCommand(['update-deps']);}));
 	disposables.push(vscode.commands.registerCommand('extension.erleunit', () => { eunitrunner.runEUnitCommand()}));

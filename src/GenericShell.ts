@@ -9,9 +9,15 @@ export class ErlGenericShell {
     protected RunProcess(processName, startDir : string, args: string[]) : Thenable<number> {
 
         return new Promise<number>((resolve, reject) => {
-            this.erlangShell = child_process.spawn(processName, args, { cwd: startDir, stdio:'pipe'});
             var channel = ErlGenericShell.ErlangOutput;
             channel.show();
+            this.erlangShell = child_process.spawn(processName, args, { cwd: startDir, stdio:'pipe'});
+            this.erlangShell.on('error', error =>{
+                channel.appendLine(error);			
+                if (process.platform == 'win32') {
+                    channel.appendLine("ensure '"+processName+"' is in your path.");
+                }			
+            });
             channel.appendLine('starting '+processName + '...' + args);
             this.erlangShell.stdout.on('data', buffer => {
                 channel.appendLine(buffer.toString());
