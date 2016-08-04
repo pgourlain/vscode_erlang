@@ -23,20 +23,12 @@ export function activate(context: vscode.ExtensionContext) {
 	// The command has been defined in the package.json file
 	// Now provide the implementation of the command with  registerCommand
 	// The commandId parameter must match the command field in package.json
-	disposables.push(vscode.commands.registerCommand('extension.rebarBuild', () => { runRebarCommand(['compile']);}));
-	disposables.push(vscode.commands.registerCommand('extension.rebarGetDeps', () => { runRebarCommand(['get-deps']);}));
-	disposables.push(vscode.commands.registerCommand('extension.rebarUpdateDeps', () => { runRebarCommand(['update-deps']);}));
-	disposables.push(vscode.commands.registerCommand('extension.erleunit', () => { eunitrunner.runEUnitCommand()}));
-	disposables.push(vscode.commands.registerCommand('extension.rebareunit', () => { runRebarCommand(['eunit'])}));
-	disposables.forEach((disposable => context.subscriptions.push(disposable)));
-	eunitrunner.setExtensionPath(context.extensionPath);
-}
-
-function runRebarCommand(command: string[]) {
+	//disposables.push(vscode.commands.registerCommand('extension.rebarBuild', () => { runRebarCommand(['compile']);}));
 	var runner = new rebar.RebarRunner();
-	try {
-		runner.runScript(vscode.workspace.rootPath, command);	
-	} catch (e) {
-		vscode.window.showErrorMessage('Couldn\'t execute rebar.\n' + e);
-	}	
+	runner.activate(context.subscriptions);
+	
+	disposables.push(vscode.commands.registerCommand('extension.erleunit', () => { eunitrunner.runEUnitCommand()}));
+	disposables.forEach((disposable => context.subscriptions.push(disposable)));
+
+	eunitrunner.setExtensionPath(context.extensionPath);
 }
