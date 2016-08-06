@@ -20,7 +20,6 @@ export class RebarRunner implements vscode.Disposable {
 	private eunitCommand: vscode.Disposable;
 
 	public activate(subscriptions: vscode.Disposable[]) {
-		subscriptions.push(this);
 		this.compileCommand = vscode.commands.registerCommand('extension.rebarBuild', () => {this.runRebarCompile();});
 		this.getDepsCommand = vscode.commands.registerCommand('extension.rebarGetDeps', () => { this.runRebarCommand(['get-deps']);});
 		this.updateDepsCommand = vscode.commands.registerCommand('extension.rebarUpdateDeps', () => { this.runRebarCommand(['update-deps']);});
@@ -28,6 +27,7 @@ export class RebarRunner implements vscode.Disposable {
 		vscode.workspace.onDidCloseTextDocument(this.onCloseDocument, null, subscriptions);
 		//vscode.workspace.onDidOpenTextDocument(this.onOpenDocument, null, subscriptions);
 		this.diagnosticCollection = vscode.languages.createDiagnosticCollection("erlang");
+		subscriptions.push(this);
 	}
 
 
@@ -42,7 +42,9 @@ export class RebarRunner implements vscode.Disposable {
 
 	private runRebarCompile(){
 		try {
+
 			this.runScript(vscode.workspace.rootPath, ['compile']).then(data => {
+				this.diagnosticCollection.clear();
 				this.parseCompilationResults(data);
 			});
 		} catch (e) {
@@ -64,7 +66,6 @@ export class RebarRunner implements vscode.Disposable {
 
 	private parseForDiag(data : string, diagnostics: { [id: string] : vscode.Diagnostic[]; }, regex : RegExp, severity: vscode.DiagnosticSeverity) : string
 	{
-		//var c = RebarRunner.RebarOutput;
 		do {
 			var m = regex.exec(data);
 			if (m) {
@@ -105,7 +106,10 @@ export class RebarRunner implements vscode.Disposable {
 
 	private runRebarCommand(command: string[]): void {
 		try {
-			this.runScript(vscode.workspace.rootPath, command);
+			this.runScript(vscode.workspace.rootPath, command).then(data => {
+
+			}, reject => {
+			});;
 		} catch (e) {
 			vscode.window.showErrorMessage('Couldn\'t execute rebar.\n' + e);
 		}

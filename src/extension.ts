@@ -26,7 +26,8 @@ export function activate(context: vscode.ExtensionContext) {
 	//disposables.push(vscode.commands.registerCommand('extension.rebarBuild', () => { runRebarCommand(['compile']);}));
 	var runner = new rebar.RebarRunner();
 	runner.activate(context.subscriptions);
-	
+	//vscode.commands.registerCommand('extension.rebareunit', () => { this.runRebarCommand(['eunit'])});
+
 	disposables.push(vscode.commands.registerCommand('extension.erleunit', () => { eunitrunner.runEUnitCommand()}));
 	disposables.forEach((disposable => context.subscriptions.push(disposable)));
 

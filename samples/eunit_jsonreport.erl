@@ -76,8 +76,21 @@ lists_join(Sep, [H|T]) -> [H|join_prepend(Sep, T)].
 join_prepend(_Sep, []) -> [];
 join_prepend(Sep, [H|T]) -> [Sep,H|join_prepend(Sep,T)].
 
+
+tuples_to_json(L) ->
+    "{" ++ 
+        lists_join(",", lists:map(fun(X)-> tuple_to_json(X) end, L)) ++
+    "}".
+
 tuple_to_json({Name, Value}) ->
-    "\""++io_lib:print(Name)++"\":" ++ to_json(Value).
+    "\""++io_lib:print(Name)++"\":" ++ to_json(Value);
+
+tuple_to_json(X) ->
+    "\"xxx" ++ io_lib:print(X) ++ "xx\"".
+
+stack_to_json({M, F, A, [{file, FileName}, {line, Line}]}) ->
+    tuples_to_json([{module, M}, {function, F}, {arity, A}, {file, FileName}, {line, Line}]).
+
 record_to_json(R) ->
     ["{"] ++ lists_join(",", lists:map(fun(X)-> tuple_to_json(X) end, R)) ++ ["}"].
 
@@ -91,21 +104,42 @@ to_json([H|_T]) when is_record(H, testcase) ->
 to_json(TC) when is_record(TC, testcase) ->
     L = record_to_json(?record_to_tuplelist(testcase, TC)),
     L;
+
+to_json({aborted, {error, Err, ErrorsList}}) ->
+    "{\"aborted\": {\"error\" : \"" ++ io_lib:print(Err) ++ "\","
+    "\"stacktrace\" : " ++ ["["] ++ lists_join(",", lists:map(fun(X)-> stack_to_json(X) end, ErrorsList)) ++ ["]"]
+    ++"}}"; 
+
+to_json(V) when is_bitstring(V) ->
+    io_lib:print(format_string(binary_to_list(V)));
+
 to_json(V) when is_binary(V)->
-    to_json(binary_to_list(V));
+    %"\"binary\"";
+    binary_to_json(V); 
 
 to_json(V) when is_atom(V) ->
     io_lib:print(atom_to_list(V));
-    
+to_json(V) when is_tuple(V) ->
+    %"\"tuple\"";
+     ["{"] ++ tuple_to_json(V) ++ ["}"];     
+
 to_json(V) ->
     case io_lib:printable_list(V) of
     true -> io_lib:print(format_string(V));
     false -> 
         case is_binary(V) of
         true -> "\"" ++ io_lib:print(binary_to_list(V)) ++ "\"";
+        %false - to_json(V)
         false -> "\"" ++ format_string(io_lib:print(V)) ++ "\""
+        %false -> "\"printable_binary\""
         end
     end.
+
+binary_to_json(V) ->
+    NewV=binary_to_term(V),
+    %"\"" ++ format_string(io_lib:print(V)) ++ "\"".
+    to_json(NewV).
+
 format_string(S) ->
     S1 = re:replace(S, "\n", "\\\\n", [global, {return, list}]),
     re:replace(S1, "\"", "'", [global, {return, list}]).
