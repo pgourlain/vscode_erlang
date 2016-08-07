@@ -105,10 +105,16 @@ to_json(TC) when is_record(TC, testcase) ->
     L = record_to_json(?record_to_tuplelist(testcase, TC)),
     L;
 
-to_json({aborted, {error, Err, ErrorsList}}) ->
-    "{\"aborted\": {\"error\" : \"" ++ io_lib:print(Err) ++ "\","
-    "\"stacktrace\" : " ++ ["["] ++ lists_join(",", lists:map(fun(X)-> stack_to_json(X) end, ErrorsList)) ++ ["]"]
+to_json({aborted, {error, Err, StackList}}) ->
+    "{\"aborted\": {\"error\" : \"" ++ io_lib:print(Err) ++ "\"," ++
+    "\"stacktrace\" : " ++ ["["] ++ lists_join(",", lists:map(fun(X)-> stack_to_json(X) end, StackList)) ++ ["]"]
     ++"}}"; 
+
+to_json({error, {AssertName, AssertStack}, StackList}) ->
+    "{\"assertion\" :\""++ atom_to_list(AssertName) ++"\", \"location\" :" ++ tuples_to_json(AssertStack) ++ "," ++
+      "\"stacktrace\" : " ++ ["["] ++ lists_join(",", lists:map(fun(X)-> stack_to_json(X) end, StackList)) ++ ["]"]
+    ++"}";
+
 
 to_json(V) when is_bitstring(V) ->
     io_lib:print(format_string(binary_to_list(V)));
