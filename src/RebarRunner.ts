@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path'
 import * as child_process from 'child_process'
+import * as utils from './utils'
 
 var rebarOutputChannel: vscode.OutputChannel;
 
@@ -52,20 +53,9 @@ export class RebarRunner implements vscode.Disposable {
 		}
 	}
 
- 	private static keysFromDictionary(dico : any): string[] {
-        var keySet: string[] = [];
- 
-        for (var prop in dico) {
-            if (dico.hasOwnProperty(prop)) {
-                keySet.push(prop);
-            }
-        }
- 
-        return keySet;
-    }
-
 	private parseForDiag(data : string, diagnostics: { [id: string] : vscode.Diagnostic[]; }, regex : RegExp, severity: vscode.DiagnosticSeverity) : string
 	{
+		//parse data while regex return matches
 		do {
 			var m = regex.exec(data);
 			if (m) {
@@ -96,7 +86,7 @@ export class RebarRunner implements vscode.Disposable {
 		//then parse errors (because regex to detect errors include warnings too)
 		var errors = new RegExp("^(.*):(\\d+):(.*)$", "gmi");
 		data = this.parseForDiag(data, diagnostics, errors, vscode.DiagnosticSeverity.Error);
-		var keys = RebarRunner.keysFromDictionary(diagnostics);
+		var keys = utils.keysFromDictionary(diagnostics);
 		keys.forEach(element => {
 			var fileUri = vscode.Uri.file(path.join(vscode.workspace.rootPath, element));
 			var diags = diagnostics[element];

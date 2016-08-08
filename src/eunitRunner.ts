@@ -4,45 +4,139 @@ import * as fs from 'fs'
 import * as rebar from './RebarRunner';
 import * as erlang from './ErlangShell';
 import * as path from 'path';
+import * as utils from './utils'
+
+
+export class EunitRunner implements vscode.Disposable {
+
+    diagnosticCollection: vscode.DiagnosticCollection;
+    private eunitCommand: vscode.Disposable;
+
+    public activate(context: vscode.ExtensionContext) {
+        this.eunitCommand = vscode.commands.registerCommand('extension.erleunit', () => { this.runEUnitCommand() });
+        this.diagnosticCollection = vscode.languages.createDiagnosticCollection("euniterlang");
+        setExtensionPath(context.extensionPath);
+        context.subscriptions.push(this);
+    }
+
+    public dispose(): void {
+        this.diagnosticCollection.clear();
+        this.diagnosticCollection.dispose();
+        this.eunitCommand.dispose();
+    }
+
+    private runEUnitCommand() {
+        runEUnitRequirements().then(_ => {
+            myoutputChannel.clear();
+            this.diagnosticCollection.clear();
+            logTitle("Read configuration...");
+            return readRebarConfigWithErlangShell();
+        })
+            .then(v => {
+                //add file type to compile
+                v.TestDirs = v.TestDirs.map(x => joinPath(x, "*.erl"));
+                return v;
+            })
+            .then(x => {
+                logTitle("Compile units tests...");
+                return compile(x);
+            })
+            .then(v => {
+                logTitle("Run units tests...");
+                return runTests(v);
+            })
+            .then(testResults => {
+                return this.parseTestsResults(testResults);
+            })
+            .then(x => x, reason => {
+                myoutputChannel.appendLine('eunit command failed :' + reason + '\n');
+            })
+            ;
+    }
+
+    private parseTestsResults(results: TestResults): Thenable<boolean> {
+        return new Promise<boolean>((a, r) => {
+            if (results.failed > 0 || results.aborted > 0) {
+                var diagnostics: { [id: string]: vscode.Diagnostic[]; } = {};
+
+                this.parseForDiag(results.testcases, diagnostics);
+                var keys = utils.keysFromDictionary(diagnostics);
+                keys.forEach(element => {
+                    var fileUri = vscode.Uri.file(path.join(vscode.workspace.rootPath, element));
+                    var diags = diagnostics[element];
+                    this.diagnosticCollection.set(fileUri, diags);
+                });
+                var failed = Number(results.failed) + Number(results.aborted);
+                r((failed) + " unittest(s) failed.");
+            }
+            a(true);
+        });
+    }
+
+    private getFile(stacktrace : any[]) : string {
+        if (stacktrace && stacktrace.length > 0) {
+            return stacktrace[0].file;
+        }
+        return "";
+    }
+
+    private getExpected(location : any) : string {
+        if (location.expected) {
+            return location.expected;
+        } else if (location.pattern) {
+            return location.pattern;
+        }
+        return JSON.stringify(location);
+    }
+
+    private parseForDiag(testcases: TestCase[], diagnostics: { [id: string]: vscode.Diagnostic[]; }) {
+        testcases.forEach(testcase => {
+            if (testcase.result && testcase.result != "ok") {
+                /*
+                let message = m[m.length-1];
+                let range = new vscode.Range(Number(m[2])-1, 0, Number(m[2])-1, peace.length-1);
+                let diagnostic = new vscode.Diagnostic(range, message, vscode.DiagnosticSeverity.Error);
+                */
+                let message = "";
+                var failed = testcase.result.failed; 
+                var diagnostic : vscode.Diagnostic = null;
+                if (failed) {
+                    message = failed.assertion + "/" + failed.location.module + ", expected :" + this.getExpected(failed.location) + ", value :" + failed.location.value;
+                    var file = this.getFile(failed.stacktrace);
+                    var line = Number(failed.location.line)-1;
+                    let range = new vscode.Range(line, 0, line, 80);
+                    diagnostic = new vscode.Diagnostic(range, message, vscode.DiagnosticSeverity.Error);
+                } else if (testcase.result.aborted) {
+                    //TODO: when test is aborted
+                    var aborted = testcase.result.aborted;
+                    message = aborted.error;
+
+                    var file = this.getFile(aborted.stacktrace);
+                    var line = Number(aborted.stacktrace[0].line)-1;
+                    let range = new vscode.Range(line, 0, line, 80);
+                    diagnostic = new vscode.Diagnostic(range, message, vscode.DiagnosticSeverity.Error);                    
+                }
+                if (!diagnostics[file]) {
+                    diagnostics[file] = [];
+                }
+                diagnostics[file].push(diagnostic);
+            }
+        });
+    }
+}
+
 
 
 var myoutputChannel = erlang.ErlangShell.ErlangOutput;
 var eunitDirectory = ".eunit";
 var myExtensionPath = "";
 
-export function runEUnitCommand() {
-    runEUnitRequirements().then(_ => {
-        myoutputChannel.clear();
-        logTitle("Read configuration...");
-        return readRebarConfigWithErlangShell();
-    })
-        .then(v => {
-            //add file type to compile
-            v.TestDirs = v.TestDirs.map(x => joinPath(x, "*.erl"));
-            return v;
-        })
-        .then(x => {
-            logTitle("Compile units tests...");
-            return compile(x);
-        })
-        .then(v => {
-            logTitle("Run units tests...");
-            return runTests(v);
-        })
-        .then(testResults => {
-            //TODO: may be show results in specific window
-         })
-        .then(x => x, reason => {
-            myoutputChannel.appendLine('eunit command failed :' + reason + '\n');
-        })
-        ;
-}
 
-export function setExtensionPath(extensionPath : string) {
+export function setExtensionPath(extensionPath: string) {
     myExtensionPath = extensionPath;
 }
 
-function joinPath(x : String, y : String) : string {
+function joinPath(x: String, y: String): string {
     return x + "/" + y;
 }
 
@@ -134,7 +228,7 @@ function findErlangFiles(dirAndPattern: string): Thenable<String[]> {
 }
 
 function mapToFirstDirLevel(x: vscode.Uri): String {
-    var y = relativeTo(vscode.workspace.rootPath, x.fsPath);    
+    var y = relativeTo(vscode.workspace.rootPath, x.fsPath);
     return y.split(path.sep)[0];
 }
 
@@ -154,7 +248,7 @@ function insertBeforeEachElement(A: String[], value: String) {
     }
 }
 
-function cleanDirectory(dir : string) {
+function cleanDirectory(dir: string) {
     fs.readdirSync(dir).forEach(element => {
         var file = path.resolve(dir, element);
         var stats = fs.statSync(file);
@@ -227,8 +321,8 @@ function findebinDirs(): Thenable<string[]> {
             if (err) r(err);
             a(files.map(x => relativePathTo(vscode.workspace.rootPath, path.resolve(x, "dummy.txt"))));
         },
-        //accept only directory that contains ebin 
-        (dirName, fullPath) => dirName.match(/ebin/gi) != null)
+            //accept only directory that contains ebin 
+            (dirName, fullPath) => dirName.match(/ebin/gi) != null)
     });
 }
 
@@ -243,12 +337,7 @@ function runTests(filenames: string[]): Thenable<TestResults> {
                 _ => {
                     var jsonResults = fs.readFileSync(path.resolve(vscode.workspace.rootPath, ".eunit", "testsuite_results.json"), "utf-8")
                     var typedResults = (<TestResults>JSON.parse(jsonResults));
-                    if (typedResults.failed > 0 || typedResults.aborted > 0) {
-                        var failed = Number(typedResults.failed)+Number(typedResults.aborted);
-                        r((failed) + " unittest(s) failed.");
-                    } else {
-                        a(typedResults);
-                    }
+                    a(typedResults);
                 },
                 exitCode => {
                     r("Erlang shell that run tests failed with exitcode :" + exitCode);
@@ -266,24 +355,24 @@ class CompileArgs {
 }
 
 class TestResults {
-    name : string;
-    time : number;
-    output : any;
-    succeeded : number;
-    failed :number;
-    aborted:number;
-    skipped:number;
-    testcases:TestCase[];    
+    name: string;
+    time: number;
+    output: any;
+    succeeded: number;
+    failed: number;
+    aborted: number;
+    skipped: number;
+    testcases: TestCase[];
 }
 
 class TestCase {
-    displayname:string;
-    description:string;
-    module:string;
-    function:string;
-    arity:number;
-    line:number;
-    result:string;
-    time:string;
-    output:any;
+    displayname: string;
+    description: string;
+    module: string;
+    function: string;
+    arity: number;
+    line: number;
+    result: any;
+    time: string;
+    output: any;
 }
