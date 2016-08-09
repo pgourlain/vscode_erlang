@@ -14,6 +14,8 @@ This extension adds support for the Erlang language to VS Code, including:
 
 
 ## Versions
+* 0.0.7
+	- Fix assertXXXX expected/value for vscode.diagnostic 
 * 0.0.6
 	- Fix 'rebar' spawning on windows
 * 0.0.5

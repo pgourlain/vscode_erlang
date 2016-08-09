@@ -94,6 +94,17 @@ stack_to_json({M, F, A, [{file, FileName}, {line, Line}]}) ->
 record_to_json(R) ->
     ["{"] ++ lists_join(",", lists:map(fun(X)-> tuple_to_json(X) end, R)) ++ ["}"].
 
+location_to_json(L) ->
+    NewL = lists:map(
+        fun(X) ->            
+            case X of
+                {value, V} -> {value, "\"" ++ format_string(io_lib:print(V)) ++ "\""};
+                {expected, E} -> {expected, "\"" ++ format_string(io_lib:print(E))  ++"\"" };
+                Y -> Y
+            end 
+        end, L),
+    tuples_to_json(NewL).
+
 to_json(TS) when is_record(TS, testsuite) ->
     Json = record_to_json(?record_to_tuplelist(testsuite, TS)),
     %io:format(Json),
@@ -111,7 +122,7 @@ to_json({aborted, {error, Err, StackList}}) ->
     ++"}}"; 
 
 to_json({error, {AssertName, AssertStack}, StackList}) ->
-    "{\"assertion\" :\""++ atom_to_list(AssertName) ++"\", \"location\" :" ++ tuples_to_json(AssertStack) ++ "," ++
+    "{\"assertion\" :\""++ atom_to_list(AssertName) ++"\", \"location\" :" ++ location_to_json(AssertStack) ++ "," ++
       "\"stacktrace\" : " ++ ["["] ++ lists_join(",", lists:map(fun(X)-> stack_to_json(X) end, StackList)) ++ ["]"]
     ++"}";
 
