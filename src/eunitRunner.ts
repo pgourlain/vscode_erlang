@@ -4,7 +4,8 @@ import * as fs from 'fs'
 import * as rebar from './RebarRunner';
 import * as erlang from './ErlangShell';
 import * as path from 'path';
-import * as utils from './utils'
+import * as utils from './utils';
+import * as adapter from './vscodeAdapter';
 
 
 export class EunitRunner implements vscode.Disposable {
@@ -127,7 +128,7 @@ export class EunitRunner implements vscode.Disposable {
 
 
 
-var myoutputChannel = erlang.ErlangShell.ErlangOutput;
+var myoutputChannel = adapter.ErlangOutput();
 var eunitDirectory = ".eunit";
 var myExtensionPath = "";
 

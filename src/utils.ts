@@ -1,4 +1,4 @@
-
+import * as vscode from 'vscode';
 
 
 ///
@@ -13,3 +13,11 @@ export function keysFromDictionary(dico : any): string[] {
         }
         return keySet;
     }
+
+var myConsole : vscode.OutputChannel;
+export function pgoConsole() {
+    if (!myConsole) {
+        myConsole = vscode.window.createOutputChannel('pgoconsole');
+    }
+    return myConsole;
+}

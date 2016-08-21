@@ -4,8 +4,10 @@ import * as vscode from 'vscode';
 import * as fs from 'fs'
 import * as rebar from './RebarRunner';
 import * as erlang from './ErlangShell';
+import * as adapter from './vscodeAdapter';
 import * as path from 'path';
 import * as eunitrunner from './eunitRunner';
+import * as utils from './utils';
 
 var myoutputChannel : vscode.OutputChannel;
 var myConsole : vscode.OutputChannel;
@@ -13,11 +15,12 @@ var myConsole : vscode.OutputChannel;
 // your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
 
-	myoutputChannel = erlang.ErlangShell.ErlangOutput;
-	myConsole = vscode.window.createOutputChannel('pgoconsole');
+	myoutputChannel = adapter.ErlangOutput();
+	myConsole = utils.pgoConsole();
 	// Use the console to output diagnostic information (console.log) and errors (console.error)
 	// This line of code will only be executed once when your extension is activated
 	console.log('Congratulations, your extension "erlang" is now active!'); 
+	myConsole.appendLine("erlang extension is acitve");
 	//configuration of erlang language -> documentation : https://code.visualstudio.com/Docs/extensionAPI/vscode-api#LanguageConfiguration
 	var disposables=[];
 	// The command has been defined in the package.json file

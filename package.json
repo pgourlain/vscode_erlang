@@ -9,16 +9,70 @@
 	},
 	"categories": [
 		"Languages",
-		"Snippets"
+		"Snippets",
+		"Debuggers"
 	],
 	"activationEvents": [
 		"onCommand:extension.rebarBuild",
 		"onCommand:extension.rebarGetDeps",
-		"onCommand:extension.rebarUpdateDeps",		
-		"onCommand:extension.erleunit"		
+		"onCommand:extension.rebarUpdateDeps",
+		"onCommand:extension.erleunit"
 	],
 	"main": "./out/src/extension",
 	"contributes": {
+		"breakpoints": [
+			{
+				"language": "erlang"
+			}
+		],
+		"debuggers": [
+			{
+				"type": "erlang",
+				"program": "./out/src/erlangDebug.js",
+				"runtime": "node",
+				"label": "Erlang",
+				"enableBreakpointsFor": {
+					"languageIds": [
+						"erlang"
+					]
+				},
+				"initialConfigurations": [
+					{
+						"name": "Launch erlang",
+						"type": "erlang",
+						"request": "launch",
+						"cwd": "${workspaceRoot}",
+						"target": "${workspaceRoot}/start.sh"
+					}
+				],
+				"configurationAttributes": {
+					"launch": {
+						"required": [],
+						"properties": {
+							"arguments": {
+								"type": "string",
+								"description": "Arguments to append after the 'target' script."
+							},
+							"cwd": {
+								"type": "string",
+								"description": "Path of project",
+								"default": "${workspaceRoot}"
+							},
+							"erlpath": {
+								"type": "string",
+								"description": "Path to the erl executable or the command if in PATH",
+								"default": "erl"
+							},
+							"target": {
+								"type": "string",
+								"description": "Path of your starting script.",
+								"default": ""
+							}
+						}
+					}
+				}
+			}
+		],
 		"languages": [
 			{
 				"id": "erlang",
@@ -29,41 +83,54 @@
 				"extensions": [
 					".erl",
 					".hrl",
-					".yrl", 
-					".escript", 
+					".yrl",
+					".escript",
 					".app.src",
 					"rebar.config"
 				],
 				"configuration": "./erlang.configuration.json"
 			}
 		],
-		
 		"grammars": [
 			{
 				"language": "erlang",
 				"scopeName": "source.erlang",
 				"path": "./syntaxes/erlang.tmLanguage"
 			}
-		],		
-		"commands": [{
-			"command": "extension.rebarBuild",
-			"title": "Erlang: rebar compile"
-		},{
-			"command": "extension.rebarGetDeps",
-			"title": "Erlang: rebar get-deps"
-		},{
-			"command": "extension.rebarUpdateDeps",
-			"title": "Erlang: rebar update-deps"
-		},{
-			"command": "extension.rebareunit",
-			"title": "Erlang: rebar eunit"
-		},{
-			"command":"extension.erleunit",
-			"title": "Erlang: run eunit tests with erlang shell"
-		}],
+		],
+		"commands": [
+			{
+				"command": "extension.rebarBuild",
+				"title": "Erlang: rebar compile"
+			},
+			{
+				"command": "extension.rebarGetDeps",
+				"title": "Erlang: rebar get-deps"
+			},
+			{
+				"command": "extension.rebarUpdateDeps",
+				"title": "Erlang: rebar update-deps"
+			},
+			{
+				"command": "extension.rebareunit",
+				"title": "Erlang: rebar eunit"
+			},
+			{
+				"command": "extension.erleunit",
+				"title": "Erlang: run eunit tests with erlang shell"
+			}
+		],
 		"keybindings": [
-			{ "command": "extension.rebarBuild", "mac": "shift+cmd+b", "key": "ctrl+shift+b"},
-			{ "command": "extension.erleunit", "mac": "shift+cmd+t", "key": "ctrl+shift+t"}
+			{
+				"command": "extension.rebarBuild",
+				"mac": "shift+cmd+b",
+				"key": "ctrl+shift+b"
+			},
+			{
+				"command": "extension.erleunit",
+				"mac": "shift+cmd+t",
+				"key": "ctrl+shift+t"
+			}
 		],
 		"menus": {
 			"explorer/context": [
@@ -75,35 +142,40 @@
 			]
 		},
 		"snippets": [
-            {
-                "language": "erlang",
-                "path": "./snippets/erlang.json"
-            }
-        ],
+			{
+				"language": "erlang",
+				"path": "./snippets/erlang.json"
+			}
+		],
 		"configuration": {
-        	"type": "object",
-        	"title": "erlang configuration",
-        	"properties": {
-				"erlang.erlangPath": {				
+			"type": "object",
+			"title": "erlang configuration",
+			"properties": {
+				"erlang.erlangPath": {
 					"type": "string",
 					"default": "",
 					"description": "Directory location of erl/escript.",
 					"title": "Path of erlang binaries"
 				}
-        	}
-    	}
+			}
+		}
 	},
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/pgourlain/vscode_erlang.git"
 	},
+	"license": "MIT",
 	"scripts": {
 		"vscode:prepublish": "node ./node_modules/vscode/bin/compile",
 		"compile": "node ./node_modules/vscode/bin/compile -watch -p ./",
 		"postinstall": "node ./node_modules/vscode/bin/install"
 	},
+	"dependencies": {
+		"vscode-debugadapter": "^1.10.0",
+		"vscode-debugprotocol": "^1.10.0"
+	},
 	"devDependencies": {
-		"typescript": "^1.7.5",
+		"typescript": "^1.8.10",
 		"vscode": "0.11.x"
 	}
 }
