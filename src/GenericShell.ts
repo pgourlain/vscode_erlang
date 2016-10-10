@@ -135,12 +135,19 @@ export class ErlGenericShell extends EventEmitter {
         this.log("log", what);
         //erlangOutputChannel.appendLine(what);
         this.erlangShell.stdin.write(what);
-        this.erlangShell.stdin.end();
+        this.erlangShell.stdin.write("\r\n");        
+        //this.erlangShell.stdin.end();
     }    
     
     public Kill() {
         if (this.erlangShell) {
             this.erlangShell.kill();
+        }
+    }
+
+    public NormalQuit() {
+        if (this.erlangShell) {
+            this.Send("q().");
         }
     }    
 }

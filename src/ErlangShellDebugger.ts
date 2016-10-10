@@ -17,15 +17,10 @@ export class ErlangShellForDebugging extends ErlGenericShell {
     }    
 
     public Start(startDir : string, args: string) : Promise<number> {
-        //TODO: assumes that erlang debugger wrapper is copied and compiled into ebin directory
-        //TODO: add int:start() ... int:subscribe .. and so on
         var processArgs = [args];
-        return this.RunProcess("erl", startDir, processArgs);
-        /*
-        return new Promise<number>((a, r) => {
-            a(0);
-        });
-        */
+        var result = this.RunProcess("erl", startDir, processArgs);
+        this.Send("int:start().");
+        return result;
     }
 }
 

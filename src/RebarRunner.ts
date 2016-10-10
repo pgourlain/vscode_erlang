@@ -143,14 +143,14 @@ export class RebarRunner implements vscode.Disposable {
 	}
 
 	private onCloseDocument(doc: vscode.TextDocument): any {
-		RebarRunner.RebarOutput.appendLine("doc close : " + doc.uri.toString());
+		//RebarRunner.RebarOutput.appendLine("doc close : " + doc.uri.toString());
 		if (this.diagnosticCollection) {
 			this.diagnosticCollection.delete(doc.uri);
 		}
 	}
 
 	private onOpenDocument(doc : vscode.TextDocument) : any {
-		RebarRunner.RebarOutput.appendLine("doc open : " + doc.uri.toString());
+		//RebarRunner.RebarOutput.appendLine("doc open : " + doc.uri.toString());
 	}
 
     public static get RebarOutput(): vscode.OutputChannel {
