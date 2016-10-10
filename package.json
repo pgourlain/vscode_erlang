@@ -124,12 +124,14 @@
 			{
 				"command": "extension.rebarBuild",
 				"mac": "shift+cmd+b",
-				"key": "ctrl+shift+b"
+				"key": "ctrl+shift+b",
+				"when": "editorLangId == 'erlang'"
 			},
 			{
 				"command": "extension.erleunit",
 				"mac": "shift+cmd+t",
-				"key": "ctrl+shift+t"
+				"key": "ctrl+shift+t",
+				"when": "editorLangId == 'erlang'"
 			}
 		],
 		"menus": {
