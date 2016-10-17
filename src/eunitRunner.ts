@@ -133,7 +133,7 @@ var eunitDirectory = ".eunit";
 var myExtensionPath = "";
 
 
-export function setExtensionPath(extensionPath: string) {
+function setExtensionPath(extensionPath: string) {
     myExtensionPath = extensionPath;
 }
 
@@ -267,7 +267,7 @@ function compile(compileArgs: CompileArgs): Thenable<string[]> {
     if (!fs.existsSync(eunitDir)) {
         fs.mkdirSync(eunitDir);
     }
-    fs.createReadStream(path.resolve(myExtensionPath, 'samples', 'eunit_jsonreport.erl'))
+    fs.createReadStream(path.resolve(myExtensionPath, 'erlangbridge', 'eunit_jsonreport.erl'))
         .pipe(fs.createWriteStream(path.resolve(eunitDir, 'eunit_jsonreport.erl')));
     return findIncludeDirectories()
         .then(iDirs => {

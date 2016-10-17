@@ -22,25 +22,3 @@ export class ErlangCompilerShell extends shell.ErlGenericShell {
         return this.RunProcess("erlc", startDir, args);
     }    
 }
-
-export class ErlangShellForDebugging extends shell.ErlGenericShell {
-
-    constructor () {
-        super(null);
-    }
-    public Start(startDir : string, args: string) : Thenable<number> {
-        //TODO: assumes that erlang debugger wrapper is copied and compiled into ebin directory
-        //TODO: add int:start() ... int:subscribe .. and so on
-        var processArgs = [args];
-        return this.RunProcess("erl", startDir, processArgs);
-    }
-/*
-	protected logNoNewLine(type: string, msg: string) : void {
-    
-    }
-
-	protected log(type: string, msg: string) : void {
-        
-    }
-    */
-}

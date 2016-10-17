@@ -9,6 +9,7 @@ const nonOutput = /^(?:\d*|undefined)[\*\+\=]|[\~\@\&\^]/;
 export interface IErlangShellOutput1 {
     show() : void;
     appendLine(value: string): void;
+    append(value: string): void;
 }
 
 export class ErlangShellForDebugging extends ErlGenericShell {
@@ -16,10 +17,20 @@ export class ErlangShellForDebugging extends ErlGenericShell {
         super(whichOutput);
     }    
 
-    public Start(startDir : string, args: string) : Promise<number> {
-        var processArgs = [args];
+    public Start(startDir : string, listen_port: number, bridgePath: string, args: string) : Promise<number> {
+        var processArgs = [ "-pa", `'${bridgePath}'`,"-s", "int",  
+            "-vscode_port", listen_port.toString(),
+            "-s", "vscode_connection", "start", listen_port.toString(),  
+            args];
         var result = this.RunProcess("erl", startDir, processArgs);
-        this.Send("int:start().");
+        return result;
+    }
+
+    public Compile(startDir : string, args: string[]) : Promise<number> {
+        //if erl is used, -compile must be used
+        //var processArgs = ["-compile"].concat(args);
+        var processArgs = [].concat(args);    
+        var result = this.RunProcess("erlc", startDir, processArgs);
         return result;
     }
 }

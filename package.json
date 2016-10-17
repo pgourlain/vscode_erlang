@@ -41,8 +41,7 @@
 						"name": "Launch erlang",
 						"type": "erlang",
 						"request": "launch",
-						"cwd": "${workspaceRoot}",
-						"target": "${workspaceRoot}/start.sh"
+						"cwd": "${workspaceRoot}"
 					}
 				],
 				"configurationAttributes": {
@@ -51,7 +50,7 @@
 						"properties": {
 							"arguments": {
 								"type": "string",
-								"description": "Arguments to append after the 'target' script."
+								"description": "Arguments to append erl command line."
 							},
 							"cwd": {
 								"type": "string",
@@ -62,11 +61,6 @@
 								"type": "string",
 								"description": "Path to the erl executable or the command if in PATH",
 								"default": "erl"
-							},
-							"target": {
-								"type": "string",
-								"description": "Path of your starting script.",
-								"default": ""
 							}
 						}
 					}
@@ -173,11 +167,11 @@
 		"postinstall": "node ./node_modules/vscode/bin/install"
 	},
 	"dependencies": {
-		"vscode-debugadapter": "^1.10.0",
-		"vscode-debugprotocol": "^1.10.0"
+		"vscode-debugadapter": "^1.11.0",
+		"vscode-debugprotocol": "^1.11.0"
 	},
 	"devDependencies": {
-		"typescript": "^1.8.10",
-		"vscode": "0.11.x"
+		"typescript": "^2.0.3",
+    	"typings": "^1.3.2"
 	}
 }

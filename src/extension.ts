@@ -8,6 +8,7 @@ import * as adapter from './vscodeAdapter';
 import * as path from 'path';
 import * as eunitrunner from './eunitRunner';
 import * as utils from './utils';
+import * as erlangDebug from './erlangDebug';
 
 var myoutputChannel : vscode.OutputChannel;
 var myConsole : vscode.OutputChannel;
@@ -27,14 +28,11 @@ export function activate(context: vscode.ExtensionContext) {
 	// Now provide the implementation of the command with  registerCommand
 	// The commandId parameter must match the command field in package.json
 	//disposables.push(vscode.commands.registerCommand('extension.rebarBuild', () => { runRebarCommand(['compile']);}));
+
 	var runner = new rebar.RebarRunner();
 	runner.activate(context.subscriptions);
 
 	var erunner = new eunitrunner.EunitRunner();
 	erunner.activate(context);
-
-	//disposables.push(vscode.commands.registerCommand('extension.erleunit', () => { eunitrunner.runEUnitCommand()}));
 	disposables.forEach((disposable => context.subscriptions.push(disposable)));
-
-	//eunitrunner.setExtensionPath(context.extensionPath);
 }

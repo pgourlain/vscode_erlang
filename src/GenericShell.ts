@@ -34,23 +34,19 @@ export class ErlGenericShell extends EventEmitter {
                 channel.show();
             }
             
-            this.erlangShell = spawn(processName, args, { cwd: startDir, stdio:'pipe'});
+            this.erlangShell = spawn(processName, args, { cwd: startDir, shell:true, stdio:'pipe'});
             this.erlangShell.on('error', error => {
                 this.log("stderr", error);
-                //channel.appendLine(error);			
                 if (process.platform == 'win32') {
                     this.log("stderr", "ensure '" + processName + "' is in your path.");
-                    //channel.appendLine("ensure '"+processName+"' is in your path.");
                 }			
             });
             this.log("log", 'starting ' + processName + '...' + args);
-            //channel.appendLine('starting '+processName + '...' + args);
             this.erlangShell.stdout.on("data", this.stdout.bind(this));
 			this.erlangShell.stderr.on("data", this.stderr.bind(this));
             
-            this.erlangShell.on('close', (exitCode) => {
+            this.erlangShell.on('close', (exitCode) => {                
                 this.log("log", processName + ' exit code:'+exitCode);	
-                //channel.appendLine(processName + ' exit code:'+exitCode);
                 if (exitCode == 0) {
                     resolve(0);
                 } else {

@@ -5,17 +5,25 @@ import { ErlangShellForDebugging, IErlangShellOutput1 } from './ErlangShellDebug
 import * as genericShell from './GenericShell';
 import * as path from 'path';
 import { EventEmitter } from 'events'
+import * as http from 'http';
+import * as vscode from 'vscode';
+import * as erlang from './ErlangShell';
+import { ErlangConnection } from './ErlangConnection';
 
 export interface LaunchRequestArguments {
 	cwd: string;
-	target: string;
 	erlpath: string;
 	arguments: string;
 }
 
+var erlangBridgePath = path.join(__dirname, "..", "..", "erlangbridge");
+
 class ErlangDebugSession extends DebugSession implements IErlangShellOutput1 {
     protected threadID: number = 1;
 	erlDebugger: ErlangShellForDebugging;
+	erlangConnection : ErlangConnection;
+	//command_receiver : http.Server;
+	//erlangbridgePort : number;
 	quit: boolean;
 	private _breakPoints = new Map<string, DebugProtocol.Breakpoint[]>();
 
@@ -42,7 +50,9 @@ class ErlangDebugSession extends DebugSession implements IErlangShellOutput1 {
 	}
 
     protected initializeRequest(response: DebugProtocol.InitializeResponse, args: DebugProtocol.InitializeRequestArguments): void {
-        this.log("initializeRequest");
+        this.log("initializeRequest : ");
+		this.erlDebugger = new ErlangShellForDebugging(this);
+		this.erlangConnection = new ErlangConnection(this);
 
 		// since this debug adapter can accept configuration requests like 'setBreakpoint' at any time,
 		// we request them early by sending an 'initializeRequest' to the frontend.
@@ -58,47 +68,48 @@ class ErlangDebugSession extends DebugSession implements IErlangShellOutput1 {
 		this.sendResponse(response);
 	}
 
-    protected launchRequest(response: DebugProtocol.LaunchResponse, args: LaunchRequestArguments): void {
+    protected async launchRequest(response: DebugProtocol.LaunchResponse, args: LaunchRequestArguments): void {
 		this.log("launch");
-		this.erlDebugger = new ErlangShellForDebugging(this);
-		//this.erlDebugger = new ATest();
+		await this.erlangConnection.Start().then(port => {
+			this.erlDebugger.Start(args.cwd, port, erlangBridgePath, args.arguments)
+				.then(res => {
+					this.quitEvent(res);
+				}, exitCode => {
+					this.log("erldebugger start failed");
+					//this.sendErrorResponse(response, 100, `erl runtime failed to run ${err}`);
+					this.quitEvent(exitCode);
+				});
 
-		//this.erlDebugger = null;
-        //this.miDebugger = new MI2(args.gdbpath || "gdb", ["-q", "--interpreter=mi2"]);
-		//this.initDebugger();
-		//this.quit = false;
-		//this.attached = false;
-		//this.needContinue = false;
-		//this.started = false;
-		//this.crashed = false;
-		//this.debugReady = false;
-
-        this.erlDebugger.Start(args.cwd, args.arguments)
-            .then(res => {
-				this.quitEvent(res);
-            }, err => {
-                this.sendErrorResponse(response, 100, `erl runtime failed to run ${err}`);
-            });
-
+		}, exitCode =>{
+			this.log("connection to erlang process failed.");
+			this.quitEvent(exitCode);
+		});
         this.sendResponse(response);
         //this.sendErrorResponse(response, 102, `Not yet implemented, coming soon...stay tuned !`);
     }
 
 	protected disconnectRequest(response: DebugProtocol.DisconnectResponse, args: DebugProtocol.DisconnectArguments): void {
-        this.log("disconnectRequest");
-		this.erlDebugger.NormalQuit();
+        //this.log("disconnectRequest");
+		if (!this.quit) {
+			//send q() only if user clic on stop debugger button
+			this.erlDebugger.NormalQuit();
+		}
+		if (this.erlangConnection) {
+			this.erlangConnection.Quit();
+		}
         super.disconnectRequest(response, args);
 	}
 
 
 	protected quitEvent(exitCode: number) {
-		this.log(`erl exit with code ${exitCode}`);
+		//this.log(`erl exit with code ${exitCode}`);
 		this.quit = true;
 		this.sendEvent(new TerminatedEvent());
 	}
 
 	protected evaluateRequest(response: DebugProtocol.EvaluateResponse, args: DebugProtocol.EvaluateArguments): void {
         //this.log("evaluateRequest");
+		//send entire expression entered in debugger console wend
 		this.erlDebugger.Send(args.expression);
 		response.body = {
 			result: 'sending to erlang...',
@@ -108,11 +119,16 @@ class ErlangDebugSession extends DebugSession implements IErlangShellOutput1 {
 	}
 
     protected setBreakPointsRequest(response: DebugProtocol.SetBreakpointsResponse, args: DebugProtocol.SetBreakpointsArguments): void {
+ 		// this is returned to VS Code
+        let vscodeBreakpoints: Breakpoint[];
+		vscodeBreakpoints = [];
 		if (this.erlDebugger) {
 			this.log("setbreakpoint after start of debugger");
 		}
 		var bp = new Breakpoint(true, 1, 1, new Source("coucou", "path", 1, "origin", "dtata"));
 		this.log("setbreakpoints : " + JSON.stringify(<any>args));
+		
+		response.body = {breakpoints: vscodeBreakpoints};
 		this.sendResponse(response);
 	}
 
@@ -141,6 +157,10 @@ class ErlangDebugSession extends DebugSession implements IErlangShellOutput1 {
 
 	appendLine(value: string): void {
 		this.log(value);
+	}
+
+	append(value: string) : void {
+		this.outLine(`${value}`);
 	}
 }
 
