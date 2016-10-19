@@ -17,6 +17,7 @@ start(Args) ->
     [P] = Args,
     VsCodePort = erlang:list_to_integer(erlang:atom_to_list(P)),
     % subcribe to int
+    init_subscribe(VsCodePort),
     % send that debugger is ready
     start_command_server(VsCodePort),
     ok.
@@ -46,8 +47,29 @@ loop_command_server(Sock) ->
 
 handle_command(Conn) ->
     %process for commands (breakpoints_list, set_breakpoint, ...)
+    case decode_command(Conn) of 
+		{add_bp, File, Module, LineNumber} ->
+			int:ni(File),
+			int:break(Module, LineNumber)
+			;
+		{remove_bp, File, Module, LineNumber} ->
+			int:ni(File),
+			int:delete_break(Module, LineNumber)
+			;
+		{debugger_next, Pid} ->
+			int:next(Pid);
+		{debugger_step, Pid} ->
+			int:step(Pid);
+		{debugger_continue, Pid} ->
+			int:continue(Pid);
+		M ->
+			io:format("command receive : ~p~n",[M])
+	end,
     gen_tcp:send(Conn, response("Hello World")),
     gen_tcp:close(Conn).
+
+decode_command(Conn) ->
+    ok.
 
 response(Str) ->
     B = iolist_to_binary(Str),
@@ -55,3 +77,37 @@ response(Str) ->
       io_lib:fwrite(
          "HTTP/1.0 200 OK\nContent-Type: text/html\nContent-Length: ~p\n\n~s",
          [size(B), B])).
+
+init_subscribe(VsCodePort) ->
+    spawn(fun () -> do_subscribe_loop(VsCodePort) end).
+
+do_subscribe_loop(VsCodePort) ->
+    register(?MODULE, self()),
+    int:subscribe(),
+    loop_subscribe(VsCodePort).
+
+loop_subscribe(VsCodePort) ->
+    	receive
+		{int, M} ->
+			decode_debugger_message(VsCodePort, M),
+			loop_subscribe(VsCodePort);
+		M ->
+			io:format("receive : ~p~n", [M]),
+			loop_subscribe(VsCodePort)
+	end.
+
+decode_debugger_message(VsCodePort, M) ->
+    %% samples of M
+    %{interpret,zcmailchecker_app}
+    %{new_break,{{zcmailchecker_app,15},[active,enable,null,null]}}
+    %{new_process,
+    %                              {<0.97.0>,
+    %                               {zcmailchecker_app,start,[normal,[]]},
+    %                               running,{}}}
+    case M of
+    {Verb, Data} ->
+        send_message_to_vscode(VsCodePort,erlang:atom_to_list(Verb), "{}");
+    _ -> 
+        io:format("decode debugger receive : ~p~n", [M])    
+    end,
+    ok.

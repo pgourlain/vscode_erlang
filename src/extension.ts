@@ -1,14 +1,14 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
-import * as fs from 'fs'
+//import * as fs from 'fs'
 import * as rebar from './RebarRunner';
-import * as erlang from './ErlangShell';
+//import * as erlang from './ErlangShell';
 import * as adapter from './vscodeAdapter';
-import * as path from 'path';
+//import * as path from 'path';
 import * as eunitrunner from './eunitRunner';
 import * as utils from './utils';
-import * as erlangDebug from './erlangDebug';
+//import * as erlangDebug from './erlangDebug';
 
 var myoutputChannel : vscode.OutputChannel;
 var myConsole : vscode.OutputChannel;
