@@ -1,5 +1,6 @@
-import { DebugSession, InitializedEvent, TerminatedEvent, StoppedEvent, OutputEvent, Thread, StackFrame, Scope, Source, Handles
-	, Breakpoint } from 'vscode-debugadapter';
+import { DebugSession, InitializedEvent, TerminatedEvent, StoppedEvent, 
+	OutputEvent, Thread, ThreadEvent, StackFrame, Scope, Source, Handles
+	, Breakpoint, ModuleEvent, Module } from 'vscode-debugadapter';
 import { DebugProtocol } from 'vscode-debugprotocol';
 import { ErlangShellForDebugging, IErlangShellOutput1 } from './ErlangShellDebugger';
 import * as genericShell from './GenericShell';
@@ -19,17 +20,16 @@ export interface LaunchRequestArguments {
 var erlangBridgePath = path.join(__dirname, "..", "..", "erlangbridge");
 
 class ErlangDebugSession extends DebugSession implements IErlangShellOutput1 {
-    protected threadID: number = 1;
+
+    protected threadIDs: {[processName: string] : number};
 	erlDebugger: ErlangShellForDebugging;
 	erlangConnection : ErlangConnection;
-	//command_receiver : http.Server;
-	//erlangbridgePort : number;
 	quit: boolean;
 	private _breakPoints = new Map<string, DebugProtocol.Breakpoint[]>();
 
     public constructor() {
 		super();
-		this.threadID = 1;
+		this.threadIDs = {};
 		this.setDebuggerLinesStartAt1(false);
 		this.setDebuggerColumnsStartAt1(false);
 		process.addListener('unhandledRejection', reason => {
@@ -41,11 +41,14 @@ class ErlangDebugSession extends DebugSession implements IErlangShellOutput1 {
 	}
 
     protected threadsRequest(response: DebugProtocol.ThreadsResponse): void {
-		this.debug("threadsRequest");
+		//this.debug("threadsRequest");
+		var ths : Thread[] = [];
+		for (var key in this.threadIDs) {
+			var thid = this.threadIDs[key];
+			ths.push(new Thread(thid, "Thread " + key))
+		}
 		response.body = {
-			threads: [
-				new Thread(this.threadID, "Thread 1")
-			]
+			threads: ths
 		};
 		this.sendResponse(response);
 	}
@@ -57,6 +60,11 @@ class ErlangDebugSession extends DebugSession implements IErlangShellOutput1 {
 			this.quitEvent(exitCode);
 		})
 		this.erlangConnection = new ErlangConnection(this);
+		this.erlangConnection.on("new_module", (arg) => this.onNewModule(arg));
+		this.erlangConnection.on("new_break", (arg) => this.onNewBreak(arg));
+		this.erlangConnection.on("new_process", (arg) => this.onNewProcess(arg));
+		this.erlangConnection.on("new_status", (pid, status) => this.onNewStatus(pid, status));
+		
 
 		// since this debug adapter can accept configuration requests like 'setBreakpoint' at any time,
 		// we request them early by sending an 'initializeRequest' to the frontend.
@@ -179,6 +187,40 @@ class ErlangDebugSession extends DebugSession implements IErlangShellOutput1 {
 
 	append(value: string) : void {
 		this.outLine(`${value}`);
+	}
+
+	//----------- events from erlangConnection
+	private onNewModule(moduleName : string) : void {
+		this.debug("OnNewModule : " + moduleName);
+		this.sendEvent(new ModuleEvent("new", new Module(moduleName, moduleName)))	
+	}
+
+	private onNewBreak(breakName : string) : void {
+		this.debug("OnNewBreak : " + breakName);
+		//this.sendEvent(new ModuleEvent("new", new Module(moduleName, moduleName)))	
+	}
+
+	private pid_to_number(processName : string) : number {
+		var pidAsString : string = processName.substr(1, processName.length-2);
+		pidAsString = pidAsString.replace(".", "");
+
+		return Number.parseInt(pidAsString);
+	}
+
+	private onNewProcess(processName : string) : void {
+		//each process in erlang is mapped to one 'thread'
+		this.debug("OnNewProcess : " + processName);
+		var thid = this.pid_to_number(processName);
+		this.threadIDs[processName] = thid;
+		this.sendEvent(new ThreadEvent("started", thid));
+	}
+	private onNewStatus(processName : string, status : string) {
+		this.debug("OnStatus : " + processName + "," + status);
+		if (status === 'exit') {
+			var thid = this.pid_to_number(processName);
+			delete this.threadIDs[processName];
+			this.sendEvent(new ThreadEvent("exited", thid));						
+		}		
 	}
 }
 

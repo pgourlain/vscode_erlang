@@ -10,7 +10,7 @@ var erlangBridgePath = path.join(__dirname, "..", "..", "erlangbridge");
 /** this class is responsible to send/receive debug command to erlang bridge */
 export class ErlangConnection extends EventEmitter {
 	erlangbridgePort : number;
-    command_receiver : http.Server;
+    events_receiver : http.Server;
     _output : IErlangShellOutput1;
 
     
@@ -45,7 +45,7 @@ export class ErlangConnection extends EventEmitter {
     public async Start() : Promise<number> {
         return new Promise<number>((a,r)=> {
             this.compile_erlang_connection().then(() => {
-                return this.start_command_receiver().then(res => {
+                return this.start_events_receiver().then(res => {
                     a(res);
                 }, exitCode => {
                     //this.log("reject");
@@ -59,7 +59,7 @@ export class ErlangConnection extends EventEmitter {
     }
 
     public Quit() : void {
-        this.command_receiver.close();
+        this.events_receiver.close();
     }
 
     private compile_erlang_connection() : Promise<number> {
@@ -76,11 +76,11 @@ export class ErlangConnection extends EventEmitter {
         });		
     }
 
-	private start_command_receiver() : Promise<number> {
+	private start_events_receiver() : Promise<number> {
         this.logAppend("Starting http listener...");
 		return new Promise<number>((accept, reject) =>
 		{
-			this.command_receiver = http.createServer((req, res) => {
+			this.events_receiver = http.createServer((req, res) => {
 				var url = req.url;
 				var body = [];
 				var jsonBody = null;
@@ -89,16 +89,23 @@ export class ErlangConnection extends EventEmitter {
 				}).on('data', chunk =>{
 					body.push(chunk);
 				}).on('end', () => {
+                    //here : receive all events from erlangBridge
 					var sbody = Buffer.concat(body).toString();
-					jsonBody = JSON.parse(sbody);
-					this.handle_command(url, jsonBody);
-					res.statusCode = 200;
+                    try {
+                        jsonBody = JSON.parse(sbody);
+					    this.handle_erlang_event(url, jsonBody);
+                    }
+                    catch (err)
+                    {
+                        this.debug("error while receving command :" + err + "\r\n" + sbody);
+                    }
+    				res.statusCode = 200;
 					res.setHeader('Content-Type', 'text/plain');
 					res.end('ok');
 				});
 			});
-			this.command_receiver.listen(0, '127.0.0.1', () => {
-				var p = this.command_receiver.address().port;
+			this.events_receiver.listen(0, '127.0.0.1', () => {
+				var p = this.events_receiver.address().port;
                 this.logAppend(` on http://127.0.0.1:${p}\n`);
 				accept(p);
 			});
@@ -106,12 +113,25 @@ export class ErlangConnection extends EventEmitter {
 		});
 	}
 
-	handle_command(url: string, body : any) {
-		if (url === '/listen') {
-			this.erlangbridgePort = body.port;
-			this.debug("erlang bridge listen on port :" + this.erlangbridgePort.toString());
-		} else {
-            this.debug("receive from erlangbridge :" + url);
+	handle_erlang_event(url: string, body : any) {
+        //this method handle every event receiver from erlang
+        switch(url) {
+            case "/listen" :
+                this.erlangbridgePort = body.port;
+                this.debug("erlang bridge listen on port :" + this.erlangbridgePort.toString());
+            break;
+            case "/interpret" :
+                this.emit("new_module", body.module);
+            break;
+            case "/new_process" :
+                this.emit("new_process", body.process);
+            break;
+            case "/new_status" :
+                this.emit("new_status", body.process, body.status);
+            break;
+            default:
+                this.debug("receive from erlangbridge :" + url + ", body :" + JSON.stringify(body));
+            break;
         }
 	}    
 

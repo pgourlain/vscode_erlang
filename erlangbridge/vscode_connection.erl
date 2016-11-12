@@ -106,8 +106,37 @@ decode_debugger_message(VsCodePort, M) ->
     %                               running,{}}}
     case M of
     {Verb, Data} ->
-        send_message_to_vscode(VsCodePort,erlang:atom_to_list(Verb), "{}");
+        send_message_to_vscode(VsCodePort,to_string(Verb), to_json(Verb, Data));
+    {new_status,Pid,idle,_} ->
+        send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, idle}));        
+    {new_status,Pid,exit,normal} ->
+        send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, exit, normal}));    
     _ -> 
         io:format("decode debugger receive : ~p~n", [M])    
     end,
     ok.
+
+to_json(new_break, {{Module, Line}, _Options}) ->
+    fmt("{\"module\":~p, \"line\":~p}",[to_string(Module), Line]);
+    %"{}";
+to_json(interpret, Data) ->
+    "{\"module\":\"" ++ to_string(Data) ++"\"}";
+to_json(new_process, {Pid, _Start, Status, _Other}) ->
+    fmt("{\"process\":~p, \"status\":~p}",[pid_to_list(Pid), to_string(Status)]);
+to_json(new_break, Data) ->
+    "{}";
+to_json(new_status, {Pid, idle}) ->
+    fmt("{\"process\":~p, \"status\":~p}", [pid_to_list(Pid), to_string(idle)]);
+to_json(new_status, {Pid, exit, normal}) ->
+    fmt("{\"process\":~p, \"status\":~p,\"reason\":~p}", [pid_to_list(Pid), to_string(exit), to_string(normal)]);
+to_json(_, _) ->
+    "{}".
+
+fmt(Fmt, Args) ->
+    binary_to_list(iolist_to_binary(io_lib:fwrite(Fmt,Args))).
+
+to_string(X) when is_atom(X) ->
+    erlang:atom_to_list(X);
+
+to_string(X) ->
+    X.
