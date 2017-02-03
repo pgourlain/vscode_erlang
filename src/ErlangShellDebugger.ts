@@ -50,7 +50,12 @@ export class ErlangShellForDebugging extends ErlGenericShell {
 
     private formatPath(filePath : string) {
         if (os.platform() == 'win32') {
-            return filePath.replace("\\", "\\\\");
+            if (filePath == undefined) {
+                return filePath;
+            }
+            filePath = filePath.split("\\").join("\\\\");
+            this.log("log", "filepath :" + filePath);
+            return filePath;
         }
         return filePath;
     }

@@ -127,7 +127,7 @@ export class ErlangConnection extends EventEmitter {
                 this.emit("new_process", body.process);
             break;
             case "/new_status" :
-                this.emit("new_status", body.process, body.status);
+                this.emit("new_status", body.process, body.status, body.reason, body.module, body.line);
             break;
             default:
                 this.debug("receive from erlangbridge :" + url + ", body :" + JSON.stringify(body));
@@ -145,6 +145,19 @@ export class ErlangConnection extends EventEmitter {
         } else {
             return new Promise(() => false);
         }
+    }
+
+    public debuggerContinue(pid : string) : Promise<boolean> {
+        if (this.erlangbridgePort > 0) {
+            return this.post("debugger_continue", pid).then(res => {
+                    return true;
+                }, err => {
+                    return false;
+                });
+        } else {
+            return new Promise(() => false);
+        }
+        
     }
 
     private post(verb : string, body? : string) : Promise<any> {

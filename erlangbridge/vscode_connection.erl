@@ -41,35 +41,40 @@ start_command_server(VsCodePort) ->
 
 loop_command_server(Sock) ->
     {ok, Conn} = gen_tcp:accept(Sock),
-    Handler = spawn(fun () -> handle_command(Conn) end),
+    Handler = spawn(fun () -> loop_handle_command(Conn) end),
     gen_tcp:controlling_process(Conn, Handler),
     loop_command_server(Sock).
 
-handle_command(Conn) ->
-    %process for commands (breakpoints_list, set_breakpoint, ...)
-    case decode_command(Conn) of 
-		{add_bp, File, Module, LineNumber} ->
-			int:ni(File),
-			int:break(Module, LineNumber)
-			;
-		{remove_bp, File, Module, LineNumber} ->
-			int:ni(File),
-			int:delete_break(Module, LineNumber)
-			;
-		{debugger_next, Pid} ->
-			int:next(Pid);
-		{debugger_step, Pid} ->
-			int:step(Pid);
-		{debugger_continue, Pid} ->
-			int:continue(Pid);
-		M ->
-			io:format("command receive : ~p~n",[M])
-	end,
-    gen_tcp:send(Conn, response("Hello World")),
-    gen_tcp:close(Conn).
 
-decode_command(Conn) ->
+loop_handle_command(Socket) ->
+    inet:setopts(Socket, [{active, once}]),
+    receive
+    {tcp, Socket, Data} ->
+        %io:format("Got packet: ~p~n", [Data]),
+        decode_request(Data),
+        loop_handle_command(Socket);
+    {tcp_closed, Socket}->
+        io:format("Socket ~p closed~n", [Socket]);
+    {tcp_error, Socket, Reason} ->
+        io:format("Error on socket ~p reason: ~p~n", [Socket, Reason])
+    end.
+
+decode_request(Data) ->
+    %"POST debugger_continue HTTP/1.1\r\nContent-Type: plain/text\r\nContent-Length: 1\r\nHost: 127.0.0.1:36477\r\nConnection: close\r\n\r\n3"
+    case parse_request(Data) of
+    {debugger_continue, SPid_as_body} ->
+        int:continue(list_to_pid(SPid_as_body)),
+        response("ok");
+    _ ->
+        ok
+    end,
     ok.
+
+parse_request(Data) ->
+    Lines = string:tokens(Data, "\r\n"),
+    Command = list_to_atom(lists:nth(2, string:tokens(lists:nth(1, Lines), " "))),
+    Body = string:join(lists:nthtail(5, Lines), "\r\n"),
+    {Command, Body}.
 
 response(Str) ->
     B = iolist_to_binary(Str),
@@ -110,7 +115,10 @@ decode_debugger_message(VsCodePort, M) ->
     {new_status,Pid,idle,_} ->
         send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, idle}));        
     {new_status,Pid,exit,normal} ->
-        send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, exit, normal}));    
+        send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, exit, normal})); 
+    {new_status,Pid,break,ModuleAndLine} ->
+        %{new_status,<0.3.0>,break,{myapp,11}}   
+        send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, break, ModuleAndLine})); 
     _ -> 
         io:format("decode debugger receive : ~p~n", [M])    
     end,
@@ -124,11 +132,15 @@ to_json(interpret, Data) ->
 to_json(new_process, {Pid, _Start, Status, _Other}) ->
     fmt("{\"process\":~p, \"status\":~p}",[pid_to_list(Pid), to_string(Status)]);
 to_json(new_break, Data) ->
+    fmt("new_break:~p}",[Data]),
     "{}";
 to_json(new_status, {Pid, idle}) ->
     fmt("{\"process\":~p, \"status\":~p}", [pid_to_list(Pid), to_string(idle)]);
 to_json(new_status, {Pid, exit, normal}) ->
     fmt("{\"process\":~p, \"status\":~p,\"reason\":~p}", [pid_to_list(Pid), to_string(exit), to_string(normal)]);
+to_json(new_status, {Pid, break, {Module, Line}}) ->
+    fmt("{\"process\":~p, \"status\":~p,\"reason\":~p,\"module\":~p, \"line\":~p}", [pid_to_list(Pid), to_string(break), 
+        to_string(normal), to_string(Module), Line]);
 to_json(_, _) ->
     "{}".
 

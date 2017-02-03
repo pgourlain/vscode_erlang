@@ -41,7 +41,7 @@ class ErlangDebugSession extends DebugSession implements IErlangShellOutput1 {
 	}
 
     protected threadsRequest(response: DebugProtocol.ThreadsResponse): void {
-		//this.debug("threadsRequest");
+		this.debug("threadsRequest");
 		var ths : Thread[] = [];
 		for (var key in this.threadIDs) {
 			var thid = this.threadIDs[key];
@@ -63,7 +63,7 @@ class ErlangDebugSession extends DebugSession implements IErlangShellOutput1 {
 		this.erlangConnection.on("new_module", (arg) => this.onNewModule(arg));
 		this.erlangConnection.on("new_break", (arg) => this.onNewBreak(arg));
 		this.erlangConnection.on("new_process", (arg) => this.onNewProcess(arg));
-		this.erlangConnection.on("new_status", (pid, status) => this.onNewStatus(pid, status));
+		this.erlangConnection.on("new_status", (pid, status, reason, moduleName, line) => this.onNewStatus(pid, status, reason, moduleName, line));
 		
 
 		// since this debug adapter can accept configuration requests like 'setBreakpoint' at any time,
@@ -160,6 +160,37 @@ class ErlangDebugSession extends DebugSession implements IErlangShellOutput1 {
 		this.sendResponse(response);
 	}
 
+	protected continueRequest(response: DebugProtocol.ContinueResponse, args: DebugProtocol.ContinueArguments): void {
+		this.sendResponse(response);
+		this.erlangConnection.debuggerContinue(this.thread_id_to_pid(args.threadId)).then(
+			() => {
+				this.sendResponse(response);
+			}, 
+			(reason) => {
+				this.error("unable to continue debugging.")
+ 				this.sendEvent(new TerminatedEvent());
+				this.sendResponse(response);
+			});
+	}
+
+	protected thread_id_to_pid(current_thid : number) : string {
+		for (var key in this.threadIDs) {
+			var thid = this.threadIDs[key];
+			if (thid == current_thid) {
+				return key;
+			}
+		}
+		return "<0.0.0>";
+	}
+
+	private threadCount() {
+		var result = 0;
+		for (var key in this.threadIDs) {
+			result++;
+		}		
+		return result;
+	}
+
     protected log(msg: string): void {
 		this.outLine(`${msg}\n`);
     }
@@ -168,7 +199,7 @@ class ErlangDebugSession extends DebugSession implements IErlangShellOutput1 {
 		this.sendEvent(new OutputEvent(msg, category ? category : 'console'));
 	}
 
-	/** send message to console with color of debug catgeory */
+	/** send message to console with color of debug category */
 	public debug(msg : string) : void {
 		//other category can be 'console', 'stdout', 'stderr', 'telemetry'		
 		this.outLine(`${msg}\n`, "debug");
@@ -215,12 +246,18 @@ class ErlangDebugSession extends DebugSession implements IErlangShellOutput1 {
 		this.threadIDs[processName] = thid;
 		this.sendEvent(new ThreadEvent("started", thid));
 	}
-	private onNewStatus(processName : string, status : string) {
+	private onNewStatus(processName : string, status : string, reason : string, moudleName : string,line : string) {
 		this.debug("OnStatus : " + processName + "," + status);
 		if (status === 'exit') {
 			var thid = this.pid_to_number(processName);
 			delete this.threadIDs[processName];
-			this.sendEvent(new ThreadEvent("exited", thid));						
+			this.sendEvent(new ThreadEvent("exited", thid));
+			if (this.threadCount() == 0) {
+				this.sendEvent(new TerminatedEvent());
+			}
+		} else if (status =="break") {
+			var thid = this.pid_to_number(processName);
+			this.sendEvent(new StoppedEvent("breakpoint", thid));
 		}		
 	}
 }
