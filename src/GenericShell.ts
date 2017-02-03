@@ -50,7 +50,7 @@ export class ErlGenericShell extends EventEmitter {
                 }
                 this.erlangShell = spawn(processName, args, { cwd: startDir, shell: true, stdio: 'pipe' });
                 this.erlangShell.on('error', error => {
-                    this.log("stderr", error);
+                    this.log("stderr", error.message);
                     if (process.platform == 'win32') {
                         this.log("stderr", "ensure '" + processName + "' is in your path.");
                     }

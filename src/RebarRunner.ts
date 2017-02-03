@@ -118,9 +118,9 @@ export class RebarRunner implements vscode.Disposable {
 			}
 			let rebar = child_process.spawn(rebarFileName, args, { cwd: dirName, stdio: 'pipe' });
 			rebar.on('error', error => {
-				outputChannel.appendLine(error);
+				outputChannel.appendLine(error.message);
 				if (process.platform == 'win32') {
-					outputChannel.appendLine("ensure 'escript.exe' is in your path.");
+					outputChannel.appendLine("ensure 'escript.exe' is in your path. And after changed your path, you must close vscode (all instances).");
 				}
 			});
 			outputChannel.appendLine('starting rebar ' + commands + ' ...');

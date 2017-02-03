@@ -197,6 +197,7 @@ class ErlangDebugSession extends DebugSession implements IErlangShellOutput1 {
 
 	private onNewBreak(breakName : string) : void {
 		this.debug("OnNewBreak : " + breakName);
+		//this.sendEvent(new StoppedEvent("breakpoint", ));
 		//this.sendEvent(new ModuleEvent("new", new Module(moduleName, moduleName)))	
 	}
 

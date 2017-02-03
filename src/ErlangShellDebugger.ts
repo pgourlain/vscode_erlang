@@ -3,6 +3,7 @@ import { EventEmitter } from 'events';
 import { ErlGenericShell } from './GenericShell';
 import { DebugProtocol } from 'vscode-debugprotocol';
 import * as path from 'path';
+import * as os from 'os';
 
 //inspired from https://github.com/WebFreak001/code-debug/blob/master/src/backend/mi2/mi2.ts for inspiration of an EventEmitter 
 const nonOutput = /^(?:\d*|undefined)[\*\+\=]|[\~\@\&\^]/;
@@ -24,7 +25,7 @@ export class ErlangShellForDebugging extends ErlGenericShell {
     }
 
     public Start(startDir: string, listen_port: number, bridgePath: string, args: string): Promise<boolean> {
-        var debugStartArgs = ["-pa", `'${bridgePath}'`, "-s", "int",
+        var debugStartArgs = ["-pa", `"${bridgePath}"`, "-s", "int",
             "-vscode_port", listen_port.toString(),
             "-s", "vscode_connection", "start", listen_port.toString()];
         var breakPointsArgs = this.breakpoints_as_startarguments();
@@ -47,23 +48,30 @@ export class ErlangShellForDebugging extends ErlGenericShell {
         return distinct;
     }
 
+    private formatPath(filePath : string) {
+        if (os.platform() == 'win32') {
+            return filePath.replace("\\", "\\\\");
+        }
+        return filePath;
+    }
+
     private breakpoints_as_startarguments(): string[] {
         //next step, to avoid reach the command line limits(character length), it's to store all breakpoints in a specific file, then bridge read it....
         var result: string[] = [];
         if (this.breakPoints) {
             result.push("-eval");
-            var evalString = "'int:start()";
+            var evalString = "\"int:start()";
             //first interpret source
             var bps = this.uniqueBy(this.breakPoints, bp => bp.source.path);
             bps.forEach(bp => {
-                evalString += ",int:ni(\"" + bp.source.path + "\")";                
+                evalString += ",int:ni(\\\"" + this.formatPath(bp.source.path) + "\\\")";                
             });
             //then set break
             this.breakPoints.forEach(bp => {
                 var moduleName = path.basename(bp.source.name, ".erl");
                 evalString += `, int:break(${moduleName}, ${bp.line})`;
             });
-            evalString += "'";
+            evalString += "\"";
             result.push(evalString);
         }
         return result;
