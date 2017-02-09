@@ -71,6 +71,7 @@ decode_request(Data) ->
     ok.
 
 parse_request(Data) ->
+    %"POST debugger_continue HTTP/1.1\r\nContent-Type: plain/text\r\nContent-Length: 1\r\nHost: 127.0.0.1:36477\r\nConnection: close\r\n\r\n3"
     Lines = string:tokens(Data, "\r\n"),
     Command = list_to_atom(lists:nth(2, string:tokens(lists:nth(1, Lines), " "))),
     Body = string:join(lists:nthtail(5, Lines), "\r\n"),
@@ -89,6 +90,7 @@ init_subscribe(VsCodePort) ->
 do_subscribe_loop(VsCodePort) ->
     register(?MODULE, self()),
     int:subscribe(),
+    %int:stack_trace(all),
     loop_subscribe(VsCodePort).
 
 loop_subscribe(VsCodePort) ->
@@ -118,7 +120,10 @@ decode_debugger_message(VsCodePort, M) ->
         send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, exit, normal})); 
     {new_status,Pid,break,ModuleAndLine} ->
         %{new_status,<0.3.0>,break,{myapp,11}}   
-        send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, break, ModuleAndLine})); 
+        send_message_to_vscode(VsCodePort,to_string(on_break), to_json(on_break, {Pid, break, ModuleAndLine, int:snapshot()}));
+    {new_status,Pid,running,_} ->
+        %{new_status,<0.3.0>,running,{}}
+        send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, running}));
     _ -> 
         io:format("decode debugger receive : ~p~n", [M])    
     end,
@@ -134,14 +139,40 @@ to_json(new_process, {Pid, _Start, Status, _Other}) ->
 to_json(new_break, Data) ->
     fmt("new_break:~p}",[Data]),
     "{}";
-to_json(new_status, {Pid, idle}) ->
-    fmt("{\"process\":~p, \"status\":~p}", [pid_to_list(Pid), to_string(idle)]);
+to_json(new_status, {Pid, Status}) ->
+    fmt("{\"process\":~p, \"status\":~p}", [pid_to_list(Pid), to_string(Status)]);
 to_json(new_status, {Pid, exit, normal}) ->
     fmt("{\"process\":~p, \"status\":~p,\"reason\":~p}", [pid_to_list(Pid), to_string(exit), to_string(normal)]);
 to_json(new_status, {Pid, break, {Module, Line}}) ->
     fmt("{\"process\":~p, \"status\":~p,\"reason\":~p,\"module\":~p, \"line\":~p}", [pid_to_list(Pid), to_string(break), 
         to_string(normal), to_string(Module), Line]);
+to_json(on_break, {Pid, break, {Module, Line}, Snapshot}) ->
+    %io:format("Snapshot : ~p~n", [Snapshot]),
+    %Snapshot : [{<0.3.0>,{myapp,start,[]},break,{myapp,12}}]
+    fmt("{\"process\":~p, \"module\":~p, \"line\":~p, \"snapshot\":[~p]}", [pid_to_list(Pid), to_string(Module), Line, snapshot_to_json(Snapshot)]);
 to_json(_, _) ->
+    "{}".
+
+snapshot_to_json([H|T]) when length(T) > 0 ->
+    Head = process_snapshot_to_json(H),
+    Tail = snapshot_to_json(T),
+    fmt("~p, ~p",[Head, Tail]);
+
+snapshot_to_json([H|_T]) ->
+    Head = process_snapshot_to_json(H),
+    fmt("~p",[Head]);
+
+snapshot_to_json([]) ->
+    "";
+
+snapshot_to_json(_) ->
+    "".
+
+process_snapshot_to_json({Pid, {Module, Method, Args}, break, {BreakModule, Line}}) ->
+    MMA = to_string(Module) ++ "/" ++ to_string(Method) ++ "/" ++ erlang:integer_to_list(length(Args)),
+    fmt("{\"process\":~p, \"initial_call\":~p, \"break_module\":~p, \"line\":~p}", [pid_to_list(Pid),MMA, to_string(BreakModule), Line]);
+
+process_snapshot_to_json(_) ->
     "{}".
 
 fmt(Fmt, Args) ->

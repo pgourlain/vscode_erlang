@@ -48,6 +48,7 @@ export class ErlGenericShell extends EventEmitter {
                 if (this.channelOutput) {
                     channel.show();
                 }
+                this.log("log", `starting : ${processName} ` + args.join(" "));
                 this.erlangShell = spawn(processName, args, { cwd: startDir, shell: true, stdio: 'pipe' });
                 this.erlangShell.on('error', error => {
                     this.log("stderr", error.message);
@@ -55,11 +56,14 @@ export class ErlGenericShell extends EventEmitter {
                         this.log("stderr", "ensure '" + processName + "' is in your path.");
                     }
                 });
-                this.log("log", 'starting ' + processName + '...' + args);
                 this.erlangShell.stdout.on("data", this.stdout.bind(this));
                 this.erlangShell.stderr.on("data", this.stderr.bind(this));
 
                 this.erlangShell.on('close', (exitCode) => {
+                    this.log("log", processName + ' exit code:' + exitCode);
+                    this.emit('close', exitCode);
+                });
+                this.erlangShell.on('exit', (exitCode: number, signal: string) => {
                     this.log("log", processName + ' exit code:' + exitCode);
                     this.emit('close', exitCode);
                 });

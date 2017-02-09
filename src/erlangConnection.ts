@@ -3,7 +3,7 @@ import { EventEmitter } from 'events'
 import * as http from 'http';
 import { DebugProtocol } from 'vscode-debugprotocol';
 import * as path from 'path';
-import { ErlangShellForDebugging, IErlangShellOutput1 } from './ErlangShellDebugger';
+import { ErlangShellForDebugging, IErlangShellOutputForDebugging } from './ErlangShellDebugger';
 
 var erlangBridgePath = path.join(__dirname, "..", "..", "erlangbridge");
 
@@ -11,14 +11,14 @@ var erlangBridgePath = path.join(__dirname, "..", "..", "erlangbridge");
 export class ErlangConnection extends EventEmitter {
 	erlangbridgePort : number;
     events_receiver : http.Server;
-    _output : IErlangShellOutput1;
+    _output : IErlangShellOutputForDebugging;
 
     
     public get isConnected() : boolean {
         return this.erlangbridgePort > 0;
     }
     
-    public constructor(output : IErlangShellOutput1) {
+    public constructor(output : IErlangShellOutputForDebugging) {
         super();
         this._output = output;
         this.erlangbridgePort = -1;
@@ -39,6 +39,12 @@ export class ErlangConnection extends EventEmitter {
     protected debug(msg : string) : void {
         if (this._output) {
             this._output.debug(msg);
+        }
+    }
+
+    protected error(msg : string) : void {
+        if (this._output) {
+            this._output.error(msg);
         }
     }
 
@@ -70,14 +76,14 @@ export class ErlangConnection extends EventEmitter {
                     this.debug("Compilation of erlang bridge...ok");
                     a(res);
 				}, exitCode => {
-                    this.debug("Compilation of erlang bridge...ko");
+                    this.error("Compilation of erlang bridge...ko");
                     r(exitCode);
 				});
         });		
     }
 
 	private start_events_receiver() : Promise<number> {
-        this.logAppend("Starting http listener...");
+        this.debug("Starting http listener...");
 		return new Promise<number>((accept, reject) =>
 		{
 			this.events_receiver = http.createServer((req, res) => {
@@ -85,7 +91,7 @@ export class ErlangConnection extends EventEmitter {
 				var body = [];
 				var jsonBody = null;
 				req.on('error', err => {
-					this.log("request error");
+					this.error("request error");
 				}).on('data', chunk =>{
 					body.push(chunk);
 				}).on('end', () => {
@@ -97,7 +103,7 @@ export class ErlangConnection extends EventEmitter {
                     }
                     catch (err)
                     {
-                        this.debug("error while receving command :" + err + "\r\n" + sbody);
+                        this.error("error while receving command :" + err + "\r\n" + sbody);
                     }
     				res.statusCode = 200;
 					res.setHeader('Content-Type', 'text/plain');
@@ -106,7 +112,7 @@ export class ErlangConnection extends EventEmitter {
 			});
 			this.events_receiver.listen(0, '127.0.0.1', () => {
 				var p = this.events_receiver.address().port;
-                this.logAppend(` on http://127.0.0.1:${p}\n`);
+                this.debug(` on http://127.0.0.1:${p}\n`);
 				accept(p);
 			});
 
@@ -128,6 +134,12 @@ export class ErlangConnection extends EventEmitter {
             break;
             case "/new_status" :
                 this.emit("new_status", body.process, body.status, body.reason, body.module, body.line);
+            break;
+            case "/new_break" :
+                this.emit("new_break", body.module, body.line);
+            break;
+            case "/on_break" :
+                this.emit("on_break", body.process, body.module, body.line, body.snapshot);
             break;
             default:
                 this.debug("receive from erlangbridge :" + url + ", body :" + JSON.stringify(body));

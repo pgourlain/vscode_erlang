@@ -9,17 +9,18 @@ import * as os from 'os';
 const nonOutput = /^(?:\d*|undefined)[\*\+\=]|[\~\@\&\^]/;
 
 
-export interface IErlangShellOutput1 {
+export interface IErlangShellOutputForDebugging {
     show(): void;
     appendLine(value: string): void;
     append(value: string): void;
     debug(value: string): void;
+    error(value: string): void;
 }
 
 export class ErlangShellForDebugging extends ErlGenericShell {
     breakPoints: DebugProtocol.Breakpoint[];
     started : boolean;
-    constructor(whichOutput: IErlangShellOutput1) {
+    constructor(whichOutput: IErlangShellOutputForDebugging) {
         super(whichOutput);
         this.breakPoints = [];
     }
@@ -54,7 +55,6 @@ export class ErlangShellForDebugging extends ErlGenericShell {
                 return filePath;
             }
             filePath = filePath.split("\\").join("\\\\");
-            this.log("log", "filepath :" + filePath);
             return filePath;
         }
         return filePath;
