@@ -18,7 +18,7 @@
 		"onCommand:extension.rebarUpdateDeps",
 		"onCommand:extension.erleunit"
 	],
-	"main": "./out/src/extension",
+	"main": "./out/lib/extension",
 	"contributes": {
 		"breakpoints": [
 			{
@@ -28,7 +28,7 @@
 		"debuggers": [
 			{
 				"type": "erlang",
-				"program": "./out/src/erlangDebug.js",
+				"program": "./out/lib/erlangDebug.js",
 				"runtime": "node",
 				"label": "Erlang",
 				"enableBreakpointsFor": {
