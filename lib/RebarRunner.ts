@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path'
+import * as fs from 'fs'
 import * as child_process from 'child_process'
 import * as utils from './utils'
 
@@ -105,9 +106,18 @@ export class RebarRunner implements vscode.Disposable {
 		}
 	}
 
+	private getRebarFullPath(dirName : string) : string {
+		var rebarFileName = path.join(dirName, 'rebar');
+		if (fs.exists(rebarFileName)) {
+			return rebarFileName;
+		}
+		rebarFileName = path.join(dirName, 'rebar3');
+		return rebarFileName;
+	}
+
 	public runScript(dirName: string, commands: string[]): Thenable<string> {
-		return new Promise<string>((a, r)=>{
-			var rebarFileName = path.join(dirName, 'rebar');
+		return new Promise<string>((a, r)=>{			
+			var rebarFileName = this.getRebarFullPath(dirName);
 			let args = commands;
 			var outputChannel = RebarRunner.RebarOutput;
 			var output : string = "";

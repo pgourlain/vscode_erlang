@@ -2,10 +2,11 @@
 import { EventEmitter } from 'events'
 import * as http from 'http';
 import { DebugProtocol } from 'vscode-debugprotocol';
+import { Variable} from 'vscode-debugadapter';
 import * as path from 'path';
 import { ErlangShellForDebugging, IErlangShellOutputForDebugging } from './ErlangShellDebugger';
 
-var erlangBridgePath = path.join(__dirname, "..", "..", "erlangbridge");
+export var erlangBridgePath = path.join(__dirname, "..", "..", "apps", "erlangbridge", "src");
 
 /** this class is responsible to send/receive debug command to erlang bridge */
 export class ErlangConnection extends EventEmitter {
@@ -98,6 +99,7 @@ export class ErlangConnection extends EventEmitter {
                     //here : receive all events from erlangBridge
 					var sbody = Buffer.concat(body).toString();
                     try {
+                        //this.log("body:" + sbody);
                         jsonBody = JSON.parse(sbody);
 					    this.handle_erlang_event(url, jsonBody);
                     }
@@ -139,7 +141,7 @@ export class ErlangConnection extends EventEmitter {
                 this.emit("new_break", body.module, body.line);
             break;
             case "/on_break" :
-                this.emit("on_break", body.process, body.module, body.line, body.snapshot);
+                this.emit("on_break", body.process, body.module, body.line, body.stacktrace);
             break;
             default:
                 this.debug("receive from erlangbridge :" + url + ", body :" + JSON.stringify(body));
@@ -172,7 +174,70 @@ export class ErlangConnection extends EventEmitter {
         
     }
 
+    public debuggerNext(pid : string) : Promise<boolean> {
+        if (this.erlangbridgePort > 0) {
+            return this.post("debugger_next", pid).then(res => {
+                    return true;
+                }, err => {
+                    return false;
+                });
+        } else {
+            return new Promise(() => false);
+        }        
+    }
+
+    public debuggerStepIn(pid : string) : Promise<boolean> {
+        if (this.erlangbridgePort > 0) {
+            return this.post("debugger_stepin", pid).then(res => {
+                    return true;
+                }, err => {
+                    return false;
+                });
+        } else {
+            return new Promise(() => false);
+        }        
+    }
+
+    public debuggerStepOut(pid : string) : Promise<boolean> {
+        if (this.erlangbridgePort > 0) {
+            return this.post("debugger_stepout", pid).then(res => {
+                    return true;
+                }, err => {
+                    return false;
+                });
+        } else {
+            return new Promise(() => false);
+        }        
+    }
+
+    public debuggerBindings(pid: string, frameId : string) : Promise<Variable[]> { 
+        if (this.erlangbridgePort > 0) {
+            return this.post("debugger_bindings", pid + "\r\n" + frameId).then(res => {
+                    //this.debug(`result of bindings : ${JSON.stringify(res)}`);
+                    return (<Array<any>>res).map(x => { return {
+                        name: x.name,
+                        type: "string",
+                        value: x.value,
+                        variablesReference: 0
+			            };});
+                }, err => {
+                    this.debug(`debugger_bindings error : ${err}`);
+                    return [];
+                });
+        } else {
+            return new Promise(() => []);
+        }        
+    }
+
     private post(verb : string, body? : string) : Promise<any> {
+        return this.postorget("POST", verb, body);
+    }
+
+    private get(verb : string, body? : string) : Promise<any> {
+        return this.postorget("GET", verb, body);
+    }
+    
+    private postorget(method : string, verb : string, body? : string) : Promise<any> {
         return new Promise<any>((a, r) => {
             if (!body) {
                 body = "";
@@ -181,7 +246,7 @@ export class ErlangConnection extends EventEmitter {
                 host:"127.0.0.1",
                 path: verb,
                 port: this.erlangbridgePort,
-                method:"POST",
+                method:method,
                 headers: {
                     'Content-Type': 'plain/text',
                     'Content-Length': Buffer.byteLength(body)
@@ -195,13 +260,17 @@ export class ErlangConnection extends EventEmitter {
 
                 response.on('end', () => {
                     try {
+                        //this.log("command response : " + body);
                         var parsed = JSON.parse(body);
                         a(parsed);
                     } catch (err) {
-                        this.log("unable to parse response as JSON:" + err)
+                        this.log("unable to parse response as JSON:" + err);
                         //console.error('Unable to parse response as JSON', err);
                         r(err);
                     }
+                });
+                response.on("error", err => {
+                        this.log("error while sending command to erlang :" + err);
                 });
             });
             postReq.write(body);
