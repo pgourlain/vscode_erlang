@@ -3,10 +3,11 @@
 	"files.exclude": {
 		"out": false, // set this to true to hide the "out" folder with the compiled JS files
 		"node_modules" : true,
-		"erlangbridge/*.beam": true
+		"_build_": true
 	},
 	"search.exclude": {
-		"out": true // set this to false to include "out" folder in search results
+		"out": true, // set this to false to include "out" folder in search results
+		"_build": true 
 	},
 	"typescript.tsdk": "./node_modules/typescript/lib" // we want to use the TS server from our node_modules folder to control its version
 }

@@ -12,6 +12,7 @@
     "exclude": [
         "node_modules",
         ".vscode-test",
-        "typings"
+        "typings",
+        "_build"
     ]
 }
