@@ -25,14 +25,14 @@ export class ErlangShellForDebugging extends ErlGenericShell {
         this.breakPoints = [];
     }
 
-    public Start(startDir: string, listen_port: number, bridgePath: string, args: string): Promise<boolean> {
+    public Start(erlPath:string, startDir: string, listen_port: number, bridgePath: string, args: string): Promise<boolean> {
         var debugStartArgs = ["-pa", `"${bridgePath}"`, "-s", "int",
             "-vscode_port", listen_port.toString(),
             "-s", "vscode_connection", "start", listen_port.toString()];
         var breakPointsArgs = this.breakpoints_as_startarguments();
         var processArgs = debugStartArgs.concat(breakPointsArgs).concat([args]);
         this.started = true;
-        var result = this.LaunchProcess("erl", startDir, processArgs);
+        var result = this.LaunchProcess(erlPath, startDir, processArgs);
         return result;
     }
 

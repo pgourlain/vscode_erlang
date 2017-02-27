@@ -48,7 +48,7 @@ export class ErlGenericShell extends EventEmitter {
                 if (this.channelOutput) {
                     channel.show();
                 }
-                this.log("log", `starting : ${processName} ` + args.join(" "));
+                this.log("log", `starting : ${processName} \r\n` + args.join(" "));
                 this.erlangShell = spawn(processName, args, { cwd: startDir, shell: true, stdio: 'pipe' });
                 this.erlangShell.on('error', error => {
                     this.log("stderr", error.message);
