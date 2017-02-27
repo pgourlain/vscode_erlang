@@ -12,8 +12,20 @@ This extension adds support for the Erlang language to VS Code, including:
 * Available commands
 ![commands](images/vscode-erlang-commands.png)
 
+* Debug
+![debug](images/vscode-erlang-debug.png)
+	- Variables list is automatically refresh from the current scope
+	- The process list contains an additional process for communication with vscode
+
+* Debug arguments  
+![debug1](images/vscode-erlang-debug-args.png)
+	- you can provide a specific command line to 'erl' in launch.json configuration file.
+
+
 
 ## Versions
+* 0.1.0
+	- debugger integration
 * 0.0.9
 	- fix shortcuts (ctrl-shift-B, ctrl-shift-T)
 * 0.0.8
