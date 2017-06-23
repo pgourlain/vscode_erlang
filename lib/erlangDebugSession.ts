@@ -40,6 +40,7 @@ export class ErlangDebugSession extends DebugSession implements IErlangShellOutp
 
 	public constructor() {
 		super();
+		this._breakPoints = [];
 		this._variableHandles = new Handles<DebugVariable>();
 		this.threadIDs = {};
 		this.setDebuggerLinesStartAt1(true);
@@ -165,22 +166,32 @@ export class ErlangDebugSession extends DebugSession implements IErlangShellOutp
 	}
 
 	protected setBreakPointsRequest(response: DebugProtocol.SetBreakpointsResponse, args: DebugProtocol.SetBreakpointsArguments) {
+		//it's called 1 per source file
 		// this is returned to VS Code
 		let vscodeBreakpoints: Breakpoint[];
 		vscodeBreakpoints = [];
-		this.debug("setbreakpoints : " + JSON.stringify(<any>args));
+		//this.debug("setbreakpoints : " + JSON.stringify(<any>args));
+		let targetModuleName = path.basename(args.source.name, ".erl");
 
 		args.breakpoints.forEach(bp => {
 			vscodeBreakpoints.push(new Breakpoint(true, bp.line, 1, new Source(args.source.name, args.source.path)))
 		});
+		this._updateBreakPoints(targetModuleName, vscodeBreakpoints);
+
 		if (this.erlangConnection.isConnected) {
-			this.erlangConnection.setBreakPointsRequest(vscodeBreakpoints);
+			this.erlangConnection.setBreakPointsRequest(targetModuleName, vscodeBreakpoints);
 		} else if (this.erlDebugger) {
 			this.erlDebugger.setBreakPointsRequest(vscodeBreakpoints);
 		}
 		response.body = { breakpoints: vscodeBreakpoints };
-        this._breakPoints = vscodeBreakpoints;
 		this.sendResponse(response);
+	}
+
+	private _updateBreakPoints(moduleName : string, bps : Breakpoint[])
+	{
+		let fileName = moduleName + ".erl";
+		let newBps = this._breakPoints.filter( (bp) => bp.source.name != fileName);
+		this._breakPoints = newBps.concat(bps);
 	}
 
 	protected setExceptionBreakPointsRequest(response: DebugProtocol.SetExceptionBreakpointsResponse, args: DebugProtocol.SetExceptionBreakpointsArguments): void {
