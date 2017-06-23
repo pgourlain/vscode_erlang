@@ -85,9 +85,26 @@ decode_request(Data) ->
         Lines =  string:tokens(Body, "\r\n"),
         Pid = lists:nth(1, Lines),
         Sp = erlang:list_to_integer(lists:nth(2, Lines)),
-        response(debugger_bindings(list_to_pid(Pid), Sp));        
+        response(debugger_bindings(list_to_pid(Pid), Sp));
+    {set_bp, Body} ->
+        % first deserialize user breaks
+        ParseBody = fun(S) -> string:tokens(S, "\r\n") end,
+        ParseLine = fun(ML) -> list_to_tuple(string:tokens(ML, ",")) end,
+        ToBp = fun({M,L}) -> {list_to_atom(M), list_to_integer(L)} end,
+        Bps = lists:map(ToBp, lists:map(ParseLine, ParseBody(Body))),
+        % take first bp to get modulename
+        { TargetModuleName, _ } = lists:nth(1, Bps),
+        %get current breakpoints
+        AllBreaks = lists:map(fun({{M,L},_}) -> {M,L} end, int:all_breaks(TargetModuleName)),
+        { BpsAlreadySet, BpsToDelete } = lists:partition(fun(X) -> lists:member(X, Bps) end, AllBreaks),
+        lists:foreach(fun({M, L}) -> int:delete_break(M, L) end, BpsToDelete),
+        %set only for new breakpoints
+        lists:foreach(fun({M,L}) -> int:break(M,L) end,
+            sets:to_list(sets:subtract(sets:from_list(Bps), sets:from_list(BpsAlreadySet)))
+            ),
+        response("{}");    
     _ ->
-        ok
+        unknown_command
     end.
 
 parse_request(Data) ->

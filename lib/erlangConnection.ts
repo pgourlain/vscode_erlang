@@ -149,13 +149,21 @@ export class ErlangConnection extends EventEmitter {
         }
 	}    
 
-    public setBreakPointsRequest(breakPoints : DebugProtocol.Breakpoint[]) : Promise<boolean> {
-        if (this.erlangbridgePort > 0) {
-            return this.post("set_bp").then(res => {
-                    return true;
-                }, err => {
-                    return false;
-                });
+    public setBreakPointsRequest(moduleName : string, breakPoints : DebugProtocol.Breakpoint[]) : Promise<boolean> {
+        if (this.erlangbridgePort > 0) {    
+            let bps = "";
+            breakPoints.forEach(bp => {
+                bps += `${moduleName},${bp.line}\r\n`;
+            });
+            if (bps != "") {
+                return this.post("set_bp", bps).then(res => {
+                        return true;
+                    }, err => {
+                        return false;
+                    });
+            } else {
+                return new Promise(() => false);
+            }
         } else {
             return new Promise(() => false);
         }
