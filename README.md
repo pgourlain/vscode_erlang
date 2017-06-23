@@ -24,6 +24,8 @@ This extension adds support for the Erlang language to VS Code, including:
 
 
 ## Versions
+* 0.1.1
+	- fix debugger integration
 * 0.1.0
 	- debugger integration
 * 0.0.9
