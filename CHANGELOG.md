@@ -1,6 +1,8 @@
 
 ## Versions
 * 0.1.1
+	- fix rebar3 #4
+* 0.1.1
 	- fix debugger integration #15
 * 0.1.0
 	- debugger integration
