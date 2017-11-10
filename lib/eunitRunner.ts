@@ -6,6 +6,7 @@ import * as erlang from './ErlangShell';
 import * as path from 'path';
 import * as utils from './utils';
 import * as adapter from './vscodeAdapter';
+import { erlangBridgePath } from './erlangConnection';
 
 
 export class EunitRunner implements vscode.Disposable {
@@ -27,32 +28,30 @@ export class EunitRunner implements vscode.Disposable {
     }
 
     private runEUnitCommand() {
+        let that = this;
         runEUnitRequirements().then(_ => {
             myoutputChannel.clear();
             this.diagnosticCollection.clear();
             logTitle("Read configuration...");
-            return readRebarConfigWithErlangShell();
-        })
-            .then(v => {
+            readRebarConfigWithErlangShell().then(v => {
                 //add file type to compile
                 v.TestDirs = v.TestDirs.map(x => joinPath(x, "*.erl"));
                 return v;
-            })
-            .then(x => {
+            }).then(x => {
                 logTitle("Compile units tests...");
-                return compile(x);
-            })
-            .then(v => {
-                logTitle("Run units tests...");
-                return runTests(v);
-            })
-            .then(testResults => {
-                return this.parseTestsResults(testResults);
-            })
-            .then(x => x, reason => {
-                myoutputChannel.appendLine('eunit command failed :' + reason + '\n');
-            })
-            ;
+                compile(x).then(v => {
+                    logTitle("Run units tests...");
+                    runTests(v).then(testResults => {
+                        that.parseTestsResults(testResults).then(ok =>ok,
+                            reason => {
+                            myoutputChannel.appendLine('eunit command failed :' + reason + '\n');
+                        });
+                    });
+                });
+            });
+        }, reason => {
+            myoutputChannel.appendLine('rebar eunit command failed :' + reason + '\n');
+        });
     }
 
     private parseTestsResults(results: TestResults): Thenable<boolean> {
@@ -74,14 +73,14 @@ export class EunitRunner implements vscode.Disposable {
         });
     }
 
-    private getFile(stacktrace : any[]) : string {
+    private getFile(stacktrace: any[]): string {
         if (stacktrace && stacktrace.length > 0) {
             return stacktrace[0].file;
         }
         return "";
     }
 
-    private getExpected(location : any) : string {
+    private getExpected(location: any): string {
         if (location.expected) {
             return location.expected;
         } else if (location.pattern) {
@@ -99,12 +98,12 @@ export class EunitRunner implements vscode.Disposable {
                 let diagnostic = new vscode.Diagnostic(range, message, vscode.DiagnosticSeverity.Error);
                 */
                 let message = "";
-                var failed = testcase.result.failed; 
-                var diagnostic : vscode.Diagnostic = null;
+                var failed = testcase.result.failed;
+                var diagnostic: vscode.Diagnostic = null;
                 if (failed) {
                     message = failed.assertion + "/" + failed.location.module + ", expected :" + this.getExpected(failed.location) + ", value :" + failed.location.value;
                     var file = this.getFile(failed.stacktrace);
-                    var line = Number(failed.location.line)-1;
+                    var line = Number(failed.location.line) - 1;
                     let range = new vscode.Range(line, 0, line, 80);
                     diagnostic = new vscode.Diagnostic(range, message, vscode.DiagnosticSeverity.Error);
                 } else if (testcase.result.aborted) {
@@ -113,9 +112,9 @@ export class EunitRunner implements vscode.Disposable {
                     message = aborted.error;
 
                     var file = this.getFile(aborted.stacktrace);
-                    var line = Number(aborted.stacktrace[0].line)-1;
+                    var line = Number(aborted.stacktrace[0].line) - 1;
                     let range = new vscode.Range(line, 0, line, 80);
-                    diagnostic = new vscode.Diagnostic(range, message, vscode.DiagnosticSeverity.Error);                    
+                    diagnostic = new vscode.Diagnostic(range, message, vscode.DiagnosticSeverity.Error);
                 }
                 if (!diagnostics[file]) {
                     diagnostics[file] = [];
@@ -148,7 +147,7 @@ function logTitle(title: string) {
 }
 
 function runEUnitRequirements(): Thenable<boolean> {
-    return new Promise<Boolean>((a, r) => {
+    return new Promise<boolean>((a, r) => {
         var rebarConfig = path.join(vscode.workspace.rootPath, "rebar.config");
         if (fs.existsSync(rebarConfig)) {
             a(true);
@@ -181,16 +180,17 @@ function readRebarConfigWithErlangShell(): Thenable<CompileArgs> {
                 r("Erlang shell that get rebar config failed with exitcode :" + exitCode);
             });
         var cmd = '{ok, Config}=file:consult("./rebar.config"),';
+        cmd += 'Undef = fun (E) -> case E of (undefined) -> []; (_) -> E end end,';
         //read erl_opts
-        cmd += 'E=proplists:get_value(erl_opts, Config),';
+        cmd += 'E=Undef(proplists:get_value(erl_opts, Config)),';
         //get includes dirs
-        cmd += 'I=proplists:get_value(i, (case E of (undefined) -> []; (_)-> E end)),';
+        cmd += 'I=Undef(proplists:get_value(i, E)),';
         //read eunit_compile_opts
-        cmd += 'EunitOpts=proplists:get_value(eunit_compile_opts, Config),';
+        cmd += 'EunitOpts=Undef(proplists:get_value(eunit_compile_opts, Config)),';
         //get src_dirs
-        cmd += 'SrcDirs=proplists:get_value(src_dirs, (case EunitOpts of (undefined) -> []; (_)-> EunitOpts end)),';
+        cmd += 'SrcDirs=Undef(proplists:get_value(src_dirs, EunitOpts)),';
         //get erlang tuples as printable chars
-        cmd += 'IR=lists:flatten(io_lib:print((case io_lib:printable_list(I) of true -> [I]; false -> I end))),';
+        cmd += 'IR=lists:flatten(io_lib:print(case io_lib:printable_list(I) and (string:length(I)>0) of true -> [I]; false -> I end)),';
         //json representation
         cmd += 'R = "{\\"TestDirs\\":"++lists:flatten(io_lib:print(SrcDirs))++", \\"IncludeDirs\\":"++IR++"}",';
         cmd += 'file:write_file("./rebarconfig.json", R),'
@@ -221,14 +221,14 @@ function relativePathTo(ref: string, value: string): string {
     return value;
 }
 
-function findErlangFiles(dirAndPattern: string): Thenable<String[]> {
+function findErlangFiles(dirAndPattern: string): Thenable<string[]> {
     //find file from the root of current workspace
     return vscode.workspace.findFiles(dirAndPattern, "").then((files: vscode.Uri[]) => {
         return files.map((v, i, a) => relativeTo(vscode.workspace.rootPath, v.fsPath));
     });
 }
 
-function mapToFirstDirLevel(x: vscode.Uri): String {
+function mapToFirstDirLevel(x: vscode.Uri): string {
     var y = relativeTo(vscode.workspace.rootPath, x.fsPath);
     return y.split(path.sep)[0];
 }
@@ -241,7 +241,7 @@ function findIncludeDirectories(): Thenable<string[]> {
     });
 }
 
-function insertBeforeEachElement(A: String[], value: String) {
+function insertBeforeEachElement(A: string[], value: string) {
     var startIndex = A.length - 1;
     var count = A.length;
     for (var index = 0; index < count; index++) {
@@ -267,7 +267,7 @@ function compile(compileArgs: CompileArgs): Thenable<string[]> {
     if (!fs.existsSync(eunitDir)) {
         fs.mkdirSync(eunitDir);
     }
-    fs.createReadStream(path.resolve(myExtensionPath, 'erlangbridge', 'eunit_jsonreport.erl'))
+    fs.createReadStream(path.resolve(erlangBridgePath, 'eunit_jsonreport.erl'))
         .pipe(fs.createWriteStream(path.resolve(eunitDir, 'eunit_jsonreport.erl')));
     return findIncludeDirectories()
         .then(iDirs => {
@@ -328,8 +328,8 @@ function findebinDirs(): Thenable<string[]> {
 }
 
 function runTests(filenames: string[]): Thenable<TestResults> {
-    return findebinDirs().then(pzDirs => {
-        return new Promise<TestResults>((a, r) => {
+    return new Promise<TestResults>((a, r) => {
+        findebinDirs().then(pzDirs => {
             var erlangShell = new erlang.ErlangShell();
             var moduleNames = filenames.map((v, i, a) => to_modulename(v));
             insertBeforeEachElement(pzDirs, "-pz");
@@ -350,9 +350,9 @@ function runTests(filenames: string[]): Thenable<TestResults> {
 }
 
 class CompileArgs {
-    TestDirs: String[];
-    IncludeDirs: String[];
-    ErlangFiles: String[];
+    TestDirs: string[];
+    IncludeDirs: string[];
+    ErlangFiles: string[];
 }
 
 class TestResults {

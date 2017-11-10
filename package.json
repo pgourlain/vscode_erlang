@@ -5,7 +5,7 @@
 	"icon": "images/icon.png",
 	"publisher": "pgourlain",
 	"engines": {
-        "vscode": "^1.5.0"
+		"vscode": "^1.5.0"
 	},
 	"categories": [
 		"Languages",
@@ -152,6 +152,12 @@
 					"default": "",
 					"description": "Directory location of erl/escript.",
 					"title": "Path of erlang binaries"
+				},
+				"erlang.rebarPath": {
+					"type": "string",
+					"default": "",
+					"description": "Directory location of rebar/rebar3.",
+					"title": "Path of rebar/rebar3"					
 				}
 			}
 		}
@@ -162,20 +168,20 @@
 	},
 	"license": "MIT",
 	"scripts": {
-        "vscode:prepublish": "tsc -p ./",
-        "compile": "tsc -watch -p ./",
-        "postinstall": "node ./node_modules/vscode/bin/install",
-        "test": "node ./node_modules/vscode/bin/test"
+		"vscode:prepublish": "tsc -p ./",
+		"compile": "tsc -watch -p ./",
+		"postinstall": "node ./node_modules/vscode/bin/install",
+		"test": "node ./node_modules/vscode/bin/test"
 	},
 	"dependencies": {
 		"vscode-debugadapter": "^1.16.0",
 		"vscode-debugprotocol": "^1.16.0"
 	},
 	"devDependencies": {
-        "typescript": "^2.0.3",
-        "vscode": "^1.0.0",
-        "mocha": "^2.3.3",
-        "@types/node": "^6.0.40",
-        "@types/mocha": "^2.2.32"
+		"typescript": "^2.0.3",
+		"vscode": "^1.0.0",
+		"mocha": "^2.3.3",
+		"@types/node": "^6.0.40",
+		"@types/mocha": "^2.2.32"
 	}
 }
