@@ -14,7 +14,7 @@ import * as vscode from 'vscode';
 import * as erlang from './ErlangShell';
 import { ErlangConnection, erlangBridgePath } from './ErlangConnection';
 
-export interface LaunchRequestArguments {
+export interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
 	cwd: string;
 	erlpath: string;
 	arguments: string;
