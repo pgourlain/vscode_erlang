@@ -44,8 +44,9 @@ export class RebarRunner implements vscode.Disposable {
 
 	private runRebarCompile() {
 		try {
-
-			this.runScript(vscode.workspace.rootPath, ['compile']).then(data => {
+			var cfg = vscode.workspace.getConfiguration('erlang');
+			var cfgRebarPath = cfg.get("rebarBuildArgs", ["compile"]);
+			this.runScript(vscode.workspace.rootPath, cfgRebarPath).then(data => {
 				this.diagnosticCollection.clear();
 				this.parseCompilationResults(data);
 			});
