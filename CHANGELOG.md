@@ -1,6 +1,8 @@
 
 ## Versions
-* 0.1.1
+* 0.1.3
+	- user can provide configuration settings to the build command (#19)
+* 0.1.2
 	- fix rebar3 #4
 * 0.1.1
 	- fix debugger integration #15
