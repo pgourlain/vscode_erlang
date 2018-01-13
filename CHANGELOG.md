@@ -1,5 +1,7 @@
 
 ## Versions
+* 0.1.4
+	- Fix args json escape format, add variable type basic support (#22)
 * 0.1.3
 	- user can provide configuration settings to the build command (#19)
 * 0.1.2
