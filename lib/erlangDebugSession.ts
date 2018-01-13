@@ -264,7 +264,7 @@ export class ErlangDebugSession extends DebugSession implements IErlangShellOutp
 				var v = id.children[i];
 				variables.push({
 					name: v.name,
-					type: "string",
+					type: v["type"],
 					value: v.value,
 					variablesReference: 0
 				});

@@ -136,9 +136,10 @@ backtrace_item_to_json(I) ->
     {Sp, {M, F, Args, Frame}} = I,
     Line = get_line_from_frame(Frame),
     %TODO:convert args in standard json
-    SArgs = re:replace(io_lib:format("~p", [Args]), "\\r\\n", "", [global,{return,list}]),
+    SArgs = re:replace(io_lib:format("~p", [Args]), "[\\r\\n|\\n]", "", [global,{return,list}]),
+    EscapedSArgs = re:replace(SArgs, "\"", "\\\\\"", [global,{return,list}]),
     io_lib:format("{\"sp\":\"~p\", \"module\":\"~p\", \"function\":\"~p\", \"args\":\"~s\", \"source\":~p, \"line\":~p}", 
-        [Sp, M, F, SArgs, sourceFileOf(M), Line]).
+        [Sp, M, F, EscapedSArgs, sourceFileOf(M), Line]).
 
 get_line_from_frame({_,{_,Line},_})->
     Line;
@@ -188,10 +189,29 @@ bindings_array_to_json([H|_T]) ->
 bindings_array_to_json([]) ->
     "".
 
+isprint(X) when X >= 32, X < 127 -> true;
+isprint(_) -> false.
+
+type_of_onebinding_to_json(Value) when is_list(Value) ->
+    case lists:all(fun isprint/1, Value) of
+        true -> "string";
+        _ -> type_of_onebinding_to_json(basic, Value)
+    end;
+type_of_onebinding_to_json(Value) -> type_of_onebinding_to_json(basic, Value).  
+type_of_onebinding_to_json(basic, Value) when is_binary(Value) -> "binary"; 
+type_of_onebinding_to_json(basic, Value) when is_boolean(Value) -> "boolean";    
+type_of_onebinding_to_json(basic, Value) when is_integer(Value) -> "integer";
+type_of_onebinding_to_json(basic, Value) when is_float(Value) -> "float";
+type_of_onebinding_to_json(basic, Value) when is_atom(Value) -> "atom";
+type_of_onebinding_to_json(basic, Value) when is_list(Value) -> "list";
+type_of_onebinding_to_json(basic, Value) when is_map(Value) -> "map";
+type_of_onebinding_to_json(basic, Value) when is_tuple(Value) -> "tuple";
+type_of_onebinding_to_json(basic, _) -> "unknown".
+
 onebinding_to_json(B) ->
     {Name, Value} = B,
-    Vfn = fun (VarValue) -> re:replace(io_lib:format("~p", [VarValue]), "\\r\\n", "", [global,{return,list}]) end,
-    "{\"name\":" ++ io_lib:write_string(atom_to_list(Name)) ++ ", \"value\":" ++ io_lib:write_string(Vfn(Value))++ "}". 
+    Vfn = fun (VarValue) -> re:replace(io_lib:format("~p", [VarValue]), "\\r\\n|\\n", "", [global,{return,list}]) end,
+    "{\"name\":" ++ io_lib:write_string(atom_to_list(Name)) ++ ", \"type\": \"" ++ type_of_onebinding_to_json(Value) ++ "\", \"value\":" ++ io_lib:write_string(Vfn(Value))++ "}".
 
 debugger_bindings(Pid, Sp) when is_pid(Pid) ->
     {ok, UnderlyingPid} = dbg_iserver:call({get_meta,Pid}),

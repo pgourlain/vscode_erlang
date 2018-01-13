@@ -224,7 +224,7 @@ export class ErlangConnection extends EventEmitter {
                     //this.debug(`result of bindings : ${JSON.stringify(res)}`);
                     return (<Array<any>>res).map(x => { return {
                         name: x.name,
-                        type: "string",
+                        type: x["type"],
                         value: x.value,
                         variablesReference: 0
 			            };});
