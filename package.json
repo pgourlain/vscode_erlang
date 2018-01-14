@@ -1,7 +1,7 @@
 {
 	"name": "erlang",
 	"description": "Erlang language extension for Visual Studio Code",
-	"version": "0.1.3",
+	"version": "0.1.4",
 	"icon": "images/icon.png",
 	"publisher": "pgourlain",
 	"engines": {
@@ -157,16 +157,18 @@
 					"type": "string",
 					"default": "",
 					"description": "Directory location of rebar/rebar3.",
-					"title": "Path of rebar/rebar3"					
+					"title": "Path of rebar/rebar3"
 				},
-				"erlang.rebarBuildArgs" : {
+				"erlang.rebarBuildArgs": {
 					"type": "array",
 					"items": {
-						"type" : "string",
+						"type": "string",
 						"title": "argument",
 						"default": ""
-					},										
-					"default": ["compile"],
+					},
+					"default": [
+						"compile"
+					],
 					"description": "Arguments to provide to rebar/rebar3 build command",
 					"title": "Arguments to provide to rebar/rebar3 build command"
 				}
