@@ -72,8 +72,8 @@ export class ErlangConnection extends EventEmitter {
     private compile_erlang_connection() : Promise<number> {
         return new Promise<number>((a, r) => {
 			var compiler = new ErlangShellForDebugging(null);
-			var erlFile = "vscode_connection.erl";	
-			return compiler.Compile(erlangBridgePath, [erlFile]).then(res => {
+			var erlFile = ["vscode_connection.erl", "vscode_jsone.erl"];	
+			return compiler.Compile(erlangBridgePath, erlFile).then(res => {
                     this.debug("Compilation of erlang bridge...ok");
                     a(res);
 				}, exitCode => {
@@ -124,24 +124,26 @@ export class ErlangConnection extends EventEmitter {
 	handle_erlang_event(url: string, body : any) {
         //this method handle every event receiver from erlang
         switch(url) {
-            case "/listen" :
+            case "/listen":
                 this.erlangbridgePort = body.port;
                 this.debug("erlang bridge listen on port :" + this.erlangbridgePort.toString());
             break;
-            case "/interpret" :
+            case "/interpret":
                 this.emit("new_module", body.module);
             break;
-            case "/new_process" :
+            case "/new_process":
                 this.emit("new_process", body.process);
             break;
-            case "/new_status" :
+            case "/new_status":
                 this.emit("new_status", body.process, body.status, body.reason, body.module, body.line);
             break;
-            case "/new_break" :
+            case "/new_break":
                 this.emit("new_break", body.module, body.line);
             break;
-            case "/on_break" :
+            case "/on_break":
                 this.emit("on_break", body.process, body.module, body.line, body.stacktrace);
+            break;
+            case "/delete_break":
             break;
             default:
                 this.debug("receive from erlangbridge :" + url + ", body :" + JSON.stringify(body));
@@ -151,19 +153,15 @@ export class ErlangConnection extends EventEmitter {
 
     public setBreakPointsRequest(moduleName : string, breakPoints : DebugProtocol.Breakpoint[]) : Promise<boolean> {
         if (this.erlangbridgePort > 0) {    
-            let bps = "";
+            let bps = moduleName + "\r\n";
             breakPoints.forEach(bp => {
                 bps += `${moduleName},${bp.line}\r\n`;
             });
-            if (bps != "") {
-                return this.post("set_bp", bps).then(res => {
-                        return true;
-                    }, err => {
-                        return false;
-                    });
-            } else {
-                return new Promise(() => false);
-            }
+            return this.post("set_bp", bps).then(res => {
+                return true;
+            }, err => {
+                return false;
+            });
         } else {
             return new Promise(() => false);
         }
@@ -218,16 +216,11 @@ export class ErlangConnection extends EventEmitter {
         }        
     }
 
-    public debuggerBindings(pid: string, frameId : string) : Promise<Variable[]> { 
+    public debuggerBindings(pid: string, frameId : string) : Promise<any[]> { 
         if (this.erlangbridgePort > 0) {
             return this.post("debugger_bindings", pid + "\r\n" + frameId).then(res => {
                     //this.debug(`result of bindings : ${JSON.stringify(res)}`);
-                    return (<Array<any>>res).map(x => { return {
-                        name: x.name,
-                        type: x["type"],
-                        value: x.value,
-                        variablesReference: 0
-			            };});
+                    return (<Array<any>>res);
                 }, err => {
                     this.debug(`debugger_bindings error : ${err}`);
                     return [];
@@ -235,6 +228,19 @@ export class ErlangConnection extends EventEmitter {
         } else {
             return new Promise(() => []);
         }        
+    }
+
+    public debuggerEval(pid: string, frameId : string, expression: string): Promise<any> {
+        if (this.erlangbridgePort > 0) {
+            return this.post("debugger_eval", pid + "\r\n" + frameId + "\r\n" + expression).then(res => {
+                    return (<any>res);
+                }, err => {
+                    this.debug(`debugger_eval error : ${err}`);
+                    return [];
+                });
+        } else {
+            return new Promise(() => []);
+        }  
     }
 
     private post(verb : string, body? : string) : Promise<any> {
