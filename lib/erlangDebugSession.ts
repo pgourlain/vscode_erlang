@@ -4,7 +4,7 @@ import {
 	, Breakpoint, ModuleEvent, Module, ContinuedEvent, Variable
 } from 'vscode-debugadapter';
 import { DebugProtocol } from 'vscode-debugprotocol';
-import { ErlangShellForDebugging, IErlangShellOutputForDebugging } from './ErlangShellDebugger';
+import { ErlangShellForDebugging } from './ErlangShellDebugger';
 import * as genericShell from './GenericShell';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -12,7 +12,8 @@ import { EventEmitter } from 'events'
 import * as http from 'http';
 import * as vscode from 'vscode';
 import * as erlang from './ErlangShell';
-import { ErlangConnection, erlangBridgePath } from './erlangConnection';
+import { erlangBridgePath } from './erlangConnection';
+import { ErlangDebugConnection } from './erlangDebugConnection';
 
 export interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
 	cwd: string;
@@ -29,11 +30,11 @@ interface DebugVariable {
 	children: Variable[];
 }
 /** this class is entry point of debugger  */
-export class ErlangDebugSession extends DebugSession implements IErlangShellOutputForDebugging {
+export class ErlangDebugSession extends DebugSession implements genericShell.IErlangShellOutput {
 
 	protected threadIDs: { [processName: string]: {thid: number, stack:any, isBreak : boolean }};
 	erlDebugger: ErlangShellForDebugging;
-	erlangConnection: ErlangConnection;
+	erlangConnection: ErlangDebugConnection;
 	quit: boolean;
 	ignoreOutput: boolean;
 	//private _breakPoints = new Map<string, DebugProtocol.Breakpoint[]>();
@@ -84,7 +85,7 @@ export class ErlangDebugSession extends DebugSession implements IErlangShellOutp
 		this.erlDebugger.on('close', (exitCode) => {
 			this.quitEvent(exitCode);
 		})
-		this.erlangConnection = new ErlangConnection(this);
+		this.erlangConnection = new ErlangDebugConnection(this);
 		this.erlangConnection.on("listen", (msg) => this.onStartListening(msg));
 		this.erlangConnection.on("new_module", (arg) => this.onNewModule(arg));
 		this.erlangConnection.on("new_break", (arg) => this.onNewBreak(arg));
@@ -139,7 +140,8 @@ export class ErlangDebugSession extends DebugSession implements IErlangShellOutp
 		else {
 			this.ignoreOutput = true;
 		}
-		this.erlDebugger.Start(args.erlpath, args.cwd, this._port, erlangBridgePath, args.arguments, args.noDebug).then(r => {
+		var bridgeBinPath = path.normalize(path.join(erlangBridgePath, "..", "ebin"))
+		this.erlDebugger.Start(args.erlpath, args.cwd, this._port, bridgeBinPath, args.arguments, args.noDebug).then(r => {
 			this.sendResponse(response);
 		}).catch(reason =>{
 			this.sendErrorResponse(response, 3000, `Launching application throw an error : ${reason}`);
