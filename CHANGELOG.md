@@ -1,5 +1,12 @@
 
 ## Versions
+* 0.1.5 (PR #23)
+	- variable view tree support for list, map, tuple
+	- watch expression support
+	- erlang rewrite json serialization and cleanup
+	- bug fix: with remove last breakpoint
+	- bug fix: runtime set breakpoint in different module
+	- bug fix: on break event vscode show file in _build/default/lib/*/src/* not in apps/*/src
 * 0.1.4
 	- Fix args json escape format, add variable type basic support (#22)
 * 0.1.3
