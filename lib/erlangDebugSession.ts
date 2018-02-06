@@ -12,7 +12,7 @@ import { EventEmitter } from 'events'
 import * as http from 'http';
 import * as vscode from 'vscode';
 import * as erlang from './ErlangShell';
-import { ErlangConnection, erlangBridgePath } from './ErlangConnection';
+import { ErlangConnection, erlangBridgePath } from './erlangConnection';
 
 export interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
 	cwd: string;
