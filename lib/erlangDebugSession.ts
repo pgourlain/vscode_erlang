@@ -350,6 +350,15 @@ export class ErlangDebugSession extends DebugSession implements IErlangShellOutp
 			if (fs.existsSync(path.join(this._LaunchArguments.cwd, "apps", relative))) {
 				ret = path.join(this._LaunchArguments.cwd, "apps", relative);
 			}
+			else {
+				var basedirname = path.parse(this._LaunchArguments.cwd).base;
+				if (relative.startsWith(basedirname + path.sep)) {
+					var converted = path.join(this._LaunchArguments.cwd, "..", relative);
+					if (fs.existsSync(converted)) {
+						ret = converted;
+					}
+				}
+			}
 		}
 		return ret;
 	}
