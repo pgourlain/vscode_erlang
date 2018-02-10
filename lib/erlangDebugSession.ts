@@ -148,6 +148,7 @@ export class ErlangDebugSession extends DebugSession implements IErlangShellOutp
 			this.erlangConnection.Quit();
 		}
 		this.sendResponse(response);
+		this.erlDebugger.CleanupAfterStart();
 	}
 
 
@@ -155,6 +156,7 @@ export class ErlangDebugSession extends DebugSession implements IErlangShellOutp
 		this.log(`erl exit with code ${exitCode}`);
 		this.quit = true;
 		this.sendEvent(new TerminatedEvent());
+		this.erlDebugger.CleanupAfterStart();
 	}
 
 	protected evaluateRequest(response: DebugProtocol.EvaluateResponse, args: DebugProtocol.EvaluateArguments): void {
