@@ -148,6 +148,7 @@ export class ErlangDebugSession extends DebugSession implements IErlangShellOutp
 			this.erlangConnection.Quit();
 		}
 		this.sendResponse(response);
+		this.erlDebugger.CleanupAfterStart();
 	}
 
 
@@ -155,6 +156,7 @@ export class ErlangDebugSession extends DebugSession implements IErlangShellOutp
 		this.log(`erl exit with code ${exitCode}`);
 		this.quit = true;
 		this.sendEvent(new TerminatedEvent());
+		this.erlDebugger.CleanupAfterStart();
 	}
 
 	protected evaluateRequest(response: DebugProtocol.EvaluateResponse, args: DebugProtocol.EvaluateArguments): void {
@@ -349,6 +351,15 @@ export class ErlangDebugSession extends DebugSession implements IErlangShellOutp
 			relative = path.relative(path.join(this._LaunchArguments.cwd, this._rebarBuildPath), debuggerPath);
 			if (fs.existsSync(path.join(this._LaunchArguments.cwd, "apps", relative))) {
 				ret = path.join(this._LaunchArguments.cwd, "apps", relative);
+			}
+			else {
+				var basedirname = path.parse(this._LaunchArguments.cwd).base;
+				if (relative.startsWith(basedirname + path.sep)) {
+					var converted = path.join(this._LaunchArguments.cwd, "..", relative);
+					if (fs.existsSync(converted)) {
+						ret = converted;
+					}
+				}
 			}
 		}
 		return ret;
