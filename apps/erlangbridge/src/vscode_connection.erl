@@ -257,6 +257,9 @@ decode_debugger_message(VsCodePort, M) ->
     %                               {mymodule_app,start,[normal,[]]},
     %                               running,{}}}
     case M of
+    {new_process, {_Pid, {_Module, module_info, _Args}, _Status, _Other}} ->
+        % ignore processes calling module_info started by debugger itself
+        ok;
     {Verb, Data} ->
         send_message_to_vscode(VsCodePort,to_string(Verb), to_json(Verb, Data));
     {new_status,Pid,idle,_} ->
@@ -269,6 +272,9 @@ decode_debugger_message(VsCodePort, M) ->
     {new_status,Pid,running,_} ->
         %{new_status,<0.3.0>,running,{}}
         send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, running}));
+    {new_status,_,waiting,_} ->
+        %{new_status,<0.3.0>,waiting,{}}: no output not to pollute the console
+        ok;
     _ -> 
         io:format("decode debugger receive : ~p~n", [M])    
     end,

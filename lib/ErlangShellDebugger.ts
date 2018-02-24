@@ -4,6 +4,7 @@ import { ErlGenericShell } from './GenericShell';
 import { DebugProtocol } from 'vscode-debugprotocol';
 import * as path from 'path';
 import * as os from 'os';
+import * as fs from 'fs';
 
 //inspired from https://github.com/WebFreak001/code-debug/blob/master/src/backend/mi2/mi2.ts for inspiration of an EventEmitter 
 const nonOutput = /^(?:\d*|undefined)[\*\+\=]|[\~\@\&\^]/;
@@ -20,20 +21,29 @@ export interface IErlangShellOutputForDebugging {
 export class ErlangShellForDebugging extends ErlGenericShell {
     breakPoints: DebugProtocol.Breakpoint[];
     started : boolean;
+    argsFileName: string;
     constructor(whichOutput: IErlangShellOutputForDebugging) {
         super(whichOutput);
         this.breakPoints = [];
     }
 
     public Start(erlPath:string, startDir: string, listen_port: number, bridgePath: string, args: string): Promise<boolean> {
+        var randomSuffix:string = Math.floor(Math.random() * 10000000).toString();
+        this.argsFileName = path.join(os.tmpdir(), path.basename(startDir) + '_' + randomSuffix);
         var debugStartArgs = ["-pa", `"${bridgePath}"`, "-s", "int",
             "-vscode_port", listen_port.toString(),
             "-s", "vscode_connection", "start", listen_port.toString()];
-        var breakPointsArgs = this.breakpoints_as_startarguments();
-        var processArgs = debugStartArgs.concat(breakPointsArgs).concat([args]);
+        var breakPointsAndModulesArgs = this.breakpointsAndModules(startDir);
+        var processArgs = debugStartArgs.concat(breakPointsAndModulesArgs).concat([args]);
         this.started = true;
         var result = this.LaunchProcess(erlPath, startDir, processArgs);
         return result;
+    }
+
+    public CleanupAfterStart() {
+        if (this.argsFileName && fs.existsSync(this.argsFileName)) {
+            fs.unlinkSync(this.argsFileName);
+        }
     }
 
     private uniqueBy<T>(arr: Array<T>, keySelector: (v: T)=> any): Array<T> {
@@ -60,24 +70,45 @@ export class ErlangShellForDebugging extends ErlGenericShell {
         return filePath;
     }
 
-    private breakpoints_as_startarguments(): string[] {
-        //next step, to avoid reach the command line limits(character length), it's to store all breakpoints in a specific file, then bridge read it....
+    private findErlFiles(dir: string, fileList: string[] = []) {
+        fs.readdirSync(dir).forEach(file => {
+            if (file == '_build')
+                return;
+            const filePath = path.join(dir, file)
+            if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory())
+                this.findErlFiles(filePath, fileList);
+            else if (path.extname(file) === '.erl')
+                fileList.push(filePath);
+        });
+        return fileList;
+    }
+
+    private breakpointsAndModules(startDir: string): string[] {
         var result: string[] = [];
         if (this.breakPoints) {
-            result.push("-eval");
-            var evalString = "\"int:start()";
+            var evalString = "-eval 'int:start()";
+            var modulesWithoutBp: { [sourcePath: string]: boolean} = {};
+            this.findErlFiles(startDir).forEach(fileName => {
+                modulesWithoutBp[fileName] = true;
+            });
             //first interpret source
             var bps = this.uniqueBy(this.breakPoints, bp => bp.source.path);
             bps.forEach(bp => {
-                evalString += ",int:ni(\\\"" + this.formatPath(bp.source.path) + "\\\")";                
+                evalString += ",int:ni(\\\"" + this.formatPath(bp.source.path) + "\\\")";
+                delete modulesWithoutBp[bp.source.path];
             });
+            for (var fileName in modulesWithoutBp) {
+                evalString += ",int:ni(\\\"" + this.formatPath(fileName) + "\\\")";
+            }
             //then set break
             this.breakPoints.forEach(bp => {
                 var moduleName = path.basename(bp.source.name, ".erl");
                 evalString += `, int:break(${moduleName}, ${bp.line})`;
             });
-            evalString += "\"";
-            result.push(evalString);
+            evalString += "'";
+            fs.writeFileSync(this.argsFileName, evalString);
+            result.push("-args_file");
+            result.push("\"" + this.argsFileName + "\"");
         }
         return result;
     }
