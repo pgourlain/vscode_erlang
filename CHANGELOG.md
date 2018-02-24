@@ -1,6 +1,11 @@
 
 ## Versions
-* 0.1.5 (PR #23)
+* 0.1.7 Fix missing file
+* 0.1.6 Fixes for process management during debugging ([wojteksurowka](https://github.com/wojteksurowka) -> [PR #25,#26,#27](https://github.com/pgourlain/vscode_erlang/pull/27))
+	- correct file opened from stack without release) structure
+	- Fix for processes monitoring
+	- do not output waiting status to console
+* 0.1.5 debug experience improvements, bug fixes, clear code ([Andrew Sumskoy](https://github.com/andrewsumskoy) -> [PR #23](https://github.com/pgourlain/vscode_erlang/pull/23))
 	- variable view tree support for list, map, tuple
 	- watch expression support
 	- erlang rewrite json serialization and cleanup
