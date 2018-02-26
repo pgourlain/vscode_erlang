@@ -130,7 +130,7 @@ export class ErlangDebugSession extends DebugSession implements IErlangShellOutp
 		this.debug("Starting erlang");
 		this.debug(`	path      : ${args.cwd}`);
 		this.debug(`	arguments : ${args.arguments}`);
-		this.erlDebugger.Start(args.erlpath, args.cwd, this._port, erlangBridgePath, args.arguments).then(r => {
+		this.erlDebugger.Start(args.erlpath, args.cwd, this._port, erlangBridgePath, args.arguments, this._LaunchArguments.noDebug).then(r => {
 			this.sendResponse(response);
 		}).catch(reason =>{
 			this.sendErrorResponse(response, 3000, `Launching application throw an error : ${reason}`);
@@ -199,7 +199,9 @@ export class ErlangDebugSession extends DebugSession implements IErlangShellOutp
 		this._updateBreakPoints(targetModuleName, vscodeBreakpoints);
 
 		if (this.erlangConnection.isConnected) {
-			this.erlangConnection.setBreakPointsRequest(targetModuleName, vscodeBreakpoints);
+			if (!this._LaunchArguments.noDebug) {
+				this.erlangConnection.setBreakPointsRequest(targetModuleName, vscodeBreakpoints);
+			}
 		} else if (this.erlDebugger) {
 			this.erlDebugger.setBreakPointsRequest(vscodeBreakpoints);
 		}
