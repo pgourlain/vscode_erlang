@@ -66,7 +66,9 @@ export class ErlangConnection extends EventEmitter {
     }
 
     public Quit() : void {
-        this.events_receiver.close();
+        this.debuggerExit().then(() => {
+            this.events_receiver.close();
+        });
     }
 
     private compile_erlang_connection() : Promise<number> {
@@ -74,7 +76,7 @@ export class ErlangConnection extends EventEmitter {
 			var compiler = new ErlangShellForDebugging(null);
 			var erlFile = ["vscode_connection.erl", "vscode_jsone.erl"];	
 			return compiler.Compile(erlangBridgePath, erlFile).then(res => {
-                    this.debug("Compilation of erlang bridge...ok");
+                    //this.debug("Compilation of erlang bridge...ok");
                     a(res);
 				}, exitCode => {
                     this.error("Compilation of erlang bridge...ko");
@@ -84,7 +86,7 @@ export class ErlangConnection extends EventEmitter {
     }
 
 	private start_events_receiver() : Promise<number> {
-        this.debug("Starting http listener...");
+        //this.debug("Starting http listener...");
 		return new Promise<number>((accept, reject) =>
 		{
 			this.events_receiver = http.createServer((req, res) => {
@@ -114,7 +116,7 @@ export class ErlangConnection extends EventEmitter {
 			});
 			this.events_receiver.listen(0, '127.0.0.1', () => {
 				var p = this.events_receiver.address().port;
-                this.debug(` on http://127.0.0.1:${p}\n`);
+                //this.debug(` on http://127.0.0.1:${p}\n`);
 				accept(p);
 			});
 
@@ -126,7 +128,7 @@ export class ErlangConnection extends EventEmitter {
         switch(url) {
             case "/listen":
                 this.erlangbridgePort = body.port;
-                this.debug("erlang bridge listen on port :" + this.erlangbridgePort.toString());
+                this.emit("listen", "erlang bridge listen on port :" + this.erlangbridgePort.toString());
             break;
             case "/interpret":
                 this.emit("new_module", body.module);
@@ -236,6 +238,22 @@ export class ErlangConnection extends EventEmitter {
                     return (<any>res);
                 }, err => {
                     this.debug(`debugger_eval error : ${err}`);
+                    return [];
+                });
+        } else {
+            return new Promise(() => []);
+        }  
+    }
+
+    public debuggerExit(): Promise<any> {
+        if (this.erlangbridgePort > 0) {
+            //this.debug('exit')
+            return this.post("debugger_exit", "").then(res => {
+                this.debug('exit yes')
+                return (<any>res);
+                }, err => {
+                    this.debug('exit no')
+                    this.debug(`debugger_exit error : ${err}`);
                     return [];
                 });
         } else {

@@ -61,6 +61,11 @@
 								"type": "string",
 								"description": "Path to the erl executable or the command if in PATH",
 								"default": "erl"
+							},
+							"verbose": {
+								"type": "boolean",
+								"description": "Should extended debugging details be logged",
+								"default": false
 							}
 						}
 					}
@@ -191,10 +196,10 @@
 		"vscode-debugprotocol": "^1.16.0"
 	},
 	"devDependencies": {
-		"typescript": "^2.0.3",
-		"vscode": "^1.0.0",
+		"@types/mocha": "^2.2.48",
+		"@types/node": "^6.0.101",
 		"mocha": "^2.3.3",
-		"@types/node": "^6.0.40",
-		"@types/mocha": "^2.2.32"
+		"typescript": "^2.7.2",
+		"vscode": "^1.1.10"
 	}
 }
