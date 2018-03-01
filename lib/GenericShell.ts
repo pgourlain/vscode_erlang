@@ -155,10 +155,4 @@ export class ErlGenericShell extends EventEmitter {
             this.erlangShell.kill();
         }
     }
-
-    public NormalQuit() {
-        if (this.erlangShell) {
-            this.Send("q().");
-        }
-    }
 }

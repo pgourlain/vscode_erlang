@@ -125,6 +125,8 @@ decode_request(Data) ->
         catch
             _:Exp -> #{value => iolist_to_binary(io_lib:format("~p", [Exp])), type => <<"error">>}    
         end;
+    {debugger_exit, _Body} ->
+        init:stop(0);
     _ ->
         unknown_command
     end.

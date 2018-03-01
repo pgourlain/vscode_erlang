@@ -30,7 +30,7 @@ export class ErlangShellForDebugging extends ErlGenericShell {
     public Start(erlPath:string, startDir: string, listen_port: number, bridgePath: string, args: string, noDebug: boolean): Promise<boolean> {
         var randomSuffix:string = Math.floor(Math.random() * 10000000).toString();
         this.argsFileName = path.join(os.tmpdir(), path.basename(startDir) + '_' + randomSuffix);
-        var debugStartArgs = ["-pa", `"${bridgePath}"`, "-s", "int",
+        var debugStartArgs = ["-noshell", "-pa", `"${bridgePath}"`, "-s", "int",
             "-vscode_port", listen_port.toString(),
             "-s", "vscode_connection", "start", listen_port.toString()];
         var breakPointsAndModulesArgs = this.breakpointsAndModules(startDir, noDebug);

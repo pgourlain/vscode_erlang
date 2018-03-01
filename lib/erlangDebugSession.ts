@@ -18,6 +18,7 @@ export interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArgum
 	cwd: string;
 	erlpath: string;
 	arguments: string;
+	verbose: boolean;
 }
 
 interface DebugVariable {
@@ -34,6 +35,7 @@ export class ErlangDebugSession extends DebugSession implements IErlangShellOutp
 	erlDebugger: ErlangShellForDebugging;
 	erlangConnection: ErlangConnection;
 	quit: boolean;
+	ignoreOutput: boolean;
 	//private _breakPoints = new Map<string, DebugProtocol.Breakpoint[]>();
 	private _rebarBuildPath = path.join("_build", "default", "lib");
 	private _breakPoints: DebugProtocol.Breakpoint[];
@@ -46,6 +48,7 @@ export class ErlangDebugSession extends DebugSession implements IErlangShellOutp
 		this._breakPoints = [];
 		this._variableHandles = new Handles<DebugVariable>();
 		this.threadIDs = {};
+		this.ignoreOutput = false;
 		this.setDebuggerLinesStartAt1(true);
 		this.setDebuggerColumnsStartAt1(false);
 		process.addListener('unhandledRejection', reason => {
@@ -82,6 +85,7 @@ export class ErlangDebugSession extends DebugSession implements IErlangShellOutp
 			this.quitEvent(exitCode);
 		})
 		this.erlangConnection = new ErlangConnection(this);
+		this.erlangConnection.on("listen", (msg) => this.onStartListening(msg));
 		this.erlangConnection.on("new_module", (arg) => this.onNewModule(arg));
 		this.erlangConnection.on("new_break", (arg) => this.onNewBreak(arg));
 		this.erlangConnection.on("new_process", (arg) => this.onNewProcess(arg));
@@ -115,7 +119,7 @@ export class ErlangDebugSession extends DebugSession implements IErlangShellOutp
 		}
 		this._LaunchArguments = args;
 		this.erlangConnection.Start().then(port => {
-			this.debug("Local webserver for erlang is started");
+			//this.debug("Local webserver for erlang is started");
 			this._port = port;
 			//Initialize the workflow only when webserver is started
 			this.sendEvent(new InitializedEvent());
@@ -127,10 +131,15 @@ export class ErlangDebugSession extends DebugSession implements IErlangShellOutp
 
 	protected configurationDoneRequest(response: DebugProtocol.ConfigurationDoneResponse, argsConf: DebugProtocol.ConfigurationDoneArguments): void {
 		var args = this._LaunchArguments;
-		this.debug("Starting erlang");
-		this.debug(`	path      : ${args.cwd}`);
-		this.debug(`	arguments : ${args.arguments}`);
-		this.erlDebugger.Start(args.erlpath, args.cwd, this._port, erlangBridgePath, args.arguments, this._LaunchArguments.noDebug).then(r => {
+		if (args.verbose) {
+			this.debug("Starting erlang");
+			this.debug(`	path      : ${args.cwd}`);
+			this.debug(`	arguments : ${args.arguments}`);
+		}
+		else {
+			this.ignoreOutput = true;
+		}
+		this.erlDebugger.Start(args.erlpath, args.cwd, this._port, erlangBridgePath, args.arguments, args.noDebug).then(r => {
 			this.sendResponse(response);
 		}).catch(reason =>{
 			this.sendErrorResponse(response, 3000, `Launching application throw an error : ${reason}`);
@@ -140,10 +149,6 @@ export class ErlangDebugSession extends DebugSession implements IErlangShellOutp
 
 	protected disconnectRequest(response: DebugProtocol.DisconnectResponse, args: DebugProtocol.DisconnectArguments): void {
 		//this.debug("disconnectRequest");
-		if (!this.quit) {
-			//send q() only if user clic on stop debugger button
-			this.erlDebugger.NormalQuit();
-		}
 		if (this.erlangConnection) {
 			this.erlangConnection.Quit();
 		}
@@ -175,13 +180,6 @@ export class ErlangDebugSession extends DebugSession implements IErlangShellOutp
 				};
 				this.sendResponse(response);
 			});
-		} else if (this.erlDebugger) {
-			this.erlDebugger.Send(args.expression);
-			response.body = {
-				result: 'sending to erlang...',
-				variablesReference: 0
-			};
-			this.sendResponse(response);
 		}
 	}
 
@@ -427,14 +425,22 @@ export class ErlangDebugSession extends DebugSession implements IErlangShellOutp
 	}
 
 	appendLine(value: string): void {
-		this.log(value);
+		if (!this.ignoreOutput)
+			this.log(value);
 	}
 
 	append(value: string): void {
-		this.outLine(`${value}`);
+		if (!this.ignoreOutput)
+			this.outLine(`${value}`);
 	}
 
 	//----------- events from erlangConnection
+	private onStartListening(message: string): void {
+		this.ignoreOutput = false;
+		if (this._LaunchArguments.verbose)
+			this.debug(message);
+	}
+	
 	private onNewModule(moduleName: string): void {
 		//this.debug("OnNewModule : " + moduleName);
 		this.sendEvent(new ModuleEvent("new", new Module(moduleName, moduleName)))
