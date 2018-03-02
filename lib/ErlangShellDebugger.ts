@@ -1,6 +1,6 @@
 import { ChildProcess, spawn } from 'child_process';
 import { EventEmitter } from 'events';
-import { ErlGenericShell } from './GenericShell';
+import { ErlGenericShell, IErlangShellOutput } from './GenericShell';
 import { DebugProtocol } from 'vscode-debugprotocol';
 import * as path from 'path';
 import * as os from 'os';
@@ -10,19 +10,19 @@ import * as fs from 'fs';
 const nonOutput = /^(?:\d*|undefined)[\*\+\=]|[\~\@\&\^]/;
 
 
-export interface IErlangShellOutputForDebugging {
-    show(): void;
-    appendLine(value: string): void;
-    append(value: string): void;
-    debug(value: string): void;
-    error(value: string): void;
-}
+// export interface IErlangShellOutputForDebugging {
+//     show(): void;
+//     appendLine(value: string): void;
+//     append(value: string): void;
+//     debug(value: string): void;
+//     error(value: string): void;
+// }
 
 export class ErlangShellForDebugging extends ErlGenericShell {
     breakPoints: DebugProtocol.Breakpoint[];
     started : boolean;
     argsFileName: string;
-    constructor(whichOutput: IErlangShellOutputForDebugging) {
+    constructor(whichOutput: IErlangShellOutput) {
         super(whichOutput);
         this.breakPoints = [];
     }
