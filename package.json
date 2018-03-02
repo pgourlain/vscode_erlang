@@ -1,7 +1,7 @@
 {
 	"name": "erlang",
 	"description": "Erlang language extension for Visual Studio Code",
-	"version": "0.1.7",
+	"version": "0.1.8",
 	"icon": "images/icon.png",
 	"publisher": "pgourlain",
 	"engines": {
@@ -178,11 +178,11 @@
 					"description": "Arguments to provide to rebar/rebar3 build command",
 					"title": "Arguments to provide to rebar/rebar3 build command"
 				},
-				"erlang.LanguageServerProtocol.verbose" : {
-					"type" : "boolean",
+				"erlang.LanguageServerProtocol.verbose": {
+					"type": "boolean",
 					"description": "Activate technical traces while parsing documents, completion (activate trace on LSP module)",
 					"title": "Activate technical traces while parsing documents",
-					"default"  :"false"
+					"default": "false"
 				}
 			}
 		}
@@ -210,7 +210,6 @@
 		"@types/mocha": "^2.2.48",
 		"@types/node": "^6.0.101",
 		"mocha": "^2.3.3",
-		"typescript": "^2.7.2",
-		"vscode": "^1.1.10"
+		"typescript": "^2.7.2"
 	}
 }

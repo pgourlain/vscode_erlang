@@ -19,11 +19,6 @@
 %state
 -record(state, {vscode_port, port, parent, lsock, socket}).
 
-
-get_port() ->
-    gen_server:call(?SERVER, {get_port}).
-    %{ok, [[P]]} = init:get_argument(vscode_port), P.
-
 start_link(VsCodePort) ->
     %io:format("gen_server start_link/1(~p)", [VsCodePort]),
     start_link(VsCodePort, undefined).
@@ -66,12 +61,12 @@ handle_info({tcp, Socket, RawData}, State) ->
     send(Socket, Result),
     {noreply, State};
 
-handle_info(timeout, #state{lsock = LSock, parent=Parent} = State) ->
+handle_info(timeout, #state{lsock = LSock} = State) ->
     {ok, ClientSocket} = gen_tcp:accept(LSock),	
     %gen_lsp_sup:start_socket(),
     {noreply, State#state{socket=ClientSocket}};
 
-handle_info({tcp_closed, Socket}, State) ->
+handle_info({tcp_closed, _Socket}, State) ->
     %io:format("handle_info tcp closed", []),
     {stop, normal, State};
 

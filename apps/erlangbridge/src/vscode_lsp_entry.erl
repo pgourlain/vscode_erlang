@@ -12,17 +12,17 @@ start(_Args) ->
     io:format("vscode_lsp_entry started/1(~p)", [_Args]),
     init_lsp().
 
-get_port() ->
-    case init:get_argument(vscode_port) of
-    {ok, [[P]]} -> P;
-    _ -> 0
-    end.
+%get_port() ->
+%    case init:get_argument(vscode_port) of
+%    {ok, [[P]]} -> P;
+%    _ -> 0
+%    end.
 
 init_lsp() ->
     case  compile_needed_modules() of
     ok ->
         case application:start(vscode_lsp, permanent) of
-        {ok, Started} -> ok;
+        {ok, _Started} -> ok;
         {error, Reason} -> io:format("application start error : ~p",[Reason]), {error, Reason};
         _ -> ok
         end;
@@ -53,5 +53,5 @@ do_compile([H|T], CompileOptions) ->
 
     end;
 
-do_compile([], CompileOptions) ->
+do_compile([], _CompileOptions) ->
     ok.
