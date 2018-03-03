@@ -1,0 +1,18 @@
+-module(gen_lsp_doc_sup).
+
+-behavior(gen_supervisor).
+
+-export([init/1, start_link/0]).
+
+start_link() ->
+    error_logger:info_msg("gen_lsp_doc_sup:start_link()"),
+    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+
+init(_Args) ->
+    UserSpec = #{id => gen_lsp_doc_server,
+        start => {gen_lsp_doc_server, start_link, []},
+        restart => permanent,
+        modules => [gen_lsp_doc_server],
+        type => worker},
+    StartSpecs = {{one_for_one, 60, 3600}, [UserSpec]},
+    {ok, StartSpecs}.

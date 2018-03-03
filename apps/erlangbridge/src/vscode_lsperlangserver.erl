@@ -16,15 +16,15 @@
 -define(COLUMN_START, 0).
 
 start() ->
-    io:format("vscode_lsperlangserver started/0"),
+    error_logger:info_msg("vscode_lsperlangserver started/0"),
     gen_connection:start(?MODULE).
 
 start(_Args) ->
-    io:format("vscode_lsperlangserver started/1"),
+    error_logger:info_msg("vscode_lsperlangserver started/1"),
     gen_connection:start(?MODULE).
 
 start(_Type, _Args) ->
-    io:format("vscode_lsperlangserver started/2 (~p, "
+    error_logger:info_msg("vscode_lsperlangserver started/2 (~p, "
 	      "~p)",
 	      [_Type, _Args]),
     gen_connection:start(?MODULE).
@@ -33,7 +33,6 @@ get_port() ->
     {ok, [[P]]} = init:get_argument(vscode_port), P.
 
 init(_Port) ->
-    %init_subscribe(Port).
     ok.
 
 decode_request(Data) ->

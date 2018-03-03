@@ -139,6 +139,7 @@ function getDocumentSettings(resource: string): Thenable<ErlangSettings> {
 // Only keep settings for open documents
 documents.onDidClose(e => {
 	documentSettings.delete(e.document.uri);
+	erlangLspConnection.onDocumentClosed(e.document.uri);
 });
 
 // The content of a text document has changed. This event is emitted

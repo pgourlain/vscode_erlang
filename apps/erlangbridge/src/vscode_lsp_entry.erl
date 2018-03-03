@@ -5,36 +5,37 @@
 
 
 start() ->
-    io:format("vscode_lsp_entry started/0"),
+    error_logger:info_msg("vscode_lsp_entry started/0"),
     init_lsp().
 
 start(_Args) ->
-    io:format("vscode_lsp_entry started/1(~p)", [_Args]),
+    %%TODO activate or not report depends on command line 
+    %%error_logger:tty(false),    
+    error_logger:info_msg("vscode_lsp_entry started/1(~p)", [_Args]),
     init_lsp().
 
-%get_port() ->
-%    case init:get_argument(vscode_port) of
-%    {ok, [[P]]} -> P;
-%    _ -> 0
-%    end.
 
 init_lsp() ->
     case  compile_needed_modules() of
     ok ->
         case application:start(vscode_lsp, permanent) of
         {ok, _Started} -> ok;
-        {error, Reason} -> io:format("application start error : ~p",[Reason]), {error, Reason};
+        {error, Reason} -> 
+            error_logger:error_msg("application start error : ~p",[Reason]), 
+            {error, Reason};
         _ -> ok
         end;
     {error, Reason} -> 
-        io:format("compile_needed_modules failed : ~p",[Reason]),
+        error_logger:error_msg("compile_needed_modules failed : ~p",[Reason]),
         {error, Reason}
     end.
 
 compile_needed_modules() ->
     CompileOptions = [verbose, binary, report],
     do_compile(["src/vscode_lsp_app", "src/gen_lsp_server", 
-        "src/gen_lsp_sup", "src/gen_connection", "src/vscode_jsone"], CompileOptions)
+        "src/gen_lsp_sup", "src/gen_lsp_doc_sup","src/gen_lsp_doc_server",
+        "src/vscode_lsp_app_sup",
+        "src/gen_connection", "src/vscode_jsone"], CompileOptions)
     .
 
 do_compile([H|T], CompileOptions) ->
@@ -48,7 +49,7 @@ do_compile([H|T], CompileOptions) ->
             {error, Reason}
         end;
     _Any -> 
-        io:format("compile result : ~p", [_Any]),
+        error_logger:error_msg("compile result of ~p: ~p",[H, _Any]),
         {error, _Any}
 
     end;
