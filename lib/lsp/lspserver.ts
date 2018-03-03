@@ -7,7 +7,7 @@
 import {
 	createConnection, TextDocuments, TextDocument, Diagnostic, DiagnosticSeverity,
 	ProposedFeatures, InitializeParams, Proposed, Range, DocumentFormattingParams, CompletionItem,
-	TextDocumentPositionParams
+	TextDocumentPositionParams, Definition, Location
 } from 'vscode-languageserver';
 
 import { ErlangLspConnection, ParsingResult } from './erlangLspConnection';
@@ -15,7 +15,6 @@ import { ErlangShellLSP } from './ErlangShellLSP';
 import { IErlangShellOutput } from '../GenericShell';
 import { erlangBridgePath } from '../erlangConnection';
 import { ErlangSettings } from '../erlangSettings';
-
 
 class ChannelWrapper implements IErlangShellOutput {
 	
@@ -68,10 +67,11 @@ connection.onInitialize(async (params: InitializeParams) => {
 		capabilities: {
 			textDocumentSync: documents.syncKind,
 			documentFormattingProvider : true,
-			completionProvider : {
-				resolveProvider: true,
-				triggerCharacters: [ ':' ]
-			}
+			definitionProvider : true,
+			// completionProvider : {
+			// 	resolveProvider: true,
+			// 	triggerCharacters: [ ':' ]
+			// }
 		}
 	}
 });
@@ -162,6 +162,15 @@ connection.onDocumentFormatting(async (params : DocumentFormattingParams) => {
 	return [];
 });
 
+connection.onDefinition(async (textDocumentPosition: TextDocumentPositionParams):Promise<Definition> => {
+	let fileName = textDocumentPosition.textDocument.uri;
+	let res = await erlangLspConnection.getDefinitionLocation(fileName, textDocumentPosition.position.line, 
+		textDocumentPosition.position.character);
+	if (res) {
+		return Location.create("file://"+res.uri, Range.create(res.line, res.character, res.line, res.character));
+	}
+	return null;
+});
 
 //https://stackoverflow.com/questions/38378410/can-i-add-a-completions-intellisense-file-to-a-language-support-extension
 connection.onCompletion(async (textDocumentPosition: TextDocumentPositionParams):Promise<CompletionItem[]> => {

@@ -50,7 +50,9 @@ handle_info({tcp, Socket, RawData}, State) ->
       {format_document, FileName} ->
 	  format_file_uri(FileName);   
       {document_closed, FileName} ->
-      gen_lsp_doc_server:remove_document(file_uri_to_file(FileName)), #{result => true};   
+      gen_lsp_doc_server:remove_document(file_uri_to_file(FileName)), #{result => true};
+      {goto_definition, FileName, Line, Column} -> 
+      lsp_navigation:goto_definition(file_uri_to_file(FileName), to_int(Line), to_int(Column));
       _ ->
 	  #{parse_result => false,
 	    error_message => <<"unknown command">>}
@@ -115,71 +117,20 @@ file_uri_to_file(FileName) ->
 parse_file_uri(FileName) ->
     F = file_uri_to_file(FileName),
     case is_src_file(F) of
-    true -> parse_src_file(F);
+    true -> lsp_syntax:parse_src_file(F);
     _ -> parse_file(F)
     end.
 
 parse_file(File) ->
-    error_logger:info_report([{parse_file, File}]),
-    case epp:parse_file(File, []) of
-      {ok, Forms} ->
-      gen_lsp_doc_server:add_or_update_document(File, Forms), 
-	  case erl_lint:module(Forms, File) of
-	    % nothing wrong
-	    {ok, []} -> #{parse_result => true};
-	    % just warnings
-	    {ok, [Warnings]} ->
-		#{parse_result => true,
-		  errors_warnings =>
-		      extract_error_or_warning(<<"warning">>, Warnings)};
-	    % errors, no warnings
-	    {error, [Errors], []} ->
-		#{parse_result => true,
-		  errors_warnings =>
-		      extract_error_or_warning(<<"error">>, Errors)};
-	    % errors and warnings
-	    {error, [Errors], [Warnings]} ->
-		#{parse_result => true,
-		  errors_warnings =>
-		      extract_error_or_warning(<<"error">>, Errors) ++
-			extract_error_or_warning(<<"warning">>, Warnings)}
-	  end;
-      {error, _} ->
-	  #{parse_result => false,
-	    error_message => <<"Cannot open file">>}
-    end.
+    %error_logger:info_report([{parse_file, File}]),
+    lsp_syntax:parse_and_lint(File).
 
 is_src_file(File) ->
     case filename:extension(File) of
     ".src" -> true;
+    ".config" -> true;
     _ -> false
     end.
-
-parse_src_file(File) ->
-    case file:path_consult(filename:dirname(File), File) of
-    {ok,_, _} -> #{parse_result => true};
-    {error, Reason} -> #{
-        parse_result => true,
-		errors_warnings => [#{type => <<"error">>, 
-        file => list_to_binary(File),
-        info => extract_info(Reason)}] }
-    end.
-
-extract_error_or_warning(Type, ErrorsOrWarnings) ->
-    [#{type => Type,
-       file =>
-	   erlang:list_to_binary(element(1, ErrorsOrWarnings)),
-       info => extract_info(X)}
-     || X <- element(2, ErrorsOrWarnings)].
-
-extract_info(X) ->
-    % samples of X
-    %{20,erl_parse,["syntax error before: ","load_xy"]}
-    %{11,erl_lint,{undefined_function,{load_xy,1}}}]}
-    #{line => element(1, X),
-      message =>
-	  erlang:list_to_binary(io_lib:fwrite("~p",
-					      [element(3, X)]))}.
 
 format_file_uri(FileName) ->
     format_file(file_uri_to_file(FileName)).

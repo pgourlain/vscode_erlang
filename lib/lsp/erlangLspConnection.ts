@@ -16,6 +16,12 @@ export interface ErrorInfo {
     message : string;
 }
 
+export interface ReferenceLocation {
+    uri : string;
+    line : number;
+    character : number;
+}
+
 export class ErlangLspConnection extends ErlangConnection {
     
     protected get_ErlangFiles() : string[] {
@@ -89,6 +95,23 @@ export class ErlangLspConnection extends ErlangConnection {
         this.post("document_closed", uri).then( 
             res => { return true;}, 
             err => {return false;} 
+        );
+    }
+
+    public async getDefinitionLocation(uri : string, line : number, character : number ) : Promise<ReferenceLocation> {
+        return await this.post("goto_definition", uri + "\r\n" + line.toString() +  "\r\n" + (character-1).toString()).then(
+            res => {
+                //this.debug(`goto_definition result : ${JSON.stringify(res)}`);
+                if (res.result == "ok") {
+                    return {
+                        uri : res.uri,
+                        line : res.line,
+                        character : res.character
+                    };
+                }
+                return null;
+            },
+            err =>  {return null;}
         );
     }
 

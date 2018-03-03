@@ -1,7 +1,5 @@
 -module(gen_lsp_sup).
 
--behavior(gen_supervisor).
-
 -export([start_link/1]).
 -export([init/1]).
 

@@ -1,5 +1,6 @@
 
 ## Versions
+* 0.1.9 Linter fix : (disable epp warnings)
 * 0.1.8 First preview of Validation/Format document
 	- ![lsp](images/lsp_validate_document.png)
 		- Today, you should activate 'Auto save' in the 'File' menu of VSCode. Due that only the filename of document is send to the Erlang LSP server (LSP: Language Server Protocol)
