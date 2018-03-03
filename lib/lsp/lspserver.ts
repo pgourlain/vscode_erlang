@@ -47,7 +47,7 @@ connection.onInitialize(async (params: InitializeParams) => {
 
 	//connection.console.log("onInitialize.");
 	
-	await erlangLspConnection.Start().then(port => {
+	await erlangLspConnection.Start(traceEnabled).then(port => {
 		return erlangLsp.Start("", erlangBridgePath+"/..", port, "src", "");
 	}, (reason) => {
 		connection.console.log(`LspConnection Start failed : ${reason}`);		

@@ -22,6 +22,7 @@ export abstract class ErlangConnection extends EventEmitter {
     erlangbridgePort: number;
     protected events_receiver: http.Server;
     _output: IErlangShellOutput;
+    verbose: boolean;
 
 
     public get isConnected(): boolean {
@@ -32,6 +33,7 @@ export abstract class ErlangConnection extends EventEmitter {
         super();
         this._output = output;
         this.erlangbridgePort = -1;
+        this.verbose = true;
     }
 
     protected log(msg: string): void {
@@ -58,7 +60,8 @@ export abstract class ErlangConnection extends EventEmitter {
         }
     }
 
-    public async Start(): Promise<number> {
+    public async Start(verbose: boolean): Promise<number> {
+        this.verbose = verbose;
         return new Promise<number>((a, r) => {
             //this.debug("erlangConnection.Start");
             this.compile_erlang_connection().then(() => {
@@ -79,7 +82,7 @@ export abstract class ErlangConnection extends EventEmitter {
     private compile_erlang_connection(): Promise<number> {
         return new Promise<number>((a, r) => {
             //TODO: #if DEBUG
-            var compiler = new ErlangShellForDebugging(this._output);
+            var compiler = new ErlangShellForDebugging(this.verbose ? this._output : null);
             var erlFiles = this.get_ErlangFiles();
             //create dir if not exists
             let ebinDir = path.normalize(path.join(erlangBridgePath, "..", "ebin"));
@@ -99,7 +102,8 @@ export abstract class ErlangConnection extends EventEmitter {
     }
 
     private start_events_receiver(): Promise<number> {
-        this.debug("Starting http listener...");
+        if (this.verbose)
+            this.debug("Starting http listener...");
         return new Promise<number>((accept, reject) => {
             this.events_receiver = http.createServer((req, res) => {
                 var url = req.url;
@@ -127,7 +131,8 @@ export abstract class ErlangConnection extends EventEmitter {
             });
             this.events_receiver.listen(0, '127.0.0.1', () => {
                 var p = this.events_receiver.address().port;
-                this.debug(` on http://127.0.0.1:${p}\n`);
+                if (this.verbose)
+                    this.debug(` on http://127.0.0.1:${p}\n`);
                 accept(p);
             });
 

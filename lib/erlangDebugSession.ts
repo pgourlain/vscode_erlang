@@ -119,7 +119,7 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 				return;
 		}
 		this._LaunchArguments = args;
-		this.erlangConnection.Start().then(port => {
+		this.erlangConnection.Start(this._LaunchArguments.verbose).then(port => {
 			//this.debug("Local webserver for erlang is started");
 			this._port = port;
 			//Initialize the workflow only when webserver is started
