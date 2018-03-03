@@ -14,7 +14,15 @@ get_port() ->
 
 start(_Type, _Args) ->
     application:start(inets),
-    gen_lsp_sup:start_link(get_port()).
+    %uncomment to monitor erlang processes
+    %spawn(fun() -> observer:start() end),
+    Port = get_port(),
+    case vscode_lsp_app_sup:start_link(Port) of
+    {ok, Pid} ->
+        error_logger:info_msg("vscode_lsp_app_sup:started"),
+        {ok, Pid};
+    _Any -> _Any        
+    end.
 
 stop(_State) ->
     ok.

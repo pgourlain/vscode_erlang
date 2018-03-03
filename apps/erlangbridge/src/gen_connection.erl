@@ -65,16 +65,14 @@ loop_handle_command(Socket, Module) ->
     inet:setopts(Socket, [{active, once}]),
     receive
       {tcp, Socket, Data} ->
-	  %io:format("Got packet: ~p~n", [Data]),
 	  Answer = response_json(Module:decode_request(Data)),
-	  %io:format("Result request: ~p~n", [Answer]),
 	  gen_tcp:send(Socket, list_to_binary(Answer)),
 	  gen_tcp:close(Socket),
 	  loop_handle_command(Socket, Module);
       {tcp_closed, Socket} ->
-	  io:format("Socket ~p closed~n", [Socket]);
+      error_logger:info_msg("Socket ~p closed~n", [Socket]);
       {tcp_error, Socket, Reason} ->
-	  io:format("Error on socket ~p reason: ~p~n",
+      error_logger:error_msg("Error on socket ~p reason: ~p~n",
 		    [Socket, Reason])
     end.
 

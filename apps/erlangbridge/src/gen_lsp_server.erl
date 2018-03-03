@@ -20,11 +20,9 @@
 -record(state, {vscode_port, port, parent, lsock, socket}).
 
 start_link(VsCodePort) ->
-    %io:format("gen_server start_link/1(~p)", [VsCodePort]),
     start_link(VsCodePort, undefined).
 
 start_link(VsCodePort, LSock) ->
-    %io:format("gen_server start_link/2(~p)", [VsCodePort]),
     gen_server:start_link({local, ?SERVER}, ?MODULE, [VsCodePort, LSock, self()],[]).
 
 
@@ -34,7 +32,6 @@ to_int(V) when is_list(V) ->
     erlang:list_to_integer(V).
 
 init([VsCodePort, LSock, Parent]) ->
-    %io:format("gen_server init/1 (~p)", [self()]),
     {ok, #state{vscode_port = to_int(VsCodePort), lsock=LSock, parent=Parent}, 
         0}.
 
@@ -46,37 +43,37 @@ handle_cast(stop, State) ->
 
 handle_info({tcp, Socket, RawData}, State) ->
     %entry point for each feature
-    %io:format("handle_info tcp data", []),
     inet:setopts(Socket, [{active, once}]),
     Result = case parse_request(RawData) of
       {validate_text_document, FileName} ->
 	  parse_file_uri(FileName);
       {format_document, FileName} ->
-	  format_file_uri(FileName);      
+	  format_file_uri(FileName);   
+      {document_closed, FileName} ->
+      gen_lsp_doc_server:remove_document(file_uri_to_file(FileName)), #{result => true};   
       _ ->
 	  #{parse_result => false,
 	    error_message => <<"unknown command">>}
     end,
-    %io:format("handle_info tcp result : ~p", [Result]),
     send(Socket, Result),
     {noreply, State};
 
 handle_info(timeout, #state{lsock = LSock} = State) ->
     {ok, ClientSocket} = gen_tcp:accept(LSock),	
-    %gen_lsp_sup:start_socket(),
     {noreply, State#state{socket=ClientSocket}};
 
 handle_info({tcp_closed, _Socket}, State) ->
-    %io:format("handle_info tcp closed", []),
     {stop, normal, State};
 
 handle_info(_Info, StateData) ->
     {noreply, StateData}.
 
 terminate(_Reason, #state{socket = Socket, parent=Parent}) ->
-    %io:format("terminate (~p)", [_Reason]),
     (catch gen_tcp:close(Socket)),
-    spawn_link(fun () -> Ret=supervisor:start_child(Parent, []), io:format("terminate start_child(~p)", [Ret]) end),    
+    spawn_link(
+        fun () -> Ret=supervisor:start_child(Parent, []),
+                error_logger:info_msg("terminate start_child(~p)", [Ret]) 
+        end),    
     ok.
 
 code_change(_OldVersion, State, _Extra) ->
@@ -116,11 +113,17 @@ file_uri_to_file(FileName) ->
     end.
 
 parse_file_uri(FileName) ->
-    parse_file(file_uri_to_file(FileName)).
+    F = file_uri_to_file(FileName),
+    case is_src_file(F) of
+    true -> parse_src_file(F);
+    _ -> parse_file(F)
+    end.
 
 parse_file(File) ->
+    error_logger:info_report([{parse_file, File}]),
     case epp:parse_file(File, []) of
       {ok, Forms} ->
+      gen_lsp_doc_server:add_or_update_document(File, Forms), 
 	  case erl_lint:module(Forms, File) of
 	    % nothing wrong
 	    {ok, []} -> #{parse_result => true};
@@ -136,7 +139,6 @@ parse_file(File) ->
 		      extract_error_or_warning(<<"error">>, Errors)};
 	    % errors and warnings
 	    {error, [Errors], [Warnings]} ->
-		%io:format("~p --- ~p", [Errors, Warnings]),
 		#{parse_result => true,
 		  errors_warnings =>
 		      extract_error_or_warning(<<"error">>, Errors) ++
@@ -145,6 +147,22 @@ parse_file(File) ->
       {error, _} ->
 	  #{parse_result => false,
 	    error_message => <<"Cannot open file">>}
+    end.
+
+is_src_file(File) ->
+    case filename:extension(File) of
+    ".src" -> true;
+    _ -> false
+    end.
+
+parse_src_file(File) ->
+    case file:path_consult(filename:dirname(File), File) of
+    {ok,_, _} -> #{parse_result => true};
+    {error, Reason} -> #{
+        parse_result => true,
+		errors_warnings => [#{type => <<"error">>, 
+        file => list_to_binary(File),
+        info => extract_info(Reason)}] }
     end.
 
 extract_error_or_warning(Type, ErrorsOrWarnings) ->

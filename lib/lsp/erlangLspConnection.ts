@@ -85,6 +85,13 @@ export class ErlangLspConnection extends ErlangConnection {
 
     }
 
+    public onDocumentClosed(uri : string) : void {
+        this.post("document_closed", uri).then( 
+            res => { return true;}, 
+            err => {return false;} 
+        );
+    }
+
     public Quit() : void {
         this.events_receiver.close();
     }
