@@ -1,7 +1,5 @@
 -module(vscode_lsp_app_sup).
 
--behavior(gen_supervisor).
-
 -export([init/1, start_link/1, start_sup_socket/1, start_sup_doc/0, start_child/1]).
 
 start_link(VsCodePort) ->
