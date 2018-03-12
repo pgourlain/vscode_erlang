@@ -18,8 +18,8 @@ export interface IErlangShellOutput {
 export class ErlGenericShell extends EventEmitter {
     protected erlangShell: ChildProcess;
     protected channelOutput: IErlangShellOutput;
-    protected buffer: string;
-    protected errbuf: string;
+    protected buffer: string = "";
+    protected errbuf: string = "";
 
     constructor(whichOutput: IErlangShellOutput) {
         super();
