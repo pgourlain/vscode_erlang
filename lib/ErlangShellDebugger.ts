@@ -27,7 +27,7 @@ export class ErlangShellForDebugging extends ErlGenericShell {
         this.breakPoints = [];
     }
 
-    public Start(erlPath:string, startDir: string, listen_port: number, bridgePath: string, args: string, noDebug: boolean): Promise<boolean> {
+    public Start(erlPath:string, startDir: string, listen_port: number, bridgePath: string, args: string, noDebug: boolean, verbose: boolean): Promise<boolean> {
         var randomSuffix:string = Math.floor(Math.random() * 10000000).toString();
         this.argsFileName = path.join(os.tmpdir(), path.basename(startDir) + '_' + randomSuffix);
         var debugStartArgs = ["-noshell", "-pa", `"${bridgePath}"`, "-s", "int",
@@ -36,7 +36,7 @@ export class ErlangShellForDebugging extends ErlGenericShell {
         var breakPointsAndModulesArgs = this.breakpointsAndModules(startDir, noDebug);
         var processArgs = debugStartArgs.concat(breakPointsAndModulesArgs).concat([args]);
         this.started = true;
-        var result = this.LaunchProcess(erlPath, startDir, processArgs);
+        var result = this.LaunchProcess(erlPath, startDir, processArgs, !verbose);
         return result;
     }
 
