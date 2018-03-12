@@ -36,7 +36,6 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 	erlDebugger: ErlangShellForDebugging;
 	erlangConnection: ErlangDebugConnection;
 	quit: boolean;
-	ignoreOutput: boolean;
 	//private _breakPoints = new Map<string, DebugProtocol.Breakpoint[]>();
 	private _rebarBuildPath = path.join("_build", "default", "lib");
 	private _breakPoints: DebugProtocol.Breakpoint[];
@@ -49,7 +48,6 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 		this._breakPoints = [];
 		this._variableHandles = new Handles<DebugVariable>();
 		this.threadIDs = {};
-		this.ignoreOutput = false;
 		this.setDebuggerLinesStartAt1(true);
 		this.setDebuggerColumnsStartAt1(false);
 		process.addListener('unhandledRejection', reason => {
@@ -137,11 +135,8 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 			this.debug(`	path      : ${args.cwd}`);
 			this.debug(`	arguments : ${args.arguments}`);
 		}
-		else {
-			this.ignoreOutput = true;
-		}
 		var bridgeBinPath = path.normalize(path.join(erlangBridgePath, "..", "ebin"))
-		this.erlDebugger.Start(args.erlpath, args.cwd, this._port, bridgeBinPath, args.arguments, args.noDebug).then(r => {
+		this.erlDebugger.Start(args.erlpath, args.cwd, this._port, bridgeBinPath, args.arguments, args.noDebug, args.verbose).then(r => {
 			this.sendResponse(response);
 		}).catch(reason =>{
 			this.sendErrorResponse(response, 3000, `Launching application throw an error : ${reason}`);
@@ -427,18 +422,15 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 	}
 
 	appendLine(value: string): void {
-		if (!this.ignoreOutput)
-			this.log(value);
+		this.log(value);
 	}
 
 	append(value: string): void {
-		if (!this.ignoreOutput)
-			this.outLine(`${value}`);
+		this.outLine(`${value}`);
 	}
 
 	//----------- events from erlangConnection
 	private onStartListening(message: string): void {
-		this.ignoreOutput = false;
 		if (this._LaunchArguments.verbose)
 			this.debug(message);
 	}

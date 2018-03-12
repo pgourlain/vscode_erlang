@@ -223,8 +223,8 @@ decode_debugger_message(VsCodePort, M) ->
         gen_connection:send_message_to_vscode(VsCodePort,to_string(Verb), to_json(Verb, Data));
     {new_status,Pid,idle,_} ->
         gen_connection:send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, idle}));        
-    {new_status,Pid,exit,normal} ->
-        gen_connection:send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, exit, normal})); 
+    {new_status,Pid,exit,_} ->
+        gen_connection:send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, exit})); 
     {new_status,Pid,break,ModuleAndLine} ->
         %{new_status,<0.3.0>,break,{myapp,11}}   
         gen_connection:send_message_to_vscode(VsCodePort,to_string(on_break), to_json(on_break, {Pid, break, ModuleAndLine}));

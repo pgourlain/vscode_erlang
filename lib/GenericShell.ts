@@ -18,8 +18,8 @@ export interface IErlangShellOutput {
 export class ErlGenericShell extends EventEmitter {
     protected erlangShell: ChildProcess;
     protected channelOutput: IErlangShellOutput;
-    protected buffer: string;
-    protected errbuf: string;
+    protected buffer: string = "";
+    protected errbuf: string = "";
 
     constructor(whichOutput: IErlangShellOutput) {
         super();
@@ -41,14 +41,15 @@ export class ErlGenericShell extends EventEmitter {
         });
     }
 
-    protected LaunchProcess(processName, startDir: string, args: string[]): Promise<boolean> {
+    protected LaunchProcess(processName, startDir: string, args: string[], quiet: boolean = false): Promise<boolean> {
         return new Promise<boolean>((resolve, reject) => {
             try {
                 var channel = this.channelOutput;
                 if (this.channelOutput) {
                     channel.show();
                 }
-                this.log("log", `starting : ${processName} \r\n` + args.join(" "));
+                if (!quiet)
+                    this.log("log", `starting : ${processName} \r\n` + args.join(" "));
                 this.erlangShell = spawn(processName, args, { cwd: startDir, shell: true, stdio: 'pipe' });
                 this.erlangShell.on('error', error => {
                     this.log("stderr", error.message);
