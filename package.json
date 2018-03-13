@@ -68,7 +68,7 @@
 								"description": "Should extended debugging details be logged",
 								"default": false
 							},
-							"addebinstocodepath": {
+							"addEbinsToCodepath": {
 								"type": "boolean",
 								"description": "Add ebin directories in _build to code path",
 								"default": true

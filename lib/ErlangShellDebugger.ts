@@ -14,7 +14,7 @@ export interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArgum
     erlpath: string;
     arguments: string;
     verbose: boolean;
-    addebinstocodepath: boolean;
+    addEbinsToCodepath: boolean;
 }
 
 // export interface IErlangShellOutputForDebugging {
@@ -40,7 +40,7 @@ export class ErlangShellForDebugging extends ErlGenericShell {
         var debugStartArgs = ["-noshell", "-pa", `"${bridgePath}"`, "-s", "int",
             "-vscode_port", listen_port.toString(),
             "-s", "vscode_connection", "start", listen_port.toString()];
-        var argsFile = this.createArgsFile(startDir, launchArguments.noDebug, launchArguments.addebinstocodepath);
+        var argsFile = this.createArgsFile(startDir, launchArguments.noDebug, launchArguments.addEbinsToCodepath);
         var processArgs = debugStartArgs.concat(argsFile).concat([launchArguments.arguments]);
         this.started = true;
         var result = this.LaunchProcess(erlPath, startDir, processArgs, !launchArguments.verbose);
@@ -103,7 +103,7 @@ export class ErlangShellForDebugging extends ErlGenericShell {
         return fileList;
     }
 
-    private createArgsFile(startDir: string, noDebug: boolean, addebinstocodepath: boolean): string[] {
+    private createArgsFile(startDir: string, noDebug: boolean, addEbinsToCodepath: boolean): string[] {
         var result: string[] = [];
         if (this.breakPoints) {
             var argsFileContents = "-eval 'int:start()";
@@ -130,7 +130,7 @@ export class ErlangShellForDebugging extends ErlGenericShell {
                 });
             }
             argsFileContents += "'";
-            if (addebinstocodepath) {
+            if (addEbinsToCodepath) {
                 this.findEbinDirs(path.join(startDir, "_build")).forEach(ebin => {
                     argsFileContents += " -pz \"" + this.formatPath(ebin) + "\"";
                 });

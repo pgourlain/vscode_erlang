@@ -109,8 +109,8 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 				this.sendErrorResponse(response, 3000, `The specified erlPath is invalid : check your launch configuration.`);
 				return;
 		}
-		if (typeof args.addebinstocodepath === "undefined") {
-			args.addebinstocodepath = true;
+		if (typeof args.addEbinsToCodepath === "undefined") {
+			args.addEbinsToCodepath = true;
 		}
 		this._LaunchArguments = args;
 		this.erlangConnection.Start(this._LaunchArguments.verbose).then(port => {
