@@ -64,7 +64,7 @@ export class ErlangShellForDebugging extends ErlGenericShell {
             if (filePath == undefined) {
                 return filePath;
             }
-            filePath = filePath.split("\\").join("\\\\");
+            filePath = filePath.split("\\").join("/");
             return filePath;
         }
         return filePath;
