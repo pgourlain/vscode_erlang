@@ -111,7 +111,14 @@ export class RebarRunner implements vscode.Disposable {
 		if (cfgRebarPath == "") {
 			cfgRebarPath = workspaceRootPath;
 		}
-		return this.findBestFile([cfgRebarPath, workspaceRootPath],['rebar3', 'rebar'], 'rebar3');
+		var rebarSearchPaths = [cfgRebarPath];
+		if (cfgRebarPath !== workspaceRootPath) {
+			rebarSearchPaths.push(workspaceRootPath);
+		}
+		if (process.platform == 'win32') { // on Windows the extension root directory is searched too
+			rebarSearchPaths.push(path.join(__dirname, '..', '..'));
+		}
+		return this.findBestFile(rebarSearchPaths, ['rebar3', 'rebar'], 'rebar3');
 	}
 
 	private findBestFile(dirs : string[], fileNames : string[], defaultResult : string) : string
