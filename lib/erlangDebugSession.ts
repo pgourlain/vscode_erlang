@@ -4,7 +4,7 @@ import {
 	, Breakpoint, ModuleEvent, Module, ContinuedEvent, Variable
 } from 'vscode-debugadapter';
 import { DebugProtocol } from 'vscode-debugprotocol';
-import { ErlangShellForDebugging } from './ErlangShellDebugger';
+import { ErlangShellForDebugging, LaunchRequestArguments } from './ErlangShellDebugger';
 import * as genericShell from './GenericShell';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -14,13 +14,6 @@ import * as vscode from 'vscode';
 import * as erlang from './ErlangShell';
 import { erlangBridgePath } from './erlangConnection';
 import { ErlangDebugConnection } from './erlangDebugConnection';
-
-export interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
-	cwd: string;
-	erlpath: string;
-	arguments: string;
-	verbose: boolean;
-}
 
 interface DebugVariable {
 	name: string;
@@ -116,6 +109,9 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 				this.sendErrorResponse(response, 3000, `The specified erlPath is invalid : check your launch configuration.`);
 				return;
 		}
+		if (typeof args.addEbinsToCodepath === "undefined") {
+			args.addEbinsToCodepath = true;
+		}
 		this._LaunchArguments = args;
 		this.erlangConnection.Start(this._LaunchArguments.verbose).then(port => {
 			//this.debug("Local webserver for erlang is started");
@@ -136,7 +132,7 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 			this.debug(`	arguments : ${args.arguments}`);
 		}
 		var bridgeBinPath = path.normalize(path.join(erlangBridgePath, "..", "ebin"))
-		this.erlDebugger.Start(args.erlpath, args.cwd, this._port, bridgeBinPath, args.arguments, args.noDebug, args.verbose).then(r => {
+		this.erlDebugger.Start(args.erlpath, args.cwd, this._port, bridgeBinPath, args).then(r => {
 			this.sendResponse(response);
 		}).catch(reason =>{
 			this.sendErrorResponse(response, 3000, `Launching application throw an error : ${reason}`);
