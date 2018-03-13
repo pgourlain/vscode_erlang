@@ -9,6 +9,13 @@ import * as fs from 'fs';
 //inspired from https://github.com/WebFreak001/code-debug/blob/master/src/backend/mi2/mi2.ts for inspiration of an EventEmitter 
 const nonOutput = /^(?:\d*|undefined)[\*\+\=]|[\~\@\&\^]/;
 
+export interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
+    cwd: string;
+    erlpath: string;
+    arguments: string;
+    verbose: boolean;
+    addebinstocodepath: boolean;
+}
 
 // export interface IErlangShellOutputForDebugging {
 //     show(): void;
@@ -27,16 +34,16 @@ export class ErlangShellForDebugging extends ErlGenericShell {
         this.breakPoints = [];
     }
 
-    public Start(erlPath:string, startDir: string, listen_port: number, bridgePath: string, args: string, noDebug: boolean, verbose: boolean): Promise<boolean> {
+    public Start(erlPath: string, startDir: string, listen_port: number, bridgePath: string, launchArguments: LaunchRequestArguments): Promise<boolean> {
         var randomSuffix:string = Math.floor(Math.random() * 10000000).toString();
         this.argsFileName = path.join(os.tmpdir(), path.basename(startDir) + '_' + randomSuffix);
         var debugStartArgs = ["-noshell", "-pa", `"${bridgePath}"`, "-s", "int",
             "-vscode_port", listen_port.toString(),
             "-s", "vscode_connection", "start", listen_port.toString()];
-        var breakPointsAndModulesArgs = this.breakpointsAndModules(startDir, noDebug);
-        var processArgs = debugStartArgs.concat(breakPointsAndModulesArgs).concat([args]);
+        var argsFile = this.createArgsFile(startDir, launchArguments.noDebug, launchArguments.addebinstocodepath);
+        var processArgs = debugStartArgs.concat(argsFile).concat([launchArguments.arguments]);
         this.started = true;
-        var result = this.LaunchProcess(erlPath, startDir, processArgs, !verbose);
+        var result = this.LaunchProcess(erlPath, startDir, processArgs, !launchArguments.verbose);
         return result;
     }
 
@@ -70,6 +77,19 @@ export class ErlangShellForDebugging extends ErlGenericShell {
         return filePath;
     }
 
+    private findEbinDirs(dir: string, dirList: string[] = []) {
+        fs.readdirSync(dir).forEach(name => {
+            const fullpath = path.join(dir, name)
+            if (fs.existsSync(fullpath) && fs.statSync(fullpath).isDirectory()) {
+                if (name === 'ebin')
+                    dirList.push(fullpath);
+                else
+                    this.findEbinDirs(fullpath, dirList);
+            }
+        });
+        return dirList;
+    }
+
     private findErlFiles(dir: string, fileList: string[] = []) {
         fs.readdirSync(dir).forEach(file => {
             if (file == '_build')
@@ -83,10 +103,10 @@ export class ErlangShellForDebugging extends ErlGenericShell {
         return fileList;
     }
 
-    private breakpointsAndModules(startDir: string, noDebug: boolean): string[] {
+    private createArgsFile(startDir: string, noDebug: boolean, addebinstocodepath: boolean): string[] {
         var result: string[] = [];
         if (this.breakPoints) {
-            var evalString = "-eval 'int:start()";
+            var argsFileContents = "-eval 'int:start()";
             var modulesWithoutBp: { [sourcePath: string]: boolean} = {};
             this.findErlFiles(startDir).forEach(fileName => {
                 modulesWithoutBp[fileName] = true;
@@ -95,22 +115,27 @@ export class ErlangShellForDebugging extends ErlGenericShell {
             if (!noDebug) {
                 var bps = this.uniqueBy(this.breakPoints, bp => bp.source.path);
                 bps.forEach(bp => {
-                    evalString += ",int:ni(\\\"" + this.formatPath(bp.source.path) + "\\\")";
+                    argsFileContents += ",int:ni(\\\"" + this.formatPath(bp.source.path) + "\\\")";
                     delete modulesWithoutBp[bp.source.path];
                 });
             }
             for (var fileName in modulesWithoutBp) {
-                evalString += ",int:ni(\\\"" + this.formatPath(fileName) + "\\\")";
+                argsFileContents += ",int:ni(\\\"" + this.formatPath(fileName) + "\\\")";
             }
             //then set break
             if (!noDebug) {
                 this.breakPoints.forEach(bp => {
                     var moduleName = path.basename(bp.source.name, ".erl");
-                    evalString += `, int:break(${moduleName}, ${bp.line})`;
+                    argsFileContents += `,int:break(${moduleName}, ${bp.line})`;
                 });
             }
-            evalString += "'";
-            fs.writeFileSync(this.argsFileName, evalString);
+            argsFileContents += "'";
+            if (addebinstocodepath) {
+                this.findEbinDirs(path.join(startDir, "_build")).forEach(ebin => {
+                    argsFileContents += " -pz \"" + this.formatPath(ebin) + "\"";
+                });
+            }
+            fs.writeFileSync(this.argsFileName, argsFileContents);
             result.push("-args_file");
             result.push("\"" + this.argsFileName + "\"");
         }
