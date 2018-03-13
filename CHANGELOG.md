@@ -1,6 +1,18 @@
 
 ## Versions
-* 0.1.5 (PR #23)
+* 0.1.9 Linter fix : (disable epp warnings)
+* 0.1.8 First preview of Validation/Format document
+	- ![lsp](images/lsp_validate_document.png)
+		- Today, you should activate 'Auto save' in the 'File' menu of VSCode. Due that only the filename of document is send to the Erlang LSP server (LSP: Language Server Protocol)
+		- technical traces can be activated by configuration (set  "erlang.LanguageServerProtocol.verbose" : "true" in your settings file) 
+	- Console quiet by default (https://github.com/wojteksurowka) -> [PR #29](https://github.com/pgourlain/vscode_erlang/pull/29)
+	- Start Without Debugging support (https://github.com/wojteksurowka) -> [PR #28](https://github.com/pgourlain/vscode_erlang/pull/28) 
+* 0.1.7 Fix missing file
+* 0.1.6 Fixes for process management during debugging ([wojteksurowka](https://github.com/wojteksurowka) -> [PR #25,#26,#27](https://github.com/pgourlain/vscode_erlang/pull/27))
+	- correct file opened from stack without release) structure
+	- Fix for processes monitoring
+	- do not output waiting status to console
+* 0.1.5 debug experience improvements, bug fixes, clear code ([Andrew Sumskoy](https://github.com/andrewsumskoy) -> [PR #23](https://github.com/pgourlain/vscode_erlang/pull/23))
 	- variable view tree support for list, map, tuple
 	- watch expression support
 	- erlang rewrite json serialization and cleanup

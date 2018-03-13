@@ -4,7 +4,7 @@ import {
 	, Breakpoint, ModuleEvent, Module, ContinuedEvent, Variable
 } from 'vscode-debugadapter';
 import { DebugProtocol } from 'vscode-debugprotocol';
-import { ErlangShellForDebugging, IErlangShellOutputForDebugging } from './ErlangShellDebugger';
+import { ErlangShellForDebugging } from './ErlangShellDebugger';
 import * as genericShell from './GenericShell';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -12,12 +12,14 @@ import { EventEmitter } from 'events'
 import * as http from 'http';
 import * as vscode from 'vscode';
 import * as erlang from './ErlangShell';
-import { ErlangConnection, erlangBridgePath } from './erlangConnection';
+import { erlangBridgePath } from './erlangConnection';
+import { ErlangDebugConnection } from './erlangDebugConnection';
 
 export interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
 	cwd: string;
 	erlpath: string;
 	arguments: string;
+	verbose: boolean;
 }
 
 interface DebugVariable {
@@ -28,11 +30,11 @@ interface DebugVariable {
 	children: Variable[];
 }
 /** this class is entry point of debugger  */
-export class ErlangDebugSession extends DebugSession implements IErlangShellOutputForDebugging {
+export class ErlangDebugSession extends DebugSession implements genericShell.IErlangShellOutput {
 
 	protected threadIDs: { [processName: string]: {thid: number, stack:any, isBreak : boolean }};
 	erlDebugger: ErlangShellForDebugging;
-	erlangConnection: ErlangConnection;
+	erlangConnection: ErlangDebugConnection;
 	quit: boolean;
 	//private _breakPoints = new Map<string, DebugProtocol.Breakpoint[]>();
 	private _rebarBuildPath = path.join("_build", "default", "lib");
@@ -81,7 +83,8 @@ export class ErlangDebugSession extends DebugSession implements IErlangShellOutp
 		this.erlDebugger.on('close', (exitCode) => {
 			this.quitEvent(exitCode);
 		})
-		this.erlangConnection = new ErlangConnection(this);
+		this.erlangConnection = new ErlangDebugConnection(this);
+		this.erlangConnection.on("listen", (msg) => this.onStartListening(msg));
 		this.erlangConnection.on("new_module", (arg) => this.onNewModule(arg));
 		this.erlangConnection.on("new_break", (arg) => this.onNewBreak(arg));
 		this.erlangConnection.on("new_process", (arg) => this.onNewProcess(arg));
@@ -114,8 +117,8 @@ export class ErlangDebugSession extends DebugSession implements IErlangShellOutp
 				return;
 		}
 		this._LaunchArguments = args;
-		this.erlangConnection.Start().then(port => {
-			this.debug("Local webserver for erlang is started");
+		this.erlangConnection.Start(this._LaunchArguments.verbose).then(port => {
+			//this.debug("Local webserver for erlang is started");
 			this._port = port;
 			//Initialize the workflow only when webserver is started
 			this.sendEvent(new InitializedEvent());
@@ -127,10 +130,13 @@ export class ErlangDebugSession extends DebugSession implements IErlangShellOutp
 
 	protected configurationDoneRequest(response: DebugProtocol.ConfigurationDoneResponse, argsConf: DebugProtocol.ConfigurationDoneArguments): void {
 		var args = this._LaunchArguments;
-		this.debug("Starting erlang");
-		this.debug(`	path      : ${args.cwd}`);
-		this.debug(`	arguments : ${args.arguments}`);
-		this.erlDebugger.Start(args.erlpath, args.cwd, this._port, erlangBridgePath, args.arguments).then(r => {
+		if (args.verbose) {
+			this.debug("Starting erlang");
+			this.debug(`	path      : ${args.cwd}`);
+			this.debug(`	arguments : ${args.arguments}`);
+		}
+		var bridgeBinPath = path.normalize(path.join(erlangBridgePath, "..", "ebin"))
+		this.erlDebugger.Start(args.erlpath, args.cwd, this._port, bridgeBinPath, args.arguments, args.noDebug, args.verbose).then(r => {
 			this.sendResponse(response);
 		}).catch(reason =>{
 			this.sendErrorResponse(response, 3000, `Launching application throw an error : ${reason}`);
@@ -140,14 +146,11 @@ export class ErlangDebugSession extends DebugSession implements IErlangShellOutp
 
 	protected disconnectRequest(response: DebugProtocol.DisconnectResponse, args: DebugProtocol.DisconnectArguments): void {
 		//this.debug("disconnectRequest");
-		if (!this.quit) {
-			//send q() only if user clic on stop debugger button
-			this.erlDebugger.NormalQuit();
-		}
 		if (this.erlangConnection) {
 			this.erlangConnection.Quit();
 		}
 		this.sendResponse(response);
+		this.erlDebugger.CleanupAfterStart();
 	}
 
 
@@ -155,6 +158,7 @@ export class ErlangDebugSession extends DebugSession implements IErlangShellOutp
 		this.log(`erl exit with code ${exitCode}`);
 		this.quit = true;
 		this.sendEvent(new TerminatedEvent());
+		this.erlDebugger.CleanupAfterStart();
 	}
 
 	protected evaluateRequest(response: DebugProtocol.EvaluateResponse, args: DebugProtocol.EvaluateArguments): void {
@@ -173,13 +177,6 @@ export class ErlangDebugSession extends DebugSession implements IErlangShellOutp
 				};
 				this.sendResponse(response);
 			});
-		} else if (this.erlDebugger) {
-			this.erlDebugger.Send(args.expression);
-			response.body = {
-				result: 'sending to erlang...',
-				variablesReference: 0
-			};
-			this.sendResponse(response);
 		}
 	}
 
@@ -197,7 +194,9 @@ export class ErlangDebugSession extends DebugSession implements IErlangShellOutp
 		this._updateBreakPoints(targetModuleName, vscodeBreakpoints);
 
 		if (this.erlangConnection.isConnected) {
-			this.erlangConnection.setBreakPointsRequest(targetModuleName, vscodeBreakpoints);
+			if (!this._LaunchArguments.noDebug) {
+				this.erlangConnection.setBreakPointsRequest(targetModuleName, vscodeBreakpoints);
+			}
 		} else if (this.erlDebugger) {
 			this.erlDebugger.setBreakPointsRequest(vscodeBreakpoints);
 		}
@@ -431,6 +430,11 @@ export class ErlangDebugSession extends DebugSession implements IErlangShellOutp
 	}
 
 	//----------- events from erlangConnection
+	private onStartListening(message: string): void {
+		if (this._LaunchArguments.verbose)
+			this.debug(message);
+	}
+	
 	private onNewModule(moduleName: string): void {
 		//this.debug("OnNewModule : " + moduleName);
 		this.sendEvent(new ModuleEvent("new", new Module(moduleName, moduleName)))

@@ -1,70 +1,27 @@
 -module(vscode_connection).
+-behaviour(gen_connection).
 
-
--export([start/0, start/1, send_message_to_vscode/3]).
+-export([start/0, start/1]).
 -export([debugger_stacktrace/2, debugger_bindings/2]).
+
+% export for gen_connection behaviour
+-export([get_port/0, init/1, decode_request/1]).
+
 
 %%called with "erl -s vscode_connection -vscode_port 1234"
 start() ->
-    inets:start(),
-    %get port from command line
-    {ok, [[P]]}=init:get_argument(vscode_port),
-    start([erlang:list_to_atom(P)]).
+    gen_connection:start(?MODULE).
 
 %%called with "erl -s vscode_connection start 1234"
 start(Args) ->
-    inets:start(),
-    %get port from Arg, because -s is used Args is an atom list (from erlang command line doc)
-    [P] = Args,
-    VsCodePort = erlang:list_to_integer(erlang:atom_to_list(P)),
-    % subcribe to int
-    init_subscribe(VsCodePort),
-    % send that debugger is ready
-    start_command_server(VsCodePort),
-    ok.
+    gen_connection:start(?MODULE).
 
+get_port() ->
+    {ok, [[P]]}=init:get_argument(vscode_port),
+    P.
 
-send_message_to_vscode(Port, Verb, Data) ->
-    {ok, Json} = vscode_jsone:encode(Data),
-    %io:format("Notify ~s ~p~n", [Verb, Json]),
-    Uri = "http://127.0.0.1:"++erlang:integer_to_list(Port) ++ "/"++Verb,
-    httpc:request(post, {Uri, [], "application/json", Json}, [],[]).
-
-%-------------------------------
-% Command receiver (from nodejs)
-%-------------------------------
--define(TCP_OPTIONS, [binary, {active, false}]).
-
-start_command_server(VsCodePort) ->
-    spawn(fun () -> {ok, Sock} = gen_tcp:listen(0, ?TCP_OPTIONS),
-                    % get assigned port
-                    {ok, Port} = inet:port(Sock),
-                    %send to vscode debugger
-                    send_message_to_vscode(VsCodePort, "listen", #{port => Port}),
-                    loop_command_server(Sock) end).
-
-loop_command_server(Sock) ->
-    {ok, Conn} = gen_tcp:accept(Sock),
-    Pid = spawn(fun () -> loop_handle_command(Conn) end),
-    gen_tcp:controlling_process(Conn, Pid),
-    loop_command_server(Sock).
-
-
-loop_handle_command(Socket) ->
-    inet:setopts(Socket, [{active, once}]),
-    receive
-    {tcp, Socket, Data} ->
-        %io:format("Got packet: ~p~n", [Data]),
-        Answer = response_json(decode_request(Data)),
-        %io:format("Result request: ~p~n", [Answer]),
-        gen_tcp:send(Socket, list_to_binary(Answer)),
-        gen_tcp:close(Socket),
-        loop_handle_command(Socket);
-    {tcp_closed, Socket}->
-        io:format("Socket ~p closed~n", [Socket]);
-    {tcp_error, Socket, Reason} ->
-     io:format("Error on socket ~p reason: ~p~n", [Socket, Reason])
-    end.
+init(Port) ->
+    init_subscribe(Port).
 
 decode_request(Data) ->
     %"POST debugger_continue HTTP/1.1\r\nContent-Type: plain/text\r\nContent-Length: 1\r\nHost: 127.0.0.1:36477\r\nConnection: close\r\n\r\n3"
@@ -125,6 +82,8 @@ decode_request(Data) ->
         catch
             _:Exp -> #{value => iolist_to_binary(io_lib:format("~p", [Exp])), type => <<"error">>}    
         end;
+    {debugger_exit, _Body} ->
+        init:stop(0);
     _ ->
         unknown_command
     end.
@@ -257,18 +216,24 @@ decode_debugger_message(VsCodePort, M) ->
     %                               {mymodule_app,start,[normal,[]]},
     %                               running,{}}}
     case M of
+    {new_process, {_Pid, {_Module, module_info, _Args}, _Status, _Other}} ->
+        % ignore processes calling module_info started by debugger itself
+        ok;
     {Verb, Data} ->
-        send_message_to_vscode(VsCodePort,to_string(Verb), to_json(Verb, Data));
+        gen_connection:send_message_to_vscode(VsCodePort,to_string(Verb), to_json(Verb, Data));
     {new_status,Pid,idle,_} ->
-        send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, idle}));        
-    {new_status,Pid,exit,normal} ->
-        send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, exit, normal})); 
+        gen_connection:send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, idle}));        
+    {new_status,Pid,exit,_} ->
+        gen_connection:send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, exit})); 
     {new_status,Pid,break,ModuleAndLine} ->
         %{new_status,<0.3.0>,break,{myapp,11}}   
-        send_message_to_vscode(VsCodePort,to_string(on_break), to_json(on_break, {Pid, break, ModuleAndLine}));
+        gen_connection:send_message_to_vscode(VsCodePort,to_string(on_break), to_json(on_break, {Pid, break, ModuleAndLine}));
     {new_status,Pid,running,_} ->
         %{new_status,<0.3.0>,running,{}}
-        send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, running}));
+        gen_connection:send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, running}));
+    {new_status,_,waiting,_} ->
+        %{new_status,<0.3.0>,waiting,{}}: no output not to pollute the console
+        ok;
     _ -> 
         io:format("decode debugger receive : ~p~n", [M])    
     end,

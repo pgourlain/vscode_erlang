@@ -1,11 +1,11 @@
 {
 	"name": "erlang",
 	"description": "Erlang language extension for Visual Studio Code",
-	"version": "0.1.5",
+	"version": "0.1.9",
 	"icon": "images/icon.png",
 	"publisher": "pgourlain",
 	"engines": {
-		"vscode": "^1.5.0"
+		"vscode": "^1.15.0"
 	},
 	"categories": [
 		"Languages",
@@ -13,6 +13,7 @@
 		"Debuggers"
 	],
 	"activationEvents": [
+		"onLanguage:erlang",
 		"onCommand:extension.rebarBuild",
 		"onCommand:extension.rebarGetDeps",
 		"onCommand:extension.rebarUpdateDeps",
@@ -61,6 +62,11 @@
 								"type": "string",
 								"description": "Path to the erl executable or the command if in PATH",
 								"default": "erl"
+							},
+							"verbose": {
+								"type": "boolean",
+								"description": "Should extended debugging details be logged",
+								"default": false
 							}
 						}
 					}
@@ -171,6 +177,12 @@
 					],
 					"description": "Arguments to provide to rebar/rebar3 build command",
 					"title": "Arguments to provide to rebar/rebar3 build command"
+				},
+				"erlang.LanguageServerProtocol.verbose": {
+					"type": "boolean",
+					"description": "Activate technical traces while parsing documents, completion (activate trace on LSP module)",
+					"title": "Activate technical traces while parsing documents",
+					"default": "false"
 				}
 			}
 		}
@@ -184,17 +196,20 @@
 		"vscode:prepublish": "tsc -p ./",
 		"compile": "tsc -watch -p ./",
 		"postinstall": "node ./node_modules/vscode/bin/install",
-		"test": "node ./node_modules/vscode/bin/test"
+		"test": "node ./node_modules/vscode/bin/test",
+		"update-vscode": "node ./node_modules/vscode/bin/install"
 	},
 	"dependencies": {
+		"vscode": "^1.1.5",
 		"vscode-debugadapter": "^1.16.0",
-		"vscode-debugprotocol": "^1.16.0"
+		"vscode-debugprotocol": "^1.16.0",
+		"vscode-languageclient": "^3.4.2",
+		"vscode-languageserver": "^3.4.2"
 	},
 	"devDependencies": {
-		"typescript": "^2.0.3",
-		"vscode": "^1.0.0",
+		"@types/mocha": "^2.2.48",
+		"@types/node": "^6.0.101",
 		"mocha": "^2.3.3",
-		"@types/node": "^6.0.40",
-		"@types/mocha": "^2.2.32"
+		"typescript": "^2.7.2"
 	}
 }
