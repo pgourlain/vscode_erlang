@@ -63,16 +63,19 @@ decode_request(Data) ->
         lists:foreach(fun (BpString) ->
             case re:run(BpString, "^[0-9]+$") of
                 nomatch ->
-                    [Function, Arity] = string:tokens(BpString, " "),
-                    case int:break_in(TargetModuleName, list_to_atom(Function), list_to_integer(Arity)) of
+                    [Function, ArityString] = string:tokens(BpString, " "),
+                    FunctionName = list_to_atom(Function),
+                    Arity = list_to_integer(ArityString),
+                    case int:break_in(TargetModuleName, FunctionName, Arity) of
                         ok -> ok;
-                        Error -> io:format("Can not setup brakepoint ~p:~p/~p by ~p~n", [TargetModuleName, Function, Arity, Error])
+                        {error,function_not_found} -> io:format("Cannot set brakepoint: function ~p:~p/~p not found", [TargetModuleName, FunctionName, Arity]);
+                        Error -> io:format("Cannot set brakepoint ~p:~p/~p by ~p~n", [TargetModuleName, Function, Arity, Error])
                     end;
                 _ ->
                     Line = list_to_integer(BpString), 
                     case int:break(TargetModuleName, Line) of
                         ok -> ok;
-                        Error -> io:format("Can not setup brakepoint ~p:~p by ~p~n", [TargetModuleName, Line, Error])
+                        Error -> io:format("Cannot set brakepoint ~p:~p by ~p~n", [TargetModuleName, Line, Error])
                     end
                 end
             end,

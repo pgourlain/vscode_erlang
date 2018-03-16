@@ -221,9 +221,9 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 
 	protected setFunctionBreakPointsRequest(response: DebugProtocol.SetFunctionBreakpointsResponse, args: DebugProtocol.SetFunctionBreakpointsArguments): void {
 		let vscodeBreakpoints: Breakpoint[] = [];
-		let modulesToSetBreakpoints = [];
+		let modulesToSetBreakpoints = new Set<string>();
 		let re = new RegExp("^(.+):(.+)/([0-9]+)$");
-		this._functionBreakPoints.forEach((breakpoints, moduleName) => modulesToSetBreakpoints.push(moduleName));
+		this._functionBreakPoints.forEach((breakpoints, moduleName) => modulesToSetBreakpoints.add(moduleName));
 		this._functionBreakPoints = new Map();
 		args.breakpoints.forEach(bp => {
 			let parsed = re.exec(bp.name);
@@ -245,7 +245,7 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 				vscodeBreakpoints.push(breakpoint);
 			}
 		});
-		this._functionBreakPoints.forEach((breakpoints, moduleName) => modulesToSetBreakpoints.push(moduleName));
+		this._functionBreakPoints.forEach((breakpoints, moduleName) => modulesToSetBreakpoints.add(moduleName));
 		modulesToSetBreakpoints.forEach((moduleName) => this._setAllBreakpoints(moduleName));
 		response.body = { breakpoints: vscodeBreakpoints };
 		this.sendResponse(response);
