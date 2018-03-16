@@ -48,28 +48,35 @@ decode_request(Data) ->
     {set_bp, Body} ->
         % first deserialize user breaks
         % take first bp to get modulename
-        [TargetModuleNameString | Lines] = string:tokens(Body, "\r\n"),
+        [TargetModuleNameString | Breakpoints] = string:tokens(Body, "\r\n"),
         TargetModuleName = list_to_atom(TargetModuleNameString),
-        ParseLine = fun(ML) -> list_to_tuple(string:tokens(ML, ",")) end,
-        ToBp = fun({M,L}) -> {list_to_atom(M), list_to_integer(L)} end,
-        Bps = lists:map(ToBp, lists:map(ParseLine, Lines)),
-        %get current breakpoints
-        AllBreaks = lists:map(fun({{M,L},_}) -> {M,L} end, int:all_breaks(TargetModuleName)),
-        { BpsAlreadySet, BpsToDelete } = lists:partition(fun(X) -> lists:member(X, Bps) end, AllBreaks),
-        lists:foreach(fun({M, L}) -> int:delete_break(M, L) end, BpsToDelete),
-        case AllBreaks of
+        %interpret module - most likely interpreted already but no harm
+        case int:all_breaks(TargetModuleName) of
             [] -> int:ni(TargetModuleName);
             _ -> ok
         end,
-        %set only for new breakpoints
-        lists:foreach(fun({M,L}) -> 
-                case int:break(M, L) of
-                    ok -> ok;
-                    Error -> io:format("Can not setup brakepoint ~p:~p by ~p~n", [M, L, Error])
+        %delete all existing breakpoints
+        lists:foreach(
+            fun({{M,L}, _}) -> int:delete_break(M, L) end,
+            int:all_breaks(TargetModuleName)),
+        %set all incoming breakpoints
+        lists:foreach(fun (BpString) ->
+            case re:run(BpString, "^[0-9]+$") of
+                nomatch ->
+                    [Function, Arity] = string:tokens(BpString, " "),
+                    case int:break_in(TargetModuleName, list_to_atom(Function), list_to_integer(Arity)) of
+                        ok -> ok;
+                        Error -> io:format("Can not setup brakepoint ~p:~p/~p by ~p~n", [TargetModuleName, Function, Arity, Error])
+                    end;
+                _ ->
+                    Line = list_to_integer(BpString), 
+                    case int:break(TargetModuleName, Line) of
+                        ok -> ok;
+                        Error -> io:format("Can not setup brakepoint ~p:~p by ~p~n", [TargetModuleName, Line, Error])
+                    end
                 end
             end,
-            sets:to_list(sets:subtract(sets:from_list(Bps), sets:from_list(BpsAlreadySet)))
-            ),
+            Breakpoints),
         #{}; 
     {debugger_eval, Body} ->
         [Pid, Sp, Expression] = string:tokens(Body, "\r\n"),
