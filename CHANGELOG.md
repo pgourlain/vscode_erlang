@@ -1,5 +1,12 @@
 
-## Versions
+# Change log
+## Version 0.2.0 (March 17, 2018)
+### Debugging Fix and improvements 
+- [PR #37](https://github.com/pgourlain/vscode_erlang/pull/37), [PR #39](https://github.com/pgourlain/vscode_erlang/pull/39), [PR #40](https://github.com/pgourlain/vscode_erlang/pull/40)
+
+Thanks to [wojteksurowka](https://github.com/wojteksurowka)
+
+## Previous versions
 * 0.1.9 Linter fix : (disable epp warnings)
 * 0.1.8 First preview of Validation/Format document
 	- ![lsp](images/lsp_validate_document.png)
