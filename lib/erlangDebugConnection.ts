@@ -1,5 +1,6 @@
 import {ErlangConnection} from './erlangConnection';
 import { DebugProtocol } from 'vscode-debugprotocol';
+import { FunctionBreakpoint } from './ErlangShellDebugger';
 
 
 export class ErlangDebugConnection extends ErlangConnection {
@@ -37,11 +38,14 @@ export class ErlangDebugConnection extends ErlangConnection {
         }
     }   
     
-    public setBreakPointsRequest(moduleName : string, breakPoints : DebugProtocol.Breakpoint[]) : Promise<boolean> {
+    public setBreakPointsRequest(moduleName : string, breakPoints : DebugProtocol.Breakpoint[], functionBreakpoints: FunctionBreakpoint[]) : Promise<boolean> {
         if (this.erlangbridgePort > 0) {    
             let bps = moduleName + "\r\n";
             breakPoints.forEach(bp => {
-                bps += `${moduleName},${bp.line}\r\n`;
+                bps += `${bp.line}\r\n`;
+            });
+            functionBreakpoints.forEach(bp => {
+                bps += `${bp.functionName} ${bp.arity}\r\n`;
             });
             return this.post("set_bp", bps).then(res => {
                 return true;
