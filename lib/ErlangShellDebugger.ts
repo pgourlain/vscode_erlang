@@ -18,12 +18,15 @@ export interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArgum
 }
 
 export class FunctionBreakpoint implements DebugProtocol.Breakpoint {
+    id: any;
     verified: boolean;
     name: string;
     moduleName: string;
     functionName: string;
     arity: number;
-    constructor(n: string, mn:string, fn: string, a: number) {
+    constructor(i: string, n: string, mn:string, fn: string, a: number) {
+        this.id = i;
+        this.verified = false;
         this.name = n;
         this.moduleName = mn;
         this.functionName = fn;
@@ -146,7 +149,7 @@ export class ErlangShellForDebugging extends ErlGenericShell {
                     argsFileContents += `,int:break(${moduleName}, ${bp.line})`;
                 });
                 this.functionBreakPoints.forEach(bp => {
-                    argsFileContents += `,int:break_in(${bp.moduleName}, ${bp.functionName}, ${bp.arity})`;
+                    argsFileContents += `,vscode_connection:set_breakpoint(${bp.moduleName}, {function, ${bp.functionName}, ${bp.arity}})`;
                 });
             }
             argsFileContents += "'";
