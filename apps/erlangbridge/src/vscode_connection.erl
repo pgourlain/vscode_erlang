@@ -2,7 +2,7 @@
 -behaviour(gen_connection).
 
 -export([start/0, start/1]).
--export([debugger_stacktrace/2, debugger_bindings/2]).
+-export([debugger_stacktrace/2, debugger_bindings/2, set_breakpoint/2]).
 
 % export for gen_connection behaviour
 -export([get_port/0, init/1, decode_request/1]).
@@ -52,7 +52,11 @@ decode_request(Data) ->
         TargetModuleName = list_to_atom(TargetModuleNameString),
         %interpret module - most likely interpreted already but no harm
         case int:all_breaks(TargetModuleName) of
-            [] -> int:ni(TargetModuleName);
+            [] ->
+                case int:interpretable(TargetModuleName) of
+                    true -> int:ni(TargetModuleName);
+                    _ -> error
+                end;
             _ -> ok
         end,
         %delete all existing breakpoints
@@ -61,23 +65,18 @@ decode_request(Data) ->
             int:all_breaks(TargetModuleName)),
         %set all incoming breakpoints
         lists:foreach(fun (BpString) ->
-            case re:run(BpString, "^[0-9]+$") of
-                nomatch ->
-                    [Function, ArityString] = string:tokens(BpString, " "),
-                    FunctionName = list_to_atom(Function),
-                    Arity = list_to_integer(ArityString),
-                    case int:break_in(TargetModuleName, FunctionName, Arity) of
-                        ok -> ok;
-                        {error,function_not_found} -> io:format("Cannot set brakepoint: function ~p:~p/~p not found", [TargetModuleName, FunctionName, Arity]);
-                        Error -> io:format("Cannot set brakepoint ~p:~p/~p by ~p~n", [TargetModuleName, Function, Arity, Error])
-                    end;
-                _ ->
-                    Line = list_to_integer(BpString), 
-                    case int:break(TargetModuleName, Line) of
-                        ok -> ok;
-                        Error -> io:format("Cannot set brakepoint ~p:~p by ~p~n", [TargetModuleName, Line, Error])
-                    end
-                end
+                BreakpointParams = list_to_tuple(lists:map(
+                    fun (P) ->
+                        case re:run(P, "^[0-9]+$") of
+                            nomatch ->
+                                list_to_atom(P);
+                            _ ->
+                                list_to_integer(P)
+                        end
+                    end,
+                    string:tokens(BpString, " ")
+                )),
+                set_breakpoint(TargetModuleName, BreakpointParams)
             end,
             Breakpoints),
         #{}; 
@@ -105,6 +104,18 @@ parse_request(Data) ->
     Command = list_to_atom(lists:nth(2, string:tokens(lists:nth(1, Lines), " "))),
     Body = string:join(lists:nthtail(5, Lines), "\r\n"),
     {Command, Body}.
+
+set_breakpoint(Module, {line, Line}) ->
+    case int:break(Module, Line) of
+        ok -> ok;
+        Error -> io:format("Cannot set brakepoint ~p:~p by ~p~n", [Module, Line, Error])
+    end;
+set_breakpoint(Module, {function, Name, Arity}) ->
+    case int:break_in(Module, Name, Arity) of
+        ok -> gen_connection:send_message_to_vscode(list_to_integer(get_port()), to_string(fbp_verified), #{module => Module, name => Name, arity => Arity});
+        {error,function_not_found} -> function_not_found; %it will be signalled to the user as non-verified breakpoint
+        Error -> io:format("Cannot set brakepoint ~p:~p/~p by ~p~n", [Module, Name, Arity, Error])
+    end.
 
 backtrace_item(I) ->
     {Sp, {M, F, Args, Frame}} = I,

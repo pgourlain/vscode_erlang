@@ -1,7 +1,7 @@
 import {
 	DebugSession, InitializedEvent, TerminatedEvent, StoppedEvent,
 	OutputEvent, Thread, ThreadEvent, StackFrame, Scope, Source, Handles
-	, Breakpoint, ModuleEvent, Module, ContinuedEvent, Variable
+	, Breakpoint, ModuleEvent, Module, ContinuedEvent, Variable, BreakpointEvent
 } from 'vscode-debugadapter';
 import { DebugProtocol } from 'vscode-debugprotocol';
 import { ErlangShellForDebugging, LaunchRequestArguments, FunctionBreakpoint } from './ErlangShellDebugger';
@@ -85,6 +85,7 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 		this.erlangConnection.on("new_process", (arg) => this.onNewProcess(arg));
 		this.erlangConnection.on("new_status", (pid, status, reason, moduleName, line) => this.onNewStatus(pid, status, reason, moduleName, line));
 		this.erlangConnection.on("on_break", (pid, moduleName, line, stacktrace) => this.onBreak(pid, moduleName, line, stacktrace));
+		this.erlangConnection.on("fbp_verified", (moduleName, functionName, arity) => this.onFbpVerified(moduleName, functionName, arity));
 
 		response.body.supportsConfigurationDoneRequest = true;
 		response.body.supportsConditionalBreakpoints = false;
@@ -229,7 +230,7 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 			let parsed = re.exec(bp.name);
 			if (parsed) {
 				let moduleName = parsed[1];
-				let breakpoint = new FunctionBreakpoint(bp.name, moduleName, parsed[2], +parsed[3]);
+				let breakpoint = new FunctionBreakpoint((<any>bp).id, bp.name, moduleName, parsed[2], +parsed[3]);
 				vscodeBreakpoints.push(breakpoint);
 				if (this._functionBreakPoints.has(moduleName))
 					this._functionBreakPoints.get(moduleName).push(breakpoint);
@@ -241,7 +242,7 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 				if (!name.endsWith(" (Invalid format)")) {
 					name += " (Invalid format)";
 				}
-				let breakpoint = new FunctionBreakpoint(name, "", "", 0);
+				let breakpoint = new FunctionBreakpoint("", name, "", "", 0);
 				vscodeBreakpoints.push(breakpoint);
 			}
 		});
@@ -523,6 +524,18 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 			} else {
 				//this.debug(`thcount:${thCount}, ${JSON.stringify(this.threadIDs)}`);
 			}
+		}
+	}
+
+	private onFbpVerified(moduleName: string, functionName:string, arity:number) {
+		if (this._functionBreakPoints.has(moduleName)) {
+			this._functionBreakPoints.get(moduleName).forEach((fbp) => {
+					if (fbp.functionName === functionName && fbp.arity === arity) {
+						fbp.verified = true;
+						this.sendEvent(new BreakpointEvent("changed", fbp));
+					}
+				}
+			);
 		}
 	}
 }

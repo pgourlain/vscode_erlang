@@ -32,6 +32,9 @@ export class ErlangDebugConnection extends ErlangConnection {
             break;
             case "/delete_break":
             break;
+            case "/fbp_verified":
+                this.emit("fbp_verified", body.module, body.name, body.arity);
+            break;
             default:
                 this.debug("receive from erlangbridge :" + url + ", body :" + JSON.stringify(body));
             break;
@@ -42,10 +45,10 @@ export class ErlangDebugConnection extends ErlangConnection {
         if (this.erlangbridgePort > 0) {    
             let bps = moduleName + "\r\n";
             breakPoints.forEach(bp => {
-                bps += `${bp.line}\r\n`;
+                bps += `line ${bp.line}\r\n`;
             });
             functionBreakpoints.forEach(bp => {
-                bps += `${bp.functionName} ${bp.arity}\r\n`;
+                bps += `function ${bp.functionName} ${bp.arity}\r\n`;
             });
             return this.post("set_bp", bps).then(res => {
                 return true;

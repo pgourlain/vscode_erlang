@@ -190,7 +190,20 @@
 					"default": "false"
 				}
 			}
-		}
+		},
+		"problemMatchers": [
+		{
+			"name": "erlang",
+			"owner": "erlang",
+			"fileLocation": ["relative", "${workspaceRoot}"],
+			"pattern": {
+				"regexp": "^(.*):(\\d+):\\s+(Warning: )?(.*)$",
+				"file": 1,
+				"line": 2,
+				"severity": 3,
+				"message": 4
+			}
+		}]
 	},
 	"repository": {
 		"type": "git",
