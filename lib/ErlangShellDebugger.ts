@@ -59,7 +59,7 @@ export class ErlangShellForDebugging extends ErlGenericShell {
         this.argsFileName = path.join(os.tmpdir(), path.basename(startDir) + '_' + randomSuffix);
         var debugStartArgs = ["-noshell", "-pa", `"${bridgePath}"`, "-s", "int",
             "-vscode_port", listen_port.toString(),
-            "-s", "vscode_connection", "start", listen_port.toString()];
+            "-s", "vscode_connection", "start"];
         var argsFile = this.createArgsFile(startDir, launchArguments.noDebug, launchArguments.addEbinsToCodepath);
         var processArgs = debugStartArgs.concat(argsFile).concat([launchArguments.arguments]);
         this.started = true;

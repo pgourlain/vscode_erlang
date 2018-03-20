@@ -1,7 +1,7 @@
 -module(vscode_connection).
 -behaviour(gen_connection).
 
--export([start/0, start/1]).
+-export([start/0]).
 -export([debugger_stacktrace/2, debugger_bindings/2, set_breakpoint/2]).
 
 % export for gen_connection behaviour
@@ -10,10 +10,6 @@
 
 %%called with "erl -s vscode_connection -vscode_port 1234"
 start() ->
-    gen_connection:start(?MODULE).
-
-%%called with "erl -s vscode_connection start 1234"
-start(Args) ->
     gen_connection:start(?MODULE).
 
 get_port() ->
