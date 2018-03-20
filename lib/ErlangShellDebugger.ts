@@ -17,6 +17,23 @@ export interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArgum
     addEbinsToCodepath: boolean;
 }
 
+export class FunctionBreakpoint implements DebugProtocol.Breakpoint {
+    id: any;
+    verified: boolean;
+    name: string;
+    moduleName: string;
+    functionName: string;
+    arity: number;
+    constructor(i: string, n: string, mn:string, fn: string, a: number) {
+        this.id = i;
+        this.verified = false;
+        this.name = n;
+        this.moduleName = mn;
+        this.functionName = fn;
+        this.arity = a;
+	}
+}
+
 // export interface IErlangShellOutputForDebugging {
 //     show(): void;
 //     appendLine(value: string): void;
@@ -27,11 +44,14 @@ export interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArgum
 
 export class ErlangShellForDebugging extends ErlGenericShell {
     breakPoints: DebugProtocol.Breakpoint[];
+    functionBreakPoints: FunctionBreakpoint[];
+    function
     started : boolean;
     argsFileName: string;
     constructor(whichOutput: IErlangShellOutput) {
         super(whichOutput);
         this.breakPoints = [];
+        this.functionBreakPoints = [];
     }
 
     public Start(erlPath: string, startDir: string, listen_port: number, bridgePath: string, launchArguments: LaunchRequestArguments): Promise<boolean> {
@@ -128,6 +148,9 @@ export class ErlangShellForDebugging extends ErlGenericShell {
                     var moduleName = path.basename(bp.source.name, ".erl");
                     argsFileContents += `,int:break(${moduleName}, ${bp.line})`;
                 });
+                this.functionBreakPoints.forEach(bp => {
+                    argsFileContents += `,vscode_connection:set_breakpoint(${bp.moduleName}, {function, ${bp.functionName}, ${bp.arity}})`;
+                });
             }
             argsFileContents += "'";
             if (addEbinsToCodepath) {
@@ -151,9 +174,10 @@ export class ErlangShellForDebugging extends ErlGenericShell {
         return result;
     }
 
-    public setBreakPointsRequest(bps: DebugProtocol.Breakpoint[]): void {
+    public setBreakPointsRequest(bps: DebugProtocol.Breakpoint[], fbps: FunctionBreakpoint[]): void {
         if (!this.started) {
             this.breakPoints = this.breakPoints.concat(bps);
+            this.functionBreakPoints = this.functionBreakPoints.concat(fbps);
         }
     }
 }

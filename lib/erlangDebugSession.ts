@@ -1,10 +1,10 @@
 import {
 	DebugSession, InitializedEvent, TerminatedEvent, StoppedEvent,
 	OutputEvent, Thread, ThreadEvent, StackFrame, Scope, Source, Handles
-	, Breakpoint, ModuleEvent, Module, ContinuedEvent, Variable
+	, Breakpoint, ModuleEvent, Module, ContinuedEvent, Variable, BreakpointEvent
 } from 'vscode-debugadapter';
 import { DebugProtocol } from 'vscode-debugprotocol';
-import { ErlangShellForDebugging, LaunchRequestArguments } from './ErlangShellDebugger';
+import { ErlangShellForDebugging, LaunchRequestArguments, FunctionBreakpoint } from './ErlangShellDebugger';
 import * as genericShell from './GenericShell';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -22,6 +22,7 @@ interface DebugVariable {
 	variablesReference: number,
 	children: Variable[];
 }
+
 /** this class is entry point of debugger  */
 export class ErlangDebugSession extends DebugSession implements genericShell.IErlangShellOutput {
 
@@ -32,6 +33,7 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 	//private _breakPoints = new Map<string, DebugProtocol.Breakpoint[]>();
 	private _rebarBuildPath = path.join("_build", "default", "lib");
 	private _breakPoints: DebugProtocol.Breakpoint[];
+	private _functionBreakPoints: Map<string, FunctionBreakpoint[]> = new Map();
 	private _variableHandles: Handles<DebugVariable>;
 	private _LaunchArguments: LaunchRequestArguments;
 	private _port: number;
@@ -83,10 +85,11 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 		this.erlangConnection.on("new_process", (arg) => this.onNewProcess(arg));
 		this.erlangConnection.on("new_status", (pid, status, reason, moduleName, line) => this.onNewStatus(pid, status, reason, moduleName, line));
 		this.erlangConnection.on("on_break", (pid, moduleName, line, stacktrace) => this.onBreak(pid, moduleName, line, stacktrace));
+		this.erlangConnection.on("fbp_verified", (moduleName, functionName, arity) => this.onFbpVerified(moduleName, functionName, arity));
 
 		response.body.supportsConfigurationDoneRequest = true;
 		response.body.supportsConditionalBreakpoints = false;
-		response.body.supportsFunctionBreakpoints = false;
+		response.body.supportsFunctionBreakpoints = true;
 		response.body.supportsEvaluateForHovers = false;
 		response.body.supportsSetVariable = false;
 		response.body.supportsStepBack = false;
@@ -188,21 +191,27 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 			vscodeBreakpoints.push(new Breakpoint(true, bp.line, 1, new Source(args.source.name, args.source.path)))
 		});
 		this._updateBreakPoints(targetModuleName, vscodeBreakpoints);
-
-		if (this.erlangConnection.isConnected) {
-			if (!this._LaunchArguments.noDebug) {
-				this.erlangConnection.setBreakPointsRequest(targetModuleName, vscodeBreakpoints);
-			}
-		} else if (this.erlDebugger) {
-			this.erlDebugger.setBreakPointsRequest(vscodeBreakpoints);
-		}
+		this._setAllBreakpoints(targetModuleName);
 		response.body = { breakpoints: vscodeBreakpoints };
 		this.sendResponse(response);
 	}
 
+	private _setAllBreakpoints(moduleName : string) {
+		let fileName = moduleName + ".erl";
+		let modulebreakpoints = this._breakPoints.filter((bp) => bp.source.name == fileName);
+		let moduleFunctionBreakpoints = this._functionBreakPoints.has(moduleName) ? this._functionBreakPoints.get(moduleName) : [];
+		if (this.erlangConnection.isConnected) {
+			if (!this._LaunchArguments.noDebug) {
+				this.erlangConnection.setBreakPointsRequest(moduleName, modulebreakpoints, moduleFunctionBreakpoints);
+			}
+		} else if (this.erlDebugger) {
+			this.erlDebugger.setBreakPointsRequest(modulebreakpoints, moduleFunctionBreakpoints);
+		}
+	}
+
 	private _updateBreakPoints(moduleName : string, bps : Breakpoint[]) {
 		let fileName = moduleName + ".erl";
-		let newBps = this._breakPoints.filter( (bp) => bp.source.name != fileName);
+		let newBps = this._breakPoints.filter((bp) => bp.source.name != fileName);
 		this._breakPoints = newBps.concat(bps);
 	}
 
@@ -211,10 +220,35 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 		this.sendResponse(response);
 	}
 
-	//--- set function breakpoints request ------------------------------------------------------------------------------------
-
 	protected setFunctionBreakPointsRequest(response: DebugProtocol.SetFunctionBreakpointsResponse, args: DebugProtocol.SetFunctionBreakpointsArguments): void {
-		//this.debug("setFunctionBreakPointsRequest :" + JSON.stringify(<any>args));
+		let vscodeBreakpoints: Breakpoint[] = [];
+		let modulesToSetBreakpoints = new Set<string>();
+		let re = new RegExp("^(.+):(.+)/([0-9]+)$");
+		this._functionBreakPoints.forEach((breakpoints, moduleName) => modulesToSetBreakpoints.add(moduleName));
+		this._functionBreakPoints = new Map();
+		args.breakpoints.forEach(bp => {
+			let parsed = re.exec(bp.name);
+			if (parsed) {
+				let moduleName = parsed[1];
+				let breakpoint = new FunctionBreakpoint((<any>bp).id, bp.name, moduleName, parsed[2], +parsed[3]);
+				vscodeBreakpoints.push(breakpoint);
+				if (this._functionBreakPoints.has(moduleName))
+					this._functionBreakPoints.get(moduleName).push(breakpoint);
+				else
+					this._functionBreakPoints.set(moduleName, [breakpoint]);
+			}
+			else {
+				let name = bp.name;
+				if (!name.endsWith(" (Invalid format)")) {
+					name += " (Invalid format)";
+				}
+				let breakpoint = new FunctionBreakpoint("", name, "", "", 0);
+				vscodeBreakpoints.push(breakpoint);
+			}
+		});
+		this._functionBreakPoints.forEach((breakpoints, moduleName) => modulesToSetBreakpoints.add(moduleName));
+		modulesToSetBreakpoints.forEach((moduleName) => this._setAllBreakpoints(moduleName));
+		response.body = { breakpoints: vscodeBreakpoints };
 		this.sendResponse(response);
 	}
 
@@ -490,6 +524,18 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 			} else {
 				//this.debug(`thcount:${thCount}, ${JSON.stringify(this.threadIDs)}`);
 			}
+		}
+	}
+
+	private onFbpVerified(moduleName: string, functionName:string, arity:number) {
+		if (this._functionBreakPoints.has(moduleName)) {
+			this._functionBreakPoints.get(moduleName).forEach((fbp) => {
+					if (fbp.functionName === functionName && fbp.arity === arity) {
+						fbp.verified = true;
+						this.sendEvent(new BreakpointEvent("changed", fbp));
+					}
+				}
+			);
 		}
 	}
 }
