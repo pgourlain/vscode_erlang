@@ -80,17 +80,31 @@ decode_request(Data) ->
         [PidString, Sp, Expression] = string:tokens(Body, "\r\n"),
         Bindings = debugger_eval_bindings(PidString, Sp),
         {ok, Tokens, _} = erl_scan:string(Expression ++ "."),
-        {ok, Exprs} = erl_parse:parse_exprs(Tokens),
-        try erl_eval:exprs(Exprs, orddict:from_list(Bindings)) of
-            {value, EvalResult, _} -> map_bindings({unused, EvalResult})
-        catch
-            _:Exp -> #{value => iolist_to_binary(io_lib:format("~p", [Exp])), type => <<"error">>}    
+        case erl_parse:parse_exprs(Tokens) of
+            {ok, Exprs} ->
+                try erl_eval:exprs(Exprs, orddict:from_list(Bindings)) of
+                    {value, EvalResult, _} -> map_bindings({unused, EvalResult})
+                catch
+                    _:{Reason, What} ->
+                        debugger_eval_error(io_lib:format("~s: ~p", [human_readable_reason(Reason), What]));
+                    _:Exp ->
+                        debugger_eval_error(io_lib:format("~p", [Exp]))
+                end;
+            {error,{_,erl_parse, Messages}} ->
+                debugger_eval_error(lists:flatten(Messages))
         end;
     {debugger_exit, _Body} ->
         init:stop(0);
     _ ->
         unknown_command
     end.
+
+human_readable_reason(unbound_var) -> "unbound variable";
+human_readable_reason(badmatch) -> "bad match";
+human_readable_reason(Atom) -> atom_to_list(Atom).
+
+debugger_eval_error(Message) ->
+    #{value => iolist_to_binary(Message), type => <<"error">>}.
 
 parse_request(Data) ->
     Content = binary_to_list(Data),
