@@ -77,9 +77,8 @@ decode_request(Data) ->
             Breakpoints),
         #{}; 
     {debugger_eval, Body} ->
-        [Pid, Sp, Expression] = string:tokens(Body, "\r\n"),
-        {ok, Meta} = dbg_iserver:call({get_meta, list_to_pid(Pid)}),
-        Bindings = int:meta(Meta, bindings, erlang:list_to_integer(Sp)),
+        [PidString, Sp, Expression] = string:tokens(Body, "\r\n"),
+        Bindings = debugger_eval_bindings(PidString, Sp),
         {ok, Tokens, _} = erl_scan:string(Expression ++ "."),
         {ok, Exprs} = erl_parse:parse_exprs(Tokens),
         try erl_eval:exprs(Exprs, orddict:from_list(Bindings)) of
@@ -112,6 +111,12 @@ set_breakpoint(Module, {function, Name, Arity}) ->
         {error,function_not_found} -> function_not_found; %it will be signalled to the user as non-verified breakpoint
         Error -> io:format("Cannot set brakepoint ~p:~p/~p by ~p~n", [Module, Name, Arity, Error])
     end.
+
+debugger_eval_bindings("<0.0.0>", _) ->
+    [];
+debugger_eval_bindings(PidString, Sp) ->
+    {ok, Meta} = dbg_iserver:call({get_meta, list_to_pid(PidString)}),
+    int:meta(Meta, bindings, erlang:list_to_integer(Sp)).
 
 backtrace_item(I) ->
     {Sp, {M, F, Args, Frame}} = I,
