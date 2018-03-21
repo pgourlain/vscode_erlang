@@ -26,7 +26,7 @@ interface DebugVariable {
 /** this class is entry point of debugger  */
 export class ErlangDebugSession extends DebugSession implements genericShell.IErlangShellOutput {
 
-	protected threadIDs: { [processName: string]: {thid: number, stack:any, isBreak : boolean }};
+	protected threadIDs: { [processName: string]: {thid: number, stack:any }};
 	erlDebugger: ErlangShellForDebugging;
 	erlangConnection: ErlangDebugConnection;
 	quit: boolean;
@@ -342,18 +342,25 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 			const maxLevels = args.levels;
 			const endFrame = Math.min(startFrame + maxLevels, stackAsObject.length);
 
-			for (let i= startFrame; i < endFrame; i++) {
+			for (let i = startFrame; i < endFrame; i++) {
 				var frame = stackAsObject[i];
 				const name = frame.module;
 				const sourceFile = frame.source;
 				const line = frame.line;
-				frames.push(new StackFrame(frame.sp*100000+thread.thid, `${name}(${line})`, 
+				frames.push(new StackFrame(frame.sp * 100000 + thread.thid, `${name}(${line})`,
 					new Source(path.basename(sourceFile), this.convertDebuggerPathToClient(sourceFile)),
 					this.convertDebuggerLineToClient(line), 0));
 			}
 			response.body = {
 				stackFrames: frames,
-				totalFrames: endFrame-startFrame
+				totalFrames: endFrame - startFrame
+			};
+			this.sendResponse(response);
+		}
+		else {
+			response.body = {
+				stackFrames: [],
+				totalFrames: 0
 			};
 			this.sendResponse(response);
 		}
@@ -499,7 +506,7 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 		//each process in erlang is mapped to one 'thread'
 		//this.debug("OnNewProcess : " + processName);
 		var thid = this.pid_to_number(processName);
-		this.threadIDs[processName] = {thid:thid, stack:null, isBreak:false};
+		this.threadIDs[processName] = {thid:thid, stack:null};
 		this.sendEvent(new ThreadEvent("started", thid));
 	}
 
@@ -508,7 +515,6 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 		var currentThread = this.threadIDs[processName];
 		if (currentThread) {
 			currentThread.stack = stacktrace;
-			currentThread.isBreak = true;
 			var breakReason = "breakpoint";
 			if (!this.isOnBreakPoint(module, line)) {
 					breakReason = "step";

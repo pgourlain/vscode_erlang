@@ -41,7 +41,7 @@ decode_request(Data) ->
         #{};
     {debugger_pause, SPid_as_body} ->
         suspend(SPid_as_body),
-        #{};
+        debugger_stacktrace(list_to_pid(SPid_as_body), -1);
     {debugger_stacktrace, SPid_as_body} ->
         debugger_stacktrace(list_to_pid(SPid_as_body), -1);
     {debugger_bindings, Body} ->
