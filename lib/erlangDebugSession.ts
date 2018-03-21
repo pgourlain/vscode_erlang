@@ -256,7 +256,7 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 		this.sendResponse(response);
 		fn(this.thread_id_to_pid(threadId)).then(
 				() => {
-						this.sendEvent(new ContinuedEvent(threadId));                
+						this.sendEvent(new ContinuedEvent(threadId, false));                
 				},
 				(reason) => {
 						this.error("unable to continue debugging.")
@@ -266,6 +266,7 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 	}
 
 	protected continueRequest(response: DebugProtocol.ContinueResponse, args: DebugProtocol.ContinueArguments): void {
+		response.body = { allThreadsContinued: false };
 		this.doProcessUserRequest(args.threadId, response, (pid:string) => this.erlangConnection.debuggerContinue(pid));
 	}
 
