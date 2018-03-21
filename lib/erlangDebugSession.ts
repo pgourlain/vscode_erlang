@@ -255,14 +255,14 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 	private doProcessUserRequest(threadId : number, response: DebugProtocol.Response, fn: (pid : string) => Promise<boolean>) {
 		this.sendResponse(response);
 		fn(this.thread_id_to_pid(threadId)).then(
-				() => {
-						this.sendEvent(new ContinuedEvent(threadId, false));                
-				},
-				(reason) => {
-						this.error("unable to continue debugging.")
-						this.sendEvent(new TerminatedEvent());
-						this.sendErrorResponse(response, 3000, `Unable to continue debugging : ${reason}`);
-				});
+			() => {
+				this.sendEvent(new ContinuedEvent(threadId, false));
+			},
+			(reason) => {
+				this.error("unable to continue debugging.")
+				this.sendEvent(new TerminatedEvent());
+				this.sendErrorResponse(response, 3000, `Unable to continue debugging : ${reason}`);
+			});
 	}
 
 	protected continueRequest(response: DebugProtocol.ContinueResponse, args: DebugProtocol.ContinueArguments): void {
@@ -279,6 +279,19 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 	protected stepOutRequest(response: DebugProtocol.StepOutResponse, args: DebugProtocol.StepOutArguments): void {
 		//this.debug("stepoOutTraceRequest");
 		super.stepOutRequest(response, args);
+	}
+
+	protected pauseRequest(response: DebugProtocol.PauseResponse, args: DebugProtocol.PauseArguments): void {
+		//this.debug("pauseRequest :" + JSON.stringify(args));
+		this.sendResponse(response);
+		this.erlangConnection.debuggerPause(this.thread_id_to_pid(args.threadId)).then(
+			() => {
+				this.sendEvent(new StoppedEvent("pause", args.threadId));
+			},
+			(reason) => {
+				this.error("unable to pause.")
+				this.sendErrorResponse(response, 3000, `Unable to pause : ${reason}`);
+			});
 	}
 
 	protected scopesRequest(response: DebugProtocol.ScopesResponse, args: DebugProtocol.ScopesArguments): void {

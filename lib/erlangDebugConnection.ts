@@ -109,7 +109,19 @@ export class ErlangDebugConnection extends ErlangConnection {
         }        
     }
 
-    public debuggerBindings(pid: string, frameId : string) : Promise<any[]> { 
+    public debuggerPause(pid: string): Promise<boolean> {
+        if (this.erlangbridgePort > 0) {
+            return this.post("debugger_pause", pid).then(res => {
+                return true;
+            }, err => {
+                return false;
+            });
+        } else {
+            return new Promise(() => false);
+        }
+    }
+
+    public debuggerBindings(pid: string, frameId: string): Promise<any[]> { 
         if (this.erlangbridgePort > 0) {
             return this.post("debugger_bindings", pid + "\r\n" + frameId).then(res => {
                     //this.debug(`result of bindings : ${JSON.stringify(res)}`);

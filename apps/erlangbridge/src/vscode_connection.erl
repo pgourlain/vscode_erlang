@@ -17,22 +17,30 @@ get_port() ->
     P.
 
 init(Port) ->
-    init_subscribe(Port).
+    init_subscribe(Port),
+    init_suspender_resumer().
 
 decode_request(Data) ->
     %"POST debugger_continue HTTP/1.1\r\nContent-Type: plain/text\r\nContent-Length: 1\r\nHost: 127.0.0.1:36477\r\nConnection: close\r\n\r\n3"
     case parse_request(Data) of
     {debugger_continue, SPid_as_body} ->
+        resume_if_suspended(SPid_as_body),
         int:continue(list_to_pid(SPid_as_body)),
         #{};
     {debugger_next, SPid_as_body} ->
+        resume_if_suspended(SPid_as_body),
         int:next(list_to_pid(SPid_as_body)),
         #{};
     {debugger_stepin, SPid_as_body} ->
+        resume_if_suspended(SPid_as_body),
         int:step(list_to_pid(SPid_as_body)),
         #{};
     {debugger_stepout, SPid_as_body} ->
+        resume_if_suspended(SPid_as_body),
         int:step(list_to_pid(SPid_as_body)),
+        #{};
+    {debugger_pause, SPid_as_body} ->
+        suspend(SPid_as_body),
         #{};
     {debugger_stacktrace, SPid_as_body} ->
         debugger_stacktrace(list_to_pid(SPid_as_body), -1);
@@ -151,7 +159,6 @@ add_framesinfo(Pid, BT, FirstLine) ->
     Frames = [frameinfo(Pid, F) || F <- H],
     [add_frameinfo(F, Frames, FirstLine) || F <- BT].
 
-
 frameinfo(Pid, F) ->
     {Sp, {_, _, _}} = F,
     Frame = int:meta(Pid, stack_frame, {up, Sp}),
@@ -238,6 +245,30 @@ loop_subscribe(VsCodePort) ->
 			io:format("receive : ~p~n", [M]),
 			loop_subscribe(VsCodePort)
 	end.
+
+init_suspender_resumer() ->
+    register(vscode_suspender_resumer, spawn(fun () -> suspender_resumer_loop() end)).
+
+suspender_resumer_loop() ->
+    receive
+        {suspend, Pid} ->
+            erlang:suspend_process(Pid),
+            suspender_resumer_loop();
+        {resume_if_suspended, Pid} ->
+            case erlang:process_info(Pid, status) of
+                {status, suspended} ->
+                    erlang:resume_process(Pid);
+                _ ->
+                    ok
+            end,
+            suspender_resumer_loop()
+    end.
+
+suspend(SPid) ->
+    vscode_suspender_resumer ! {suspend, list_to_pid(SPid)}.
+
+resume_if_suspended(SPid) ->
+    vscode_suspender_resumer ! {resume_if_suspended, list_to_pid(SPid)}.
 
 decode_debugger_message(VsCodePort, M) ->
     %% samples of M
