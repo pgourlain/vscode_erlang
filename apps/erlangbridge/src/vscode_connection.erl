@@ -86,7 +86,7 @@ decode_request(Data) ->
                     {value, EvalResult, _} -> map_bindings({unused, EvalResult})
                 catch
                     _:{Reason, What} ->
-                        debugger_eval_error(io_lib:format("~s: ~p", [human_readable_reason(Reason), What]));
+                        debugger_eval_error(io_lib:format("~p: ~p", [Reason, What]));
                     _:Exp ->
                         debugger_eval_error(io_lib:format("~p", [Exp]))
                 end;
@@ -98,10 +98,6 @@ decode_request(Data) ->
     _ ->
         unknown_command
     end.
-
-human_readable_reason(unbound_var) -> "unbound variable";
-human_readable_reason(badmatch) -> "bad match";
-human_readable_reason(Atom) -> atom_to_list(Atom).
 
 debugger_eval_error(Message) ->
     #{value => iolist_to_binary(Message), type => <<"error">>}.
