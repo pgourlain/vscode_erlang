@@ -253,6 +253,7 @@ suspender_resumer_loop() ->
     receive
         {suspend, Pid} ->
             erlang:suspend_process(Pid),
+            gen_connection:send_message_to_vscode(list_to_integer(get_port()),to_string(on_pause), to_json(on_pause, {Pid, pause})),
             suspender_resumer_loop();
         {resume_if_suspended, Pid} ->
             case erlang:process_info(Pid, status) of
@@ -318,6 +319,8 @@ to_json(new_status, {Pid, break, {Module, Line}}) ->
     #{ process => list_to_binary(pid_to_list(Pid)), status => break, reason => normal, module => Module, line => Line };
 to_json(on_break, {Pid, break, {Module, Line}}) ->
     #{ process => list_to_binary(pid_to_list(Pid)), module => Module, line => Line, stacktrace => debugger_stacktrace(Pid, Line) };
+to_json(on_pause, {Pid, pause}) ->
+    #{ process => list_to_binary(pid_to_list(Pid)), stacktrace => debugger_stacktrace(Pid, -1) };
 to_json(_, _) ->
     #{}.
 
@@ -335,8 +338,3 @@ to_string(X) when is_atom(X) ->
 
 to_string(X) ->
     X.
-
-response_json(M) ->
-    {ok, B} = vscode_jsone:encode(M),
-    binary_to_list(iolist_to_binary(
-      io_lib:fwrite("HTTP/1.0 200 OK\nContent-Type: application/json\nContent-Length: ~p\n\n~s",[byte_size(B), B]))).          
