@@ -278,8 +278,7 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 		this.doProcessUserRequest(args.threadId, response, (pid:string) => this.erlangConnection.debuggerStepIn(pid));
 	}
 	protected stepOutRequest(response: DebugProtocol.StepOutResponse, args: DebugProtocol.StepOutArguments): void {
-		//this.debug("stepoOutTraceRequest");
-		super.stepOutRequest(response, args);
+		this.doProcessUserRequest(args.threadId, response, (pid:string) => this.erlangConnection.debuggerStepOut(pid));
 	}
 
 	protected pauseRequest(response: DebugProtocol.PauseResponse, args: DebugProtocol.PauseArguments): void {

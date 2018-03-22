@@ -37,7 +37,7 @@ decode_request(Data) ->
         #{};
     {debugger_stepout, SPid_as_body} ->
         resume_if_suspended(SPid_as_body),
-        int:step(list_to_pid(SPid_as_body)),
+        int:finish(list_to_pid(SPid_as_body)),
         #{};
     {debugger_pause, SPid_as_body} ->
         suspend(SPid_as_body),
