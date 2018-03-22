@@ -544,15 +544,20 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 	private onNewStatus(processName: string, status: string, reason: string, moudleName: string, line: string) {
 		//this.debug("OnStatus : " + processName + "," + status);
 		if (status === 'exit') {
-			var currentThread = this.threadIDs[processName];
-			delete this.threadIDs[processName];
-			this.sendEvent(new ThreadEvent("exited", currentThread.thid));
-			var thCount = this.threadCount(); 
-			if (thCount == 0) {
-				this.sendEvent(new TerminatedEvent());
-			} else {
-				//this.debug(`thcount:${thCount}, ${JSON.stringify(this.threadIDs)}`);
-			}
+			var that = this;
+			//Use 250ms delay to mitigate case when a process spawns another one and exits
+			//It is then possible to receive onNewStatus('exit') before onNewProcess for the spawned process
+			setTimeout(function () {
+				var currentThread = that.threadIDs[processName];
+				delete that.threadIDs[processName];
+				that.sendEvent(new ThreadEvent("exited", currentThread.thid));
+				var thCount = that.threadCount(); 
+				if (thCount == 0) {
+					that.sendEvent(new TerminatedEvent());
+				} else {
+					//that.debug(`thcount:${thCount}, ${JSON.stringify(that.threadIDs)}`);
+				}
+			}, 250);
 		}
 	}
 
