@@ -34,8 +34,7 @@ decode_request(Data) ->
         int:finish(list_to_pid(SPid_as_body)),
         #{};
     {debugger_pause, SPid_as_body} ->
-        {ok, Meta} = dbg_iserver:call({get_meta, list_to_pid(SPid_as_body)}),
-        dbg_icmd:stop(Meta),
+        debugger_pause(list_to_pid(SPid_as_body)),
         #{};
     {debugger_bindings, Body} ->
         Lines =  string:tokens(Body, "\r\n"),
@@ -155,6 +154,34 @@ parent_line(UnderlyingPid, Sp, _StackFrames) ->
             -1
     end.
 
+debugger_pause(Pid) ->
+    {ok, Meta} = dbg_iserver:call({get_meta, Pid}),
+    dbg_icmd:stop(Meta),
+    timer:sleep(100),
+    case lists:keyfind(Pid, 1, int:snapshot()) of
+        {_, _, break, _} ->
+            ok;
+        _ ->
+            erlang:suspend_process(Pid),
+            set_temp_breakpoint(debugger_stacktrace(Pid, -1)),
+            erlang:resume_process(Pid)
+    end.
+
+set_temp_breakpoint([]) ->
+    false;
+set_temp_breakpoint([#{module := Module, line := Line} | T]) ->
+    case lists:member(Module, int:interpreted()) of
+        true ->
+            case int:break(Module, Line) of
+                ok ->
+                    int:action_at_break(Module, Line, delete);
+                _ ->
+                    ok
+            end;
+        _ ->
+            set_temp_breakpoint(T)
+    end.
+
 type_of_binding(Value) when is_list(Value) ->
     case lists:all(fun(X) when X >= 32, X < 127 -> true; (_) -> false end, Value) of
         true -> string;
@@ -230,6 +257,8 @@ decode_debugger_message(VsCodePort, M) ->
     case M of
     {new_process, {_Pid, {_Module, module_info, _Args}, _Status, _Other}} ->
         % ignore processes calling module_info started by debugger itself
+        ok;
+    {break_options, _Data} ->
         ok;
     {Verb, Data} ->
         gen_connection:send_message_to_vscode(VsCodePort,to_string(Verb), to_json(Verb, Data));
