@@ -278,7 +278,14 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 		this.doProcessUserRequest(args.threadId, response, (pid:string) => this.erlangConnection.debuggerStepIn(pid));
 	}
 	protected stepOutRequest(response: DebugProtocol.StepOutResponse, args: DebugProtocol.StepOutArguments): void {
-		this.doProcessUserRequest(args.threadId, response, (pid:string) => this.erlangConnection.debuggerStepOut(pid));
+		var processName = this.thread_id_to_pid(args.threadId);
+		var thread = this.threadIDs[processName];
+		if (thread && thread.stack && thread.stack.length == 1) {
+			this.doProcessUserRequest(args.threadId, response, (pid:string) => this.erlangConnection.debuggerContinue(pid));	
+		}
+		else {
+			this.doProcessUserRequest(args.threadId, response, (pid:string) => this.erlangConnection.debuggerStepOut(pid));
+		}
 	}
 
 	protected pauseRequest(response: DebugProtocol.PauseResponse, args: DebugProtocol.PauseArguments): void {
@@ -294,6 +301,7 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 	}
 
 	protected scopesRequest(response: DebugProtocol.ScopesResponse, args: DebugProtocol.ScopesArguments): void {
+		//this.debug("scopesRequest :" + JSON.stringify(args));
 		var vars = [];
 		var frameId = Math.floor(args.frameId / 100000);
 		var threadId = (args.frameId - frameId * 100000);
