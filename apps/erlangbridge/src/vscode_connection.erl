@@ -134,11 +134,11 @@ debugger_stacktrace(Pid, CurrentLine) when is_pid(Pid) ->
 
 process_backtrace(_UnderlyingPid, [], Frames, _Line) ->
     lists:reverse(Frames);
-process_backtrace(UnderlyingPid, [{Sp, {Module, Function, _Args}} | T], Frames, Line) ->
+process_backtrace(UnderlyingPid, [{Sp, {Module, Function, Args}} | T], Frames, Line) ->
     Frame = #{
         sp => Sp,
         module => Module,
-        func => Function,
+        func => list_to_binary(io_lib:format("~p/~p", [Function, length(Args)])),
         source => sourceFileOf(Module),
         line => Line
     },

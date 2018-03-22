@@ -536,7 +536,7 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 	private isOnBreakPoint(module: string, line : string) : boolean {
 		var nLine = Number(line);
 		var candidates = this._breakPoints.filter(bp => {
-			return bp.line == nLine && bp.source.name == module + ".erl";
+			return bp.line == nLine && bp.source.name == module;
 		});
 		return candidates.length > 0;
 	}
