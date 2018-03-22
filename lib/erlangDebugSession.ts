@@ -185,10 +185,10 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 		let vscodeBreakpoints: Breakpoint[];
 		vscodeBreakpoints = [];
 		//this.debug("setbreakpoints : " + JSON.stringify(<any>args));
-		let targetModuleName = path.basename(args.source.name, ".erl");
+		let targetModuleName = path.basename(args.source.path, ".erl");
 
 		args.breakpoints.forEach(bp => {
-			vscodeBreakpoints.push(new Breakpoint(true, bp.line, 1, new Source(args.source.name, args.source.path)))
+			vscodeBreakpoints.push(new Breakpoint(true, bp.line, 1, new Source(targetModuleName, args.source.path)))
 		});
 		this._updateBreakPoints(targetModuleName, vscodeBreakpoints);
 		this._setAllBreakpoints(targetModuleName);
@@ -197,8 +197,7 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 	}
 
 	private _setAllBreakpoints(moduleName : string) {
-		let fileName = moduleName + ".erl";
-		let modulebreakpoints = this._breakPoints.filter((bp) => bp.source.name == fileName);
+		let modulebreakpoints = this._breakPoints.filter((bp) => bp.source.name == moduleName);
 		let moduleFunctionBreakpoints = this._functionBreakPoints.has(moduleName) ? this._functionBreakPoints.get(moduleName) : [];
 		if (this.erlangConnection.isConnected) {
 			if (!this._LaunchArguments.noDebug) {
@@ -210,8 +209,7 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 	}
 
 	private _updateBreakPoints(moduleName : string, bps : Breakpoint[]) {
-		let fileName = moduleName + ".erl";
-		let newBps = this._breakPoints.filter((bp) => bp.source.name != fileName);
+		let newBps = this._breakPoints.filter((bp) => bp.source.name != moduleName);
 		this._breakPoints = newBps.concat(bps);
 	}
 
