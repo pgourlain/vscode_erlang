@@ -521,7 +521,7 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 			currentThread.stack = stacktrace;
 			var breakReason = "breakpoint";
 			if (!this.isOnBreakPoint(module, line)) {
-					breakReason = "step";
+				breakReason = "step";
 			}
 			//this._breakPoints.forEach()
 			this.sendEvent(new StoppedEvent(breakReason, currentThread.thid));
@@ -540,7 +540,7 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 	private isOnBreakPoint(module: string, line : string) : boolean {
 		var nLine = Number(line);
 		var candidates = this._breakPoints.filter(bp => {
-				return bp.line == nLine && bp.source.name == module;
+			return bp.line == nLine && bp.source.name == module + ".erl";
 		});
 		return candidates.length > 0;
 	}
