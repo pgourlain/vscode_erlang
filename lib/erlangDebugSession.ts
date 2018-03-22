@@ -85,7 +85,6 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 		this.erlangConnection.on("new_process", (arg) => this.onNewProcess(arg));
 		this.erlangConnection.on("new_status", (pid, status, reason, moduleName, line) => this.onNewStatus(pid, status, reason, moduleName, line));
 		this.erlangConnection.on("on_break", (pid, moduleName, line, stacktrace) => this.onBreak(pid, moduleName, line, stacktrace));
-		this.erlangConnection.on("on_pause", (pid, stacktrace) => this.onPause(pid, stacktrace));
 		this.erlangConnection.on("fbp_verified", (moduleName, functionName, arity) => this.onFbpVerified(moduleName, functionName, arity));
 
 		response.body.supportsConfigurationDoneRequest = true;
@@ -351,12 +350,12 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 
 			for (let i = startFrame; i < endFrame; i++) {
 				var frame = stackAsObject[i];
-				const name = frame.module;
+				const name = frame.func;
 				const sourceFile = frame.source;
 				const line = frame.line;
 				if (fs.existsSync(sourceFile)) {
-					frames.push(new StackFrame(frame.sp * 100000 + thread.thid, `${name}(${line})`,
-						new Source(path.basename(sourceFile), this.convertDebuggerPathToClient(sourceFile)),
+					frames.push(new StackFrame(frame.sp * 100000 + thread.thid, name,
+						new Source(frame.module, this.convertDebuggerPathToClient(sourceFile)),
 						this.convertDebuggerLineToClient(line), 0));
 				}
 				else {
@@ -523,25 +522,16 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 	}
 
 	private onBreak(processName: string, module: string, line: string, stacktrace: any) {
-		//this.debug(`onBreak : ${processName} stacktrace:${stacktrace}`);
+		//this.debug(`onBreak : ${processName} stacktrace:${JSON.stringify(stacktrace)}`);
 		var currentThread = this.threadIDs[processName];
 		if (currentThread) {
 			currentThread.stack = stacktrace;
 			var breakReason = "breakpoint";
 			if (!this.isOnBreakPoint(module, line)) {
-				breakReason = "step";
+				breakReason = "";
 			}
 			//this._breakPoints.forEach()
 			this.sendEvent(new StoppedEvent(breakReason, currentThread.thid));
-		}
-	}
-
-	private onPause(processName: string, stacktrace: any) {
-		//this.debug(`onPause : ${processName} stacktrace:${stacktrace}`);
-		var currentThread = this.threadIDs[processName];
-		if (currentThread) {
-			currentThread.stack = stacktrace;
-			this.sendEvent(new StoppedEvent("pause", currentThread.thid));
 		}
 	}
 

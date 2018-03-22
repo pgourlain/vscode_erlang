@@ -30,9 +30,6 @@ export class ErlangDebugConnection extends ErlangConnection {
             case "/on_break":
                 this.emit("on_break", body.process, body.module, body.line, body.stacktrace);
             break;
-            case "/on_pause":
-                this.emit("on_pause", body.process, body.stacktrace);
-            break;
             case "/delete_break":
             break;
             case "/fbp_verified":

@@ -1,8 +1,7 @@
 -module(vscode_connection).
 -behaviour(gen_connection).
 
--export([start/0]).
--export([debugger_stacktrace/2, debugger_bindings/2, set_breakpoint/2]).
+-export([start/0, set_breakpoint/2]).
 
 % export for gen_connection behaviour
 -export([get_port/0, init/1, decode_request/1]).
@@ -17,30 +16,26 @@ get_port() ->
     P.
 
 init(Port) ->
-    init_subscribe(Port),
-    init_suspender_resumer().
+    init_subscribe(Port).
 
 decode_request(Data) ->
     %"POST debugger_continue HTTP/1.1\r\nContent-Type: plain/text\r\nContent-Length: 1\r\nHost: 127.0.0.1:36477\r\nConnection: close\r\n\r\n3"
     case parse_request(Data) of
     {debugger_continue, SPid_as_body} ->
-        resume_if_suspended(SPid_as_body),
         int:continue(list_to_pid(SPid_as_body)),
         #{};
     {debugger_next, SPid_as_body} ->
-        resume_if_suspended(SPid_as_body),
         int:next(list_to_pid(SPid_as_body)),
         #{};
     {debugger_stepin, SPid_as_body} ->
-        resume_if_suspended(SPid_as_body),
         int:step(list_to_pid(SPid_as_body)),
         #{};
     {debugger_stepout, SPid_as_body} ->
-        resume_if_suspended(SPid_as_body),
         int:finish(list_to_pid(SPid_as_body)),
         #{};
     {debugger_pause, SPid_as_body} ->
-        suspend(SPid_as_body),
+        {ok, Meta} = dbg_iserver:call({get_meta, list_to_pid(SPid_as_body)}),
+        dbg_icmd:stop(Meta),
         #{};
     {debugger_bindings, Body} ->
         Lines =  string:tokens(Body, "\r\n"),
@@ -134,51 +129,31 @@ debugger_eval_bindings(PidString, Sp) ->
     {ok, Meta} = dbg_iserver:call({get_meta, list_to_pid(PidString)}),
     int:meta(Meta, bindings, erlang:list_to_integer(Sp)).
 
-backtrace_item(I) ->
-    {Sp, {M, F, Args, Frame}} = I,
-    Line = get_line_from_frame(Frame),
-    IndexedArgs = lists:zip(lists:seq(1, length(Args)), Args),
-    #{
-        sp => Sp,
-        module => M,
-        function => F,
-        args => lists:map(fun({Index, El}) -> map_bindings({iolist_to_binary(io_lib:format("$~p", [Index])), El}) end, IndexedArgs),
-        source => sourceFileOf(M),
-        line => Line
-    }.
-
-get_line_from_frame({_,{_,Line},_})->
-    Line;
-get_line_from_frame(_)->
-    -1.
-
-add_framesinfo(Pid, BT, FirstLine) ->
-    {H, _} = lists:split(length(BT) - 1, BT),
-    Frames = [frameinfo(Pid, F) || F <- H],
-    [add_frameinfo(F, Frames, FirstLine) || F <- BT].
-
-frameinfo(Pid, F) ->
-    {Sp, {_, _, _}} = F,
-    Frame = int:meta(Pid, stack_frame, {up, Sp}),
-    Frame.
-
-add_frameinfo(F, Frames, FirstLine) ->
-    %sample : {2,{mymodule_app,start,[normal,[]]}}
-    {Sp, {M, Fun, Args}} = F,
-    Frame = lists:keyfind(Sp, 1, Frames),
-    NewFrame = case Frame of
-        false -> {-1, {uknown_module, FirstLine},[]};
-        _ -> Frame
-    end,
-    {Sp, {M, Fun, Args, NewFrame}}.
-    %F.
-
-debugger_stacktrace(Pid, FirstLine) when is_pid(Pid) ->
-    %%get the underlying Pid
+debugger_stacktrace(Pid, CurrentLine) when is_pid(Pid) ->
     {ok, UnderlyingPid} = dbg_iserver:safe_call({get_meta,Pid}),
-    BackTrace = int:meta(UnderlyingPid,backtrace,all),
-    BTAndSF = add_framesinfo(UnderlyingPid, BackTrace, FirstLine),
-    lists:map(fun backtrace_item/1, BTAndSF).
+    process_backtrace(UnderlyingPid, int:meta(UnderlyingPid, backtrace, all), [], CurrentLine).
+
+process_backtrace(_UnderlyingPid, [], Frames, _Line) ->
+    lists:reverse(Frames);
+process_backtrace(UnderlyingPid, [{Sp, {Module, Function, _Args}} | T], Frames, Line) ->
+    Frame = #{
+        sp => Sp,
+        module => Module,
+        func => Function,
+        source => sourceFileOf(Module),
+        line => Line
+    },
+    process_backtrace(UnderlyingPid, T, [Frame | Frames], parent_line(UnderlyingPid, Sp, T)).
+
+parent_line(_UnderlyingPid, _Sp, []) ->
+    -1;
+parent_line(UnderlyingPid, Sp, _StackFrames) ->
+    case int:meta(UnderlyingPid, stack_frame, {up, Sp}) of
+        {_Sp, {_Module, Line}, _Args} ->
+            Line;
+        _ ->
+            -1
+    end.
 
 type_of_binding(Value) when is_list(Value) ->
     case lists:all(fun(X) when X >= 32, X < 127 -> true; (_) -> false end, Value) of
@@ -244,31 +219,6 @@ loop_subscribe(VsCodePort) ->
 			loop_subscribe(VsCodePort)
 	end.
 
-init_suspender_resumer() ->
-    register(vscode_suspender_resumer, spawn(fun () -> suspender_resumer_loop() end)).
-
-suspender_resumer_loop() ->
-    receive
-        {suspend, Pid} ->
-            erlang:suspend_process(Pid),
-            gen_connection:send_message_to_vscode(list_to_integer(get_port()),to_string(on_pause), to_json(on_pause, {Pid, pause})),
-            suspender_resumer_loop();
-        {resume_if_suspended, Pid} ->
-            case erlang:process_info(Pid, status) of
-                {status, suspended} ->
-                    erlang:resume_process(Pid);
-                _ ->
-                    ok
-            end,
-            suspender_resumer_loop()
-    end.
-
-suspend(SPid) ->
-    vscode_suspender_resumer ! {suspend, list_to_pid(SPid)}.
-
-resume_if_suspended(SPid) ->
-    vscode_suspender_resumer ! {resume_if_suspended, list_to_pid(SPid)}.
-
 decode_debugger_message(VsCodePort, M) ->
     %% samples of M
     %{interpret,mymodule_app}
@@ -317,8 +267,6 @@ to_json(new_status, {Pid, break, {Module, Line}}) ->
     #{ process => list_to_binary(pid_to_list(Pid)), status => break, reason => normal, module => Module, line => Line };
 to_json(on_break, {Pid, break, {Module, Line}}) ->
     #{ process => list_to_binary(pid_to_list(Pid)), module => Module, line => Line, stacktrace => debugger_stacktrace(Pid, Line) };
-to_json(on_pause, {Pid, pause}) ->
-    #{ process => list_to_binary(pid_to_list(Pid)), stacktrace => debugger_stacktrace(Pid, -1) };
 to_json(_, _) ->
     #{}.
 
