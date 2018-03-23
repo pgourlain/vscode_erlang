@@ -26,7 +26,7 @@ interface DebugVariable {
 /** this class is entry point of debugger  */
 export class ErlangDebugSession extends DebugSession implements genericShell.IErlangShellOutput {
 
-	protected threadIDs: { [processName: string]: {thid: number, stack:any, isBreak : boolean }};
+	protected threadIDs: { [processName: string]: {thid: number, stack:any }};
 	erlDebugger: ErlangShellForDebugging;
 	erlangConnection: ErlangDebugConnection;
 	quit: boolean;
@@ -185,10 +185,10 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 		let vscodeBreakpoints: Breakpoint[];
 		vscodeBreakpoints = [];
 		//this.debug("setbreakpoints : " + JSON.stringify(<any>args));
-		let targetModuleName = path.basename(args.source.name, ".erl");
+		let targetModuleName = path.basename(args.source.path, ".erl");
 
 		args.breakpoints.forEach(bp => {
-			vscodeBreakpoints.push(new Breakpoint(true, bp.line, 1, new Source(args.source.name, args.source.path)))
+			vscodeBreakpoints.push(new Breakpoint(true, bp.line, 1, new Source(targetModuleName, args.source.path)))
 		});
 		this._updateBreakPoints(targetModuleName, vscodeBreakpoints);
 		this._setAllBreakpoints(targetModuleName);
@@ -197,8 +197,7 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 	}
 
 	private _setAllBreakpoints(moduleName : string) {
-		let fileName = moduleName + ".erl";
-		let modulebreakpoints = this._breakPoints.filter((bp) => bp.source.name == fileName);
+		let modulebreakpoints = this._breakPoints.filter((bp) => bp.source.name == moduleName);
 		let moduleFunctionBreakpoints = this._functionBreakPoints.has(moduleName) ? this._functionBreakPoints.get(moduleName) : [];
 		if (this.erlangConnection.isConnected) {
 			if (!this._LaunchArguments.noDebug) {
@@ -210,8 +209,7 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 	}
 
 	private _updateBreakPoints(moduleName : string, bps : Breakpoint[]) {
-		let fileName = moduleName + ".erl";
-		let newBps = this._breakPoints.filter((bp) => bp.source.name != fileName);
+		let newBps = this._breakPoints.filter((bp) => bp.source.name != moduleName);
 		this._breakPoints = newBps.concat(bps);
 	}
 
@@ -255,17 +253,18 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 	private doProcessUserRequest(threadId : number, response: DebugProtocol.Response, fn: (pid : string) => Promise<boolean>) {
 		this.sendResponse(response);
 		fn(this.thread_id_to_pid(threadId)).then(
-				() => {
-						this.sendEvent(new ContinuedEvent(threadId));                
-				},
-				(reason) => {
-						this.error("unable to continue debugging.")
-						this.sendEvent(new TerminatedEvent());
-						this.sendErrorResponse(response, 3000, `Unable to continue debugging : ${reason}`);
-				});
+			() => {
+				this.sendEvent(new ContinuedEvent(threadId, false));
+			},
+			(reason) => {
+				this.error("unable to continue debugging.")
+				this.sendEvent(new TerminatedEvent());
+				this.sendErrorResponse(response, 3000, `Unable to continue debugging : ${reason}`);
+			});
 	}
 
 	protected continueRequest(response: DebugProtocol.ContinueResponse, args: DebugProtocol.ContinueArguments): void {
+		response.body = { allThreadsContinued: false };
 		this.doProcessUserRequest(args.threadId, response, (pid:string) => this.erlangConnection.debuggerContinue(pid));
 	}
 
@@ -276,11 +275,30 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 		this.doProcessUserRequest(args.threadId, response, (pid:string) => this.erlangConnection.debuggerStepIn(pid));
 	}
 	protected stepOutRequest(response: DebugProtocol.StepOutResponse, args: DebugProtocol.StepOutArguments): void {
-		//this.debug("stepoOutTraceRequest");
-		super.stepOutRequest(response, args);
+		var processName = this.thread_id_to_pid(args.threadId);
+		var thread = this.threadIDs[processName];
+		if (thread && thread.stack && thread.stack.length == 1) {
+			this.doProcessUserRequest(args.threadId, response, (pid:string) => this.erlangConnection.debuggerContinue(pid));	
+		}
+		else {
+			this.doProcessUserRequest(args.threadId, response, (pid:string) => this.erlangConnection.debuggerStepOut(pid));
+		}
+	}
+
+	protected pauseRequest(response: DebugProtocol.PauseResponse, args: DebugProtocol.PauseArguments): void {
+		//this.debug("pauseRequest :" + JSON.stringify(args));
+		this.sendResponse(response);
+		this.erlangConnection.debuggerPause(this.thread_id_to_pid(args.threadId)).then(
+			() => {
+			},
+			(reason) => {
+				this.error("unable to pause.")
+				this.sendErrorResponse(response, 3000, `Unable to pause : ${reason}`);
+			});
 	}
 
 	protected scopesRequest(response: DebugProtocol.ScopesResponse, args: DebugProtocol.ScopesArguments): void {
+		//this.debug("scopesRequest :" + JSON.stringify(args));
 		var vars = [];
 		var frameId = Math.floor(args.frameId / 100000);
 		var threadId = (args.frameId - frameId * 100000);
@@ -328,18 +346,30 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 			const maxLevels = args.levels;
 			const endFrame = Math.min(startFrame + maxLevels, stackAsObject.length);
 
-			for (let i= startFrame; i < endFrame; i++) {
+			for (let i = startFrame; i < endFrame; i++) {
 				var frame = stackAsObject[i];
-				const name = frame.module;
+				const name = frame.func;
 				const sourceFile = frame.source;
 				const line = frame.line;
-				frames.push(new StackFrame(frame.sp*100000+thread.thid, `${name}(${line})`, 
-					new Source(path.basename(sourceFile), this.convertDebuggerPathToClient(sourceFile)),
-					this.convertDebuggerLineToClient(line), 0));
+				if (fs.existsSync(sourceFile)) {
+					frames.push(new StackFrame(frame.sp * 100000 + thread.thid, name,
+						new Source(frame.module, this.convertDebuggerPathToClient(sourceFile)),
+						this.convertDebuggerLineToClient(line), 0));
+				}
+				else {
+					frames.push(new StackFrame(frame.sp * 100000 + thread.thid, path.basename(sourceFile), null, <any>""));
+				}
 			}
 			response.body = {
 				stackFrames: frames,
-				totalFrames: endFrame-startFrame
+				totalFrames: endFrame - startFrame
+			};
+			this.sendResponse(response);
+		}
+		else {
+			response.body = {
+				stackFrames: [],
+				totalFrames: 0
 			};
 			this.sendResponse(response);
 		}
@@ -485,19 +515,18 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 		//each process in erlang is mapped to one 'thread'
 		//this.debug("OnNewProcess : " + processName);
 		var thid = this.pid_to_number(processName);
-		this.threadIDs[processName] = {thid:thid, stack:null, isBreak:false};
+		this.threadIDs[processName] = {thid:thid, stack:null};
 		this.sendEvent(new ThreadEvent("started", thid));
 	}
 
 	private onBreak(processName: string, module: string, line: string, stacktrace: any) {
-		//this.debug(`onBreak : ${processName} stacktrace:${stacktrace}`);
+		//this.debug(`onBreak : ${processName} stacktrace:${JSON.stringify(stacktrace)}`);
 		var currentThread = this.threadIDs[processName];
 		if (currentThread) {
 			currentThread.stack = stacktrace;
-			currentThread.isBreak = true;
 			var breakReason = "breakpoint";
 			if (!this.isOnBreakPoint(module, line)) {
-					breakReason = "step";
+				breakReason = "";
 			}
 			//this._breakPoints.forEach()
 			this.sendEvent(new StoppedEvent(breakReason, currentThread.thid));
@@ -507,7 +536,7 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 	private isOnBreakPoint(module: string, line : string) : boolean {
 		var nLine = Number(line);
 		var candidates = this._breakPoints.filter(bp => {
-				return bp.line == nLine && bp.source.name == module;
+			return bp.line == nLine && bp.source.name == module;
 		});
 		return candidates.length > 0;
 	}
@@ -515,15 +544,20 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 	private onNewStatus(processName: string, status: string, reason: string, moudleName: string, line: string) {
 		//this.debug("OnStatus : " + processName + "," + status);
 		if (status === 'exit') {
-			var currentThread = this.threadIDs[processName];
-			delete this.threadIDs[processName];
-			this.sendEvent(new ThreadEvent("exited", currentThread.thid));
-			var thCount = this.threadCount(); 
-			if (thCount == 0) {
-				this.sendEvent(new TerminatedEvent());
-			} else {
-				//this.debug(`thcount:${thCount}, ${JSON.stringify(this.threadIDs)}`);
-			}
+			var that = this;
+			//Use 250ms delay to mitigate case when a process spawns another one and exits
+			//It is then possible to receive onNewStatus('exit') before onNewProcess for the spawned process
+			setTimeout(function () {
+				var currentThread = that.threadIDs[processName];
+				delete that.threadIDs[processName];
+				that.sendEvent(new ThreadEvent("exited", currentThread.thid));
+				var thCount = that.threadCount(); 
+				if (thCount == 0) {
+					that.sendEvent(new TerminatedEvent());
+				} else {
+					//that.debug(`thcount:${thCount}, ${JSON.stringify(that.threadIDs)}`);
+				}
+			}, 250);
 		}
 	}
 

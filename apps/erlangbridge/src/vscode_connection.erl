@@ -1,8 +1,7 @@
 -module(vscode_connection).
 -behaviour(gen_connection).
 
--export([start/0, start/1]).
--export([debugger_stacktrace/2, debugger_bindings/2, set_breakpoint/2]).
+-export([start/0, set_breakpoint/2]).
 
 % export for gen_connection behaviour
 -export([get_port/0, init/1, decode_request/1]).
@@ -10,10 +9,6 @@
 
 %%called with "erl -s vscode_connection -vscode_port 1234"
 start() ->
-    gen_connection:start(?MODULE).
-
-%%called with "erl -s vscode_connection start 1234"
-start(Args) ->
     gen_connection:start(?MODULE).
 
 get_port() ->
@@ -36,10 +31,11 @@ decode_request(Data) ->
         int:step(list_to_pid(SPid_as_body)),
         #{};
     {debugger_stepout, SPid_as_body} ->
-        int:step(list_to_pid(SPid_as_body)),
+        int:finish(list_to_pid(SPid_as_body)),
         #{};
-    {debugger_stacktrace, SPid_as_body} ->
-        debugger_stacktrace(list_to_pid(SPid_as_body), -1);
+    {debugger_pause, SPid_as_body} ->
+        debugger_pause(list_to_pid(SPid_as_body)),
+        #{};
     {debugger_bindings, Body} ->
         Lines =  string:tokens(Body, "\r\n"),
         Pid = lists:nth(1, Lines),
@@ -81,21 +77,30 @@ decode_request(Data) ->
             Breakpoints),
         #{}; 
     {debugger_eval, Body} ->
-        [Pid, Sp, Expression] = string:tokens(Body, "\r\n"),
-        {ok, Meta} = dbg_iserver:call({get_meta, list_to_pid(Pid)}),
-        Bindings = int:meta(Meta, bindings, erlang:list_to_integer(Sp)),
+        [PidString, Sp, Expression] = string:tokens(Body, "\r\n"),
+        Bindings = debugger_eval_bindings(PidString, Sp),
         {ok, Tokens, _} = erl_scan:string(Expression ++ "."),
-        {ok, Exprs} = erl_parse:parse_exprs(Tokens),
-        try erl_eval:exprs(Exprs, orddict:from_list(Bindings)) of
-            {value, EvalResult, _} -> map_bindings({unused, EvalResult})
-        catch
-            _:Exp -> #{value => iolist_to_binary(io_lib:format("~p", [Exp])), type => <<"error">>}    
+        case erl_parse:parse_exprs(Tokens) of
+            {ok, Exprs} ->
+                try erl_eval:exprs(Exprs, orddict:from_list(Bindings)) of
+                    {value, EvalResult, _} -> map_bindings({unused, EvalResult})
+                catch
+                    _:{Reason, What} ->
+                        debugger_eval_error(io_lib:format("~p: ~p", [Reason, What]));
+                    _:Exp ->
+                        debugger_eval_error(io_lib:format("~p", [Exp]))
+                end;
+            {error,{_,erl_parse, Messages}} ->
+                debugger_eval_error(lists:flatten(Messages))
         end;
     {debugger_exit, _Body} ->
         init:stop(0);
     _ ->
         unknown_command
     end.
+
+debugger_eval_error(Message) ->
+    #{value => iolist_to_binary(Message), type => <<"error">>}.
 
 parse_request(Data) ->
     Content = binary_to_list(Data),
@@ -117,52 +122,65 @@ set_breakpoint(Module, {function, Name, Arity}) ->
         Error -> io:format("Cannot set brakepoint ~p:~p/~p by ~p~n", [Module, Name, Arity, Error])
     end.
 
-backtrace_item(I) ->
-    {Sp, {M, F, Args, Frame}} = I,
-    Line = get_line_from_frame(Frame),
-    IndexedArgs = lists:zip(lists:seq(1, length(Args)), Args),
-    #{
-        sp => Sp,
-        module => M,
-        function => F,
-        args => lists:map(fun({Index, El}) -> map_bindings({iolist_to_binary(io_lib:format("$~p", [Index])), El}) end, IndexedArgs),
-        source => sourceFileOf(M),
-        line => Line
-    }.
+debugger_eval_bindings("<0.0.0>", _) ->
+    [];
+debugger_eval_bindings(PidString, Sp) ->
+    {ok, Meta} = dbg_iserver:call({get_meta, list_to_pid(PidString)}),
+    int:meta(Meta, bindings, erlang:list_to_integer(Sp)).
 
-get_line_from_frame({_,{_,Line},_})->
-    Line;
-get_line_from_frame(_)->
-    -1.
-
-add_framesinfo(Pid, BT, FirstLine) ->
-    {H, _} = lists:split(length(BT) - 1, BT),
-    Frames = [frameinfo(Pid, F) || F <- H],
-    [add_frameinfo(F, Frames, FirstLine) || F <- BT].
-
-
-frameinfo(Pid, F) ->
-    {Sp, {_, _, _}} = F,
-    Frame = int:meta(Pid, stack_frame, {up, Sp}),
-    Frame.
-
-add_frameinfo(F, Frames, FirstLine) ->
-    %sample : {2,{mymodule_app,start,[normal,[]]}}
-    {Sp, {M, Fun, Args}} = F,
-    Frame = lists:keyfind(Sp, 1, Frames),
-    NewFrame = case Frame of
-        false -> {-1, {uknown_module, FirstLine},[]};
-        _ -> Frame
-    end,
-    {Sp, {M, Fun, Args, NewFrame}}.
-    %F.
-
-debugger_stacktrace(Pid, FirstLine) when is_pid(Pid) ->
-    %%get the underlying Pid
+debugger_stacktrace(Pid, CurrentLine) when is_pid(Pid) ->
     {ok, UnderlyingPid} = dbg_iserver:safe_call({get_meta,Pid}),
-    BackTrace = int:meta(UnderlyingPid,backtrace,all),
-    BTAndSF = add_framesinfo(UnderlyingPid, BackTrace, FirstLine),
-    lists:map(fun backtrace_item/1, BTAndSF).
+    process_backtrace(UnderlyingPid, int:meta(UnderlyingPid, backtrace, all), [], CurrentLine).
+
+process_backtrace(_UnderlyingPid, [], Frames, _Line) ->
+    lists:reverse(Frames);
+process_backtrace(UnderlyingPid, [{Sp, {Module, Function, Args}} | T], Frames, Line) ->
+    Frame = #{
+        sp => Sp,
+        module => Module,
+        func => list_to_binary(io_lib:format("~p/~p", [Function, length(Args)])),
+        source => sourceFileOf(Module),
+        line => Line
+    },
+    process_backtrace(UnderlyingPid, T, [Frame | Frames], parent_line(UnderlyingPid, Sp, T)).
+
+parent_line(_UnderlyingPid, _Sp, []) ->
+    -1;
+parent_line(UnderlyingPid, Sp, _StackFrames) ->
+    case int:meta(UnderlyingPid, stack_frame, {up, Sp}) of
+        {_Sp, {_Module, Line}, _Args} ->
+            Line;
+        _ ->
+            -1
+    end.
+
+debugger_pause(Pid) ->
+    {ok, Meta} = dbg_iserver:call({get_meta, Pid}),
+    dbg_icmd:stop(Meta),
+    timer:sleep(100),
+    case lists:keyfind(Pid, 1, int:snapshot()) of
+        {_, _, break, _} ->
+            ok;
+        _ ->
+            erlang:suspend_process(Pid),
+            set_temp_breakpoint(debugger_stacktrace(Pid, -1)),
+            erlang:resume_process(Pid)
+    end.
+
+set_temp_breakpoint([]) ->
+    false;
+set_temp_breakpoint([#{module := Module, line := Line} | T]) ->
+    case lists:member(Module, int:interpreted()) of
+        true ->
+            case int:break(Module, Line) of
+                ok ->
+                    int:action_at_break(Module, Line, delete);
+                _ ->
+                    ok
+            end;
+        _ ->
+            set_temp_breakpoint(T)
+    end.
 
 type_of_binding(Value) when is_list(Value) ->
     case lists:all(fun(X) when X >= 32, X < 127 -> true; (_) -> false end, Value) of
@@ -240,6 +258,8 @@ decode_debugger_message(VsCodePort, M) ->
     {new_process, {_Pid, {_Module, module_info, _Args}, _Status, _Other}} ->
         % ignore processes calling module_info started by debugger itself
         ok;
+    {break_options, _Data} ->
+        ok;
     {Verb, Data} ->
         gen_connection:send_message_to_vscode(VsCodePort,to_string(Verb), to_json(Verb, Data));
     {new_status,Pid,idle,_} ->
@@ -293,8 +313,3 @@ to_string(X) when is_atom(X) ->
 
 to_string(X) ->
     X.
-
-response_json(M) ->
-    {ok, B} = vscode_jsone:encode(M),
-    binary_to_list(iolist_to_binary(
-      io_lib:fwrite("HTTP/1.0 200 OK\nContent-Type: application/json\nContent-Length: ~p\n\n~s",[byte_size(B), B]))).          
