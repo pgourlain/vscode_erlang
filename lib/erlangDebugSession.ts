@@ -558,7 +558,7 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 		//this.debug("OnStatus : " + processName + "," + status);
 		if (status === 'exit') {
 			var that = this;
-			//Use 250ms delay to mitigate case when a process spawns another one and exits
+			//Use 125ms delay to mitigate case when a process spawns another one and exits
 			//It is then possible to receive onNewStatus('exit') before onNewProcess for the spawned process
 			setTimeout(function () {
 				var currentThread = that.threadIDs[processName];
@@ -572,7 +572,7 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 				} else {
 					//that.debug(`thcount:${thCount}, ${JSON.stringify(that.threadIDs)}`);
 				}
-			}, 250);
+			}, 125);
 		}
 	}
 
