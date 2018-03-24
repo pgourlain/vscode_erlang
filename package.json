@@ -195,7 +195,10 @@
 		{
 			"name": "erlang",
 			"owner": "erlang",
-			"fileLocation": ["relative", "${workspaceRoot}"],
+			"fileLocation": [
+				"relative",
+				"${workspaceRoot}"
+			],
 			"pattern": {
 				"regexp": "^(.*):(\\d+):\\s+((Warning): )?(.*)$",
 				"file": 1,
