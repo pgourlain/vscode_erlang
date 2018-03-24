@@ -1,10 +1,23 @@
 
 # Change log
+
+## Version 0.2.1 (March 24, 2018)
+### Debugging Fix and improvements 
+* [PR #42](https://github.com/pgourlain/vscode_erlang/pull/42)
+	- Step Out support
+	- Pause support
+	- Call stack shows function names with arity
+	- Other minor improvements and bug fixes
+
+Thanks to [Wojtek Surowka](https://github.com/wojteksurowka)
+
+---
+
 ## Version 0.2.0 (March 17, 2018)
 ### Debugging Fix and improvements 
 - [PR #37](https://github.com/pgourlain/vscode_erlang/pull/37), [PR #39](https://github.com/pgourlain/vscode_erlang/pull/39), [PR #40](https://github.com/pgourlain/vscode_erlang/pull/40)
 
-Thanks to [wojteksurowka](https://github.com/wojteksurowka)
+Thanks to [Wojtek Surowka](https://github.com/wojteksurowka)
 
 ## Previous versions
 * 0.1.9 Linter fix : (disable epp warnings)
