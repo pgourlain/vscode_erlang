@@ -192,21 +192,22 @@
 			}
 		},
 		"problemMatchers": [
-		{
-			"name": "erlang",
-			"owner": "erlang",
-			"fileLocation": [
-				"relative",
-				"${workspaceRoot}"
-			],
-			"pattern": {
-				"regexp": "^(.*):(\\d+):\\s+((Warning): )?(.*)$",
-				"file": 1,
-				"line": 2,
-				"severity": 4,
-				"message": 5
+			{
+				"name": "erlang",
+				"owner": "erlang",
+				"fileLocation": [
+					"relative",
+					"${workspaceRoot}"
+				],
+				"pattern": {
+					"regexp": "^(.*):(\\d+):\\s+((Warning): )?(.*)$",
+					"file": 1,
+					"line": 2,
+					"severity": 4,
+					"message": 5
+				}
 			}
-		}]
+		]
 	},
 	"repository": {
 		"type": "git",
