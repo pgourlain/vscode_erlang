@@ -138,11 +138,16 @@ process_backtrace(UnderlyingPid, [{Sp, {Module, Function, Args}} | T], Frames, L
     Frame = #{
         sp => Sp,
         module => Module,
-        func => list_to_binary(io_lib:format("~p/~p", [Function, length(Args)])),
+        func => list_to_binary(io_lib:format("~p/~p", [Function, arity(Args)])),
         source => sourceFileOf(Module),
         line => Line
     },
     process_backtrace(UnderlyingPid, T, [Frame | Frames], parent_line(UnderlyingPid, Sp, T)).
+
+arity(Args) when is_list(Args) ->
+    length(Args);
+arity(_) ->
+    0.
 
 parent_line(_UnderlyingPid, _Sp, []) ->
     -1;
@@ -180,7 +185,9 @@ set_temp_breakpoint([#{module := Module, line := Line} | T]) ->
             end;
         _ ->
             set_temp_breakpoint(T)
-    end.
+    end;
+set_temp_breakpoint(_) ->
+    false.
 
 type_of_binding(Value) when is_list(Value) ->
     case lists:all(fun(X) when X >= 32, X < 127 -> true; (_) -> false end, Value) of
@@ -299,6 +306,8 @@ to_json(on_break, {Pid, break, {Module, Line}}) ->
 to_json(_, _) ->
     #{}.
 
+sourceFileOf(undefined) ->
+    <<"<unknown.erl>">>;
 sourceFileOf(M) ->
     F = fun ({compile,_}) -> true ; (_) -> false end,
     C = [L || L <- M:module_info(), F(L)],

@@ -26,7 +26,7 @@ interface DebugVariable {
 /** this class is entry point of debugger  */
 export class ErlangDebugSession extends DebugSession implements genericShell.IErlangShellOutput {
 
-	protected threadIDs: { [processName: string]: {thid: number, stack:any }};
+	protected threadIDs: { [processName: string]: {thid: number, stack:any, vscode: boolean}};
 	erlDebugger: ErlangShellForDebugging;
 	erlangConnection: ErlangDebugConnection;
 	quit: boolean;
@@ -58,7 +58,9 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 		var ths: Thread[] = [];
 		for (var key in this.threadIDs) {
 			var thread = this.threadIDs[key];
-			ths.push(new Thread(thread.thid, "Process " + key));
+			if (thread.vscode) {
+				ths.push(new Thread(thread.thid, "Process " + key));
+			}
 		}
 		response.body = {
 			threads: ths
@@ -507,7 +509,6 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 	private pid_to_number(processName: string): number {
 		var pidAsString: string = processName.substr(1, processName.length - 2);
 		pidAsString = pidAsString.replace(".", "");
-
 		return Number.parseInt(pidAsString);
 	}
 
@@ -515,12 +516,24 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 		//each process in erlang is mapped to one 'thread'
 		//this.debug("OnNewProcess : " + processName);
 		var thid = this.pid_to_number(processName);
-		this.threadIDs[processName] = {thid:thid, stack:null};
-		this.sendEvent(new ThreadEvent("started", thid));
+		this.threadIDs[processName] = {thid:thid, stack:null, vscode: false};
+		var that = this;
+		setTimeout(function () {
+			that.sendThreadStartedEventIfNeeded(processName);
+		}, 250);
+	}
+
+	private sendThreadStartedEventIfNeeded(processName: string) {
+		var thread = this.threadIDs[processName];
+		if (thread && !thread.vscode) {
+			thread.vscode = true;
+			this.sendEvent(new ThreadEvent("started", thread.thid));
+		}
 	}
 
 	private onBreak(processName: string, module: string, line: string, stacktrace: any) {
 		//this.debug(`onBreak : ${processName} stacktrace:${JSON.stringify(stacktrace)}`);
+		this.sendThreadStartedEventIfNeeded(processName);
 		var currentThread = this.threadIDs[processName];
 		if (currentThread) {
 			currentThread.stack = stacktrace;
@@ -545,19 +558,21 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 		//this.debug("OnStatus : " + processName + "," + status);
 		if (status === 'exit') {
 			var that = this;
-			//Use 250ms delay to mitigate case when a process spawns another one and exits
+			//Use 125ms delay to mitigate case when a process spawns another one and exits
 			//It is then possible to receive onNewStatus('exit') before onNewProcess for the spawned process
 			setTimeout(function () {
 				var currentThread = that.threadIDs[processName];
 				delete that.threadIDs[processName];
-				that.sendEvent(new ThreadEvent("exited", currentThread.thid));
+				if (currentThread.vscode) {
+					that.sendEvent(new ThreadEvent("exited", currentThread.thid));
+				}
 				var thCount = that.threadCount(); 
 				if (thCount == 0) {
 					that.sendEvent(new TerminatedEvent());
 				} else {
 					//that.debug(`thcount:${thCount}, ${JSON.stringify(that.threadIDs)}`);
 				}
-			}, 250);
+			}, 125);
 		}
 	}
 
