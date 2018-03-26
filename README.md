@@ -19,9 +19,10 @@ This extension adds support for the Erlang language to VS Code, including:
 
 ## Debug
 ![debug](images/vscode-erlang-debug.png)
-- Variables list is automatically refresh from the current scope
+- Variables list is automatically refreshed from the current scope
 - The process list contains an additional process for communication with vscode
 - Function Breakpoints are supported: use format module:function/arity
+- Conditional Breakpoints and Hit-Count Breakpoints are supported
 
 ## Debug arguments  
 ![debug1](images/vscode-erlang-debug-args.png)
