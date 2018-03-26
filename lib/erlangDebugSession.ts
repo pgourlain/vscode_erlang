@@ -23,6 +23,17 @@ interface DebugVariable {
 	children: Variable[];
 }
 
+class ConditionalBreakpoint {
+	condition: string;
+	hitCount: number;
+	actualHitCount: number;
+	constructor(condition: string, hitCondition: string) {
+		this.condition = condition;
+		this.hitCount = parseInt(hitCondition);
+		this.actualHitCount = 0;
+	}
+}
+
 /** this class is entry point of debugger  */
 export class ErlangDebugSession extends DebugSession implements genericShell.IErlangShellOutput {
 
@@ -34,6 +45,7 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 	private _rebarBuildPath = path.join("_build", "default", "lib");
 	private _breakPoints: DebugProtocol.Breakpoint[];
 	private _functionBreakPoints: Map<string, FunctionBreakpoint[]> = new Map();
+	private _conditionalBreakPoints: Map<string, Map<number, ConditionalBreakpoint>> = new Map();
 	private _variableHandles: Handles<DebugVariable>;
 	private _LaunchArguments: LaunchRequestArguments;
 	private _port: number;
@@ -90,7 +102,8 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 		this.erlangConnection.on("fbp_verified", (moduleName, functionName, arity) => this.onFbpVerified(moduleName, functionName, arity));
 
 		response.body.supportsConfigurationDoneRequest = true;
-		response.body.supportsConditionalBreakpoints = false;
+		response.body.supportsConditionalBreakpoints = true;
+		response.body.supportsHitConditionalBreakpoints = true;
 		response.body.supportsFunctionBreakpoints = true;
 		response.body.supportsEvaluateForHovers = false;
 		response.body.supportsSetVariable = false;
@@ -188,9 +201,16 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 		vscodeBreakpoints = [];
 		//this.debug("setbreakpoints : " + JSON.stringify(<any>args));
 		let targetModuleName = path.basename(args.source.path, ".erl");
-
+		this._conditionalBreakPoints.delete(targetModuleName);
 		args.breakpoints.forEach(bp => {
-			vscodeBreakpoints.push(new Breakpoint(true, bp.line, 1, new Source(targetModuleName, args.source.path)))
+			vscodeBreakpoints.push(new Breakpoint(true, bp.line, 1, new Source(targetModuleName, args.source.path)));
+			if (bp.condition || bp.hitCondition) {
+				if (!this._conditionalBreakPoints.has(targetModuleName)) {
+					this._conditionalBreakPoints.set(targetModuleName, new Map());
+				}
+				var cbp = new ConditionalBreakpoint(bp.condition, bp.hitCondition);
+				this._conditionalBreakPoints.get(targetModuleName).set(bp.line, cbp);
+			}
 		});
 		this._updateBreakPoints(targetModuleName, vscodeBreakpoints);
 		this._setAllBreakpoints(targetModuleName);
@@ -531,18 +551,64 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 		}
 	}
 
+	private breakReason(module: string, line: string) {
+		if (this.isOnBreakPoint(module, line)) {
+			return "breakpoint";
+		}
+		return "";
+	}
+
+	private findConditionalBreakpoint(module: string, line: string) : ConditionalBreakpoint {
+		if (this._conditionalBreakPoints.has(module)) {
+			var moduleConditionalBreakpoints = this._conditionalBreakPoints.get(module);
+			var lineNo = parseInt(line);
+			if (moduleConditionalBreakpoints.has(lineNo) {
+				return moduleConditionalBreakpoints.get(lineNo);
+			}
+		}
+		return null;
+	}
+
+	private conditionalBreakpointHit(cbp: ConditionalBreakpoint, processName: string, module: string, line: string, thid: number) {
+		if (isNaN(cbp.hitCount)) {
+			this.sendEvent(new StoppedEvent(this.breakReason(module, line), thid));
+		}
+		else {
+			if (++cbp.actualHitCount == cbp.hitCount) {
+				this.sendEvent(new StoppedEvent(this.breakReason(module, line), thid));
+			}
+			else {
+				this.erlangConnection.debuggerContinue(processName);				
+			}
+		}
+	}
+
 	private onBreak(processName: string, module: string, line: string, stacktrace: any) {
 		//this.debug(`onBreak : ${processName} stacktrace:${JSON.stringify(stacktrace)}`);
 		this.sendThreadStartedEventIfNeeded(processName);
 		var currentThread = this.threadIDs[processName];
 		if (currentThread) {
 			currentThread.stack = stacktrace;
-			var breakReason = "breakpoint";
-			if (!this.isOnBreakPoint(module, line)) {
-				breakReason = "";
+			var cbp = this.findConditionalBreakpoint(module, line);
+			if (cbp) {
+				if (cbp.condition) {
+					var sp = stacktrace && stacktrace.length > 0 ? stacktrace[0].sp : -1;
+					this.erlangConnection.debuggerEval(processName, sp, cbp.condition).then((res) => {
+						if (res.value == "true") {
+							this.conditionalBreakpointHit(cbp, processName, module, line, currentThread.thid);
+						}
+						else {
+							this.erlangConnection.debuggerContinue(processName);
+						}
+					});
+				}
+				else {
+					this.conditionalBreakpointHit(cbp, processName, module, line, currentThread.thid);					
+				}
 			}
-			//this._breakPoints.forEach()
-			this.sendEvent(new StoppedEvent(breakReason, currentThread.thid));
+			else {
+				this.sendEvent(new StoppedEvent(this.breakReason(module, line), currentThread.thid));				
+			}
 		}
 	}
 
