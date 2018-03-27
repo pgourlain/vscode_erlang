@@ -1,6 +1,20 @@
 
 # Change log
 
+## Version 0.2.2 (March 27, 2018)
+### Debugging Fix and improvements 
+* [PR #42](https://github.com/pgourlain/vscode_erlang/pull/43)
+* [PR #43](https://github.com/pgourlain/vscode_erlang/pull/44)
+* [PR #45](https://github.com/pgourlain/vscode_erlang/pull/45)
+	- Conditional breakpoints
+	- Warnings recognised by problemMatcher
+	- Minor changes
+	
+Thanks to [Wojtek Surowka](https://github.com/wojteksurowka)
+
+---
+
+
 ## Version 0.2.1 (March 24, 2018)
 ### Debugging Fix and improvements 
 * [PR #42](https://github.com/pgourlain/vscode_erlang/pull/42)

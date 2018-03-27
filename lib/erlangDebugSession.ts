@@ -562,7 +562,7 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 		if (this._conditionalBreakPoints.has(module)) {
 			var moduleConditionalBreakpoints = this._conditionalBreakPoints.get(module);
 			var lineNo = parseInt(line);
-			if (moduleConditionalBreakpoints.has(lineNo) {
+			if (moduleConditionalBreakpoints.has(lineNo)) {
 				return moduleConditionalBreakpoints.get(lineNo);
 			}
 		}
