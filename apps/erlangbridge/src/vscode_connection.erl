@@ -1,94 +1,106 @@
 -module(vscode_connection).
+-behaviour(gen_connection).
 
+-export([start/0, set_breakpoint/2]).
 
--export([start/0, start/1, send_message_to_vscode/3]).
--export([debugger_stacktrace/2, debugger_bindings/2]).
+% export for gen_connection behaviour
+-export([get_port/0, init/1, decode_request/1]).
+
 
 %%called with "erl -s vscode_connection -vscode_port 1234"
 start() ->
-    inets:start(),
-    %get port from command line
+    gen_connection:start(?MODULE).
+
+get_port() ->
     {ok, [[P]]}=init:get_argument(vscode_port),
-    start([erlang:list_to_atom(P)]).
+    P.
 
-%%called with "erl -s vscode_connection start 1234"
-start(Args) ->
-    inets:start(),
-    %get port from Arg, because -s is used Args is an atom list (from erlang command line doc)
-    [P] = Args,
-    VsCodePort = erlang:list_to_integer(erlang:atom_to_list(P)),
-    % subcribe to int
-    init_subscribe(VsCodePort),
-    % send that debugger is ready
-    start_command_server(VsCodePort),
-    ok.
-
-
-send_message_to_vscode(Port, Verb, Body) ->
-    Uri = "http://127.0.0.1:"++erlang:integer_to_list(Port) ++ "/"++Verb,
-    httpc:request(post, {Uri, [], "application/json", Body}, [],[]).
-
-%-------------------------------
-% Command receiver (from nodejs)
-%-------------------------------
--define(TCP_OPTIONS, [binary, {active, false}]).
-
-start_command_server(VsCodePort) ->
-    spawn(fun () -> {ok, Sock} = gen_tcp:listen(0, ?TCP_OPTIONS),
-                    % get assigned port
-                    {ok, Port} = inet:port(Sock),
-                    %send to vscode debugger
-                    send_message_to_vscode(VsCodePort, "listen", "{\"port\":" ++erlang:integer_to_list(Port)++"}"),
-                    loop_command_server(Sock) end).
-
-loop_command_server(Sock) ->
-    {ok, Conn} = gen_tcp:accept(Sock),
-    Pid = spawn(fun () -> loop_handle_command(Conn) end),
-    gen_tcp:controlling_process(Conn, Pid),
-    loop_command_server(Sock).
-
-
-loop_handle_command(Socket) ->
-    inet:setopts(Socket, [{active, once}]),
-    receive
-    {tcp, Socket, Data} ->
-        %io:format("Got packet: ~p~n", [Data]),
-        Answer = decode_request(Data),
-        %io:format("Result request: ~p~n", [Answer]),
-        gen_tcp:send(Socket, list_to_binary(Answer)),
-        gen_tcp:close(Socket),
-        loop_handle_command(Socket);
-    {tcp_closed, Socket}->
-        io:format("Socket ~p closed~n", [Socket]);
-    {tcp_error, Socket, Reason} ->
-     io:format("Error on socket ~p reason: ~p~n", [Socket, Reason])
-    end.
+init(Port) ->
+    init_subscribe(Port).
 
 decode_request(Data) ->
     %"POST debugger_continue HTTP/1.1\r\nContent-Type: plain/text\r\nContent-Length: 1\r\nHost: 127.0.0.1:36477\r\nConnection: close\r\n\r\n3"
     case parse_request(Data) of
     {debugger_continue, SPid_as_body} ->
         int:continue(list_to_pid(SPid_as_body)),
-        response("{}");
+        #{};
     {debugger_next, SPid_as_body} ->
         int:next(list_to_pid(SPid_as_body)),
-        response("{}");
+        #{};
     {debugger_stepin, SPid_as_body} ->
         int:step(list_to_pid(SPid_as_body)),
-        response("{}");
+        #{};
     {debugger_stepout, SPid_as_body} ->
-        int:step(list_to_pid(SPid_as_body)),
-        response("{}");
-    {debugger_stacktrace, SPid_as_body} ->
-        response(debugger_stacktrace(list_to_pid(SPid_as_body), -1));
+        int:finish(list_to_pid(SPid_as_body)),
+        #{};
+    {debugger_pause, SPid_as_body} ->
+        debugger_pause(list_to_pid(SPid_as_body)),
+        #{};
     {debugger_bindings, Body} ->
         Lines =  string:tokens(Body, "\r\n"),
         Pid = lists:nth(1, Lines),
         Sp = erlang:list_to_integer(lists:nth(2, Lines)),
-        response(debugger_bindings(list_to_pid(Pid), Sp));        
+        debugger_bindings(list_to_pid(Pid), Sp);
+    {set_bp, Body} ->
+        % first deserialize user breaks
+        % take first bp to get modulename
+        [TargetModuleNameString | Breakpoints] = string:tokens(Body, "\r\n"),
+        TargetModuleName = list_to_atom(TargetModuleNameString),
+        %interpret module - most likely interpreted already but no harm
+        case int:all_breaks(TargetModuleName) of
+            [] ->
+                case int:interpretable(TargetModuleName) of
+                    true -> int:ni(TargetModuleName);
+                    _ -> error
+                end;
+            _ -> ok
+        end,
+        %delete all existing breakpoints
+        lists:foreach(
+            fun({{M,L}, _}) -> int:delete_break(M, L) end,
+            int:all_breaks(TargetModuleName)),
+        %set all incoming breakpoints
+        lists:foreach(fun (BpString) ->
+                BreakpointParams = list_to_tuple(lists:map(
+                    fun (P) ->
+                        case re:run(P, "^[0-9]+$") of
+                            nomatch ->
+                                list_to_atom(P);
+                            _ ->
+                                list_to_integer(P)
+                        end
+                    end,
+                    string:tokens(BpString, " ")
+                )),
+                set_breakpoint(TargetModuleName, BreakpointParams)
+            end,
+            Breakpoints),
+        #{}; 
+    {debugger_eval, Body} ->
+        [PidString, Sp, Expression] = string:tokens(Body, "\r\n"),
+        Bindings = debugger_eval_bindings(PidString, Sp),
+        {ok, Tokens, _} = erl_scan:string(Expression ++ "."),
+        case erl_parse:parse_exprs(Tokens) of
+            {ok, Exprs} ->
+                try erl_eval:exprs(Exprs, orddict:from_list(Bindings)) of
+                    {value, EvalResult, _} -> map_bindings({unused, EvalResult})
+                catch
+                    _:{Reason, What} ->
+                        debugger_eval_error(io_lib:format("~p: ~p", [Reason, What]));
+                    _:Exp ->
+                        debugger_eval_error(io_lib:format("~p", [Exp]))
+                end;
+            {error,{_,erl_parse, Messages}} ->
+                debugger_eval_error(lists:flatten(Messages))
+        end;
+    {debugger_exit, _Body} ->
+        init:stop(0);
     _ ->
-        ok
+        unknown_command
     end.
+
+debugger_eval_error(Message) ->
+    #{value => iolist_to_binary(Message), type => <<"error">>}.
 
 parse_request(Data) ->
     Content = binary_to_list(Data),
@@ -98,88 +110,130 @@ parse_request(Data) ->
     Body = string:join(lists:nthtail(5, Lines), "\r\n"),
     {Command, Body}.
 
-response(Str) ->
-    B = Str,
-    binary_to_list(iolist_to_binary(
-      io_lib:fwrite("HTTP/1.0 200 OK\nContent-Type: application/json\nContent-Length: ~p\n\n~s",[length(B), B]))).
+set_breakpoint(Module, {line, Line}) ->
+    case int:break(Module, Line) of
+        ok -> ok;
+        Error -> io:format("Cannot set brakepoint ~p:~p by ~p~n", [Module, Line, Error])
+    end;
+set_breakpoint(Module, {function, Name, Arity}) ->
+    case int:break_in(Module, Name, Arity) of
+        ok -> gen_connection:send_message_to_vscode(list_to_integer(get_port()), to_string(fbp_verified), #{module => Module, name => Name, arity => Arity});
+        {error,function_not_found} -> function_not_found; %it will be signalled to the user as non-verified breakpoint
+        Error -> io:format("Cannot set brakepoint ~p:~p/~p by ~p~n", [Module, Name, Arity, Error])
+    end.
 
-%[{3,{mymodule_app,load_config,[]}},
-%{2,{mymodyle_app,start,[normal,[]]}}]
-backtrace_to_json([H|T]) ->
-    binary_to_list(iolist_to_binary("[" ++ backtrace_item_to_json(H) 
-    ++ backtrace_items_to_json(T)    
-    ++ "]")).
+debugger_eval_bindings("<0.0.0>", _) ->
+    [];
+debugger_eval_bindings(PidString, Sp) ->
+    {ok, Meta} = dbg_iserver:call({get_meta, list_to_pid(PidString)}),
+    int:meta(Meta, bindings, erlang:list_to_integer(Sp)).
 
-backtrace_items_to_json([H|T]) ->
-    "," ++ backtrace_item_to_json(H) ++ backtrace_items_to_json(T);
-backtrace_items_to_json([]) ->
-    "".
+debugger_stacktrace(Pid, CurrentLine) when is_pid(Pid) ->
+    {ok, UnderlyingPid} = dbg_iserver:safe_call({get_meta,Pid}),
+    process_backtrace(UnderlyingPid, int:meta(UnderlyingPid, backtrace, all), [], CurrentLine).
 
-backtrace_item_to_json(I) ->
-    {Sp, {M, F, Args, Frame}} = I,
-    Line = get_line_from_frame(Frame),
-    %TODO:convert args in standard json
-    SArgs = re:replace(io_lib:format("~p", [Args]), "\\r\\n", "", [global,{return,list}]),
-    io_lib:format("{\"sp\":\"~p\", \"module\":\"~p\", \"function\":\"~p\", \"args\":\"~s\", \"source\":~p, \"line\":~p}", 
-        [Sp, M, F, SArgs, sourceFileOf(M), Line]).
+process_backtrace(_UnderlyingPid, [], Frames, _Line) ->
+    lists:reverse(Frames);
+process_backtrace(UnderlyingPid, [{Sp, {Module, Function, Args}} | T], Frames, Line) ->
+    Frame = #{
+        sp => Sp,
+        module => Module,
+        func => list_to_binary(io_lib:format("~p/~p", [Function, arity(Args)])),
+        source => sourceFileOf(Module),
+        line => Line
+    },
+    process_backtrace(UnderlyingPid, T, [Frame | Frames], parent_line(UnderlyingPid, Sp, T)).
 
-get_line_from_frame({_,{_,Line},_})->
-    Line;
-get_line_from_frame(_)->
-    -1.
+arity(Args) when is_list(Args) ->
+    length(Args);
+arity(_) ->
+    0.
 
-add_framesinfo(Pid, BT, FirstLine) ->
-    {H, _} = lists:split(length(BT) - 1, BT),
-    Frames = [frameinfo(Pid, F) || F <- H],
-    [add_frameinfo(F, Frames, FirstLine) || F <- BT].
+parent_line(_UnderlyingPid, _Sp, []) ->
+    -1;
+parent_line(UnderlyingPid, Sp, _StackFrames) ->
+    case int:meta(UnderlyingPid, stack_frame, {up, Sp}) of
+        {_Sp, {_Module, Line}, _Args} ->
+            Line;
+        _ ->
+            -1
+    end.
 
+debugger_pause(Pid) ->
+    {ok, Meta} = dbg_iserver:call({get_meta, Pid}),
+    dbg_icmd:stop(Meta),
+    timer:sleep(100),
+    case lists:keyfind(Pid, 1, int:snapshot()) of
+        {_, _, break, _} ->
+            ok;
+        _ ->
+            erlang:suspend_process(Pid),
+            set_temp_breakpoint(debugger_stacktrace(Pid, -1)),
+            erlang:resume_process(Pid)
+    end.
 
-frameinfo(Pid, F) ->
-    {Sp, {_, _, _}} = F,
-    Frame = int:meta(Pid, stack_frame, {up, Sp}),
-    Frame.
+set_temp_breakpoint([]) ->
+    false;
+set_temp_breakpoint([#{module := Module, line := Line} | T]) ->
+    case lists:member(Module, int:interpreted()) of
+        true ->
+            case int:break(Module, Line) of
+                ok ->
+                    int:action_at_break(Module, Line, delete);
+                _ ->
+                    ok
+            end;
+        _ ->
+            set_temp_breakpoint(T)
+    end;
+set_temp_breakpoint(_) ->
+    false.
 
-add_frameinfo(F, Frames, FirstLine) ->
-    %sample : {2,{mymodule_app,start,[normal,[]]}}
-    {Sp, {M, Fun, Args}} = F,
-    Frame = lists:keyfind(Sp, 1, Frames),
-    NewFrame = case Frame of
-        false -> {-1, {uknown_module, FirstLine},[]};
-        _ -> Frame
+type_of_binding(Value) when is_list(Value) ->
+    case lists:all(fun(X) when X >= 32, X < 127 -> true; (_) -> false end, Value) of
+        true -> string;
+        _ -> type_of_binding(basic, Value)
+    end;
+type_of_binding(Value) -> type_of_binding(basic, Value).  
+type_of_binding(basic, Value) when is_binary(Value) -> binary; 
+type_of_binding(basic, Value) when is_boolean(Value) -> boolean;    
+type_of_binding(basic, Value) when is_integer(Value) -> integer;
+type_of_binding(basic, Value) when is_float(Value) -> float;
+type_of_binding(basic, Value) when is_atom(Value) -> atom;
+type_of_binding(basic, Value) when is_list(Value) -> list;
+type_of_binding(basic, Value) when is_map(Value) -> map;
+type_of_binding(basic, Value) when is_tuple(Value) -> tuple;
+type_of_binding(basic, Value) when is_function(Value) -> function;
+type_of_binding(basic, _) -> unknown.
+
+map_bindings({Name, Value}) ->
+    T = type_of_binding(Value),
+    H = #{
+        name => Name,
+        type => T,
+        value => iolist_to_binary(io_lib:format("~p", [Value]))
+    },
+    V = case T of
+        list -> 
+            IndexedValue = lists:zip(lists:seq(1, length(Value)), Value),
+            MapF = fun({Index, El}) -> map_bindings({iolist_to_binary(io_lib:format("~p", [Index])), El}) end,
+            Ret = lists:map(MapF, IndexedValue),
+            #{children => Ret};
+        tuple ->
+            List = tuple_to_list(Value),
+            IndexedValue = lists:zip(lists:seq(1, length(List)), List),
+            MapF = fun({Index, El}) -> map_bindings({iolist_to_binary(io_lib:format("~p", [Index])), El}) end,
+            Ret = lists:map(MapF, IndexedValue),
+            #{children => Ret};  
+        map -> #{children => lists:map(fun map_bindings/1, maps:to_list(Value))};
+        _ -> #{}
     end,
-    {Sp, {M, Fun, Args, NewFrame}}.
-    %F.
-
-debugger_stacktrace(Pid, FirstLine) when is_pid(Pid) ->
-    %%get the underlying Pid
-    {ok, UnderlyingPid} = dbg_iserver:call({get_meta,Pid}),
-    BackTrace = int:meta(UnderlyingPid,backtrace,5),
-    BTAndSF = add_framesinfo(UnderlyingPid, BackTrace, FirstLine),
-    backtrace_to_json(BTAndSF).
-
-bindings_to_json(Bindings) ->
-    %sample : [{'Result',[]},{'ConfigFile',"conf/local/myconfig.cfg"},{'_',{error,enoent}}]
-    "[" ++ bindings_array_to_json(Bindings) ++ "]".
-    %"[{\"name\":\"myvar\", \"value\":\"tagaad\"},{\"name\":\"myvar2\", \"value\":\"oulala\"}]".
-
-bindings_array_to_json([H|T]) when length(T) > 0 ->
-    onebinding_to_json(H) ++ "," ++ bindings_array_to_json(T);
-
-bindings_array_to_json([H|_T]) ->
-    onebinding_to_json(H);
-
-bindings_array_to_json([]) ->
-    "".
-
-onebinding_to_json(B) ->
-    {Name, Value} = B,
-    Vfn = fun (VarValue) -> re:replace(io_lib:format("~p", [VarValue]), "\\r\\n", "", [global,{return,list}]) end,
-    "{\"name\":" ++ io_lib:write_string(atom_to_list(Name)) ++ ", \"value\":" ++ io_lib:write_string(Vfn(Value))++ "}". 
+    maps:merge(V, H).
 
 debugger_bindings(Pid, Sp) when is_pid(Pid) ->
     {ok, UnderlyingPid} = dbg_iserver:call({get_meta,Pid}),
     Bindings = int:meta(UnderlyingPid, bindings, Sp),
-    bindings_to_json(Bindings).
+    lists:map(fun map_bindings/1, Bindings).
 
 init_subscribe(VsCodePort) ->
     spawn(fun () -> do_subscribe_loop(VsCodePort) end).
@@ -190,7 +244,7 @@ do_subscribe_loop(VsCodePort) ->
     loop_subscribe(VsCodePort).
 
 loop_subscribe(VsCodePort) ->
-    	receive
+    receive
 		{int, M} ->
 			decode_debugger_message(VsCodePort, M),
 			loop_subscribe(VsCodePort);
@@ -208,48 +262,52 @@ decode_debugger_message(VsCodePort, M) ->
     %                               {mymodule_app,start,[normal,[]]},
     %                               running,{}}}
     case M of
+    {new_process, {_Pid, {_Module, module_info, _Args}, _Status, _Other}} ->
+        % ignore processes calling module_info started by debugger itself
+        ok;
+    {break_options, _Data} ->
+        ok;
     {Verb, Data} ->
-        send_message_to_vscode(VsCodePort,to_string(Verb), to_json(Verb, Data));
+        gen_connection:send_message_to_vscode(VsCodePort,to_string(Verb), to_json(Verb, Data));
     {new_status,Pid,idle,_} ->
-        send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, idle}));        
-    {new_status,Pid,exit,normal} ->
-        send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, exit, normal})); 
+        gen_connection:send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, idle}));        
+    {new_status,Pid,exit,_} ->
+        gen_connection:send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, exit})); 
     {new_status,Pid,break,ModuleAndLine} ->
         %{new_status,<0.3.0>,break,{myapp,11}}   
-        send_message_to_vscode(VsCodePort,to_string(on_break), to_json(on_break, {Pid, break, ModuleAndLine}));
+        gen_connection:send_message_to_vscode(VsCodePort,to_string(on_break), to_json(on_break, {Pid, break, ModuleAndLine}));
     {new_status,Pid,running,_} ->
         %{new_status,<0.3.0>,running,{}}
-        send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, running}));
+        gen_connection:send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, running}));
+    {new_status,_,waiting,_} ->
+        %{new_status,<0.3.0>,waiting,{}}: no output not to pollute the console
+        ok;
     _ -> 
         io:format("decode debugger receive : ~p~n", [M])    
     end,
     ok.
 
 to_json(new_break, {{Module, Line}, _Options}) ->
-    fmt("{\"module\":~p, \"line\":~p}",[to_string(Module), Line]);
-    %"{}";
+    #{ module => Module, line => Line };
 to_json(interpret, Data) ->
-    "{\"module\":\"" ++ to_string(Data) ++"\"}";
+    #{ module => Data };
 to_json(new_process, {Pid, _Start, Status, _Other}) ->
-    fmt("{\"process\":~p, \"status\":~p}",[pid_to_list(Pid), to_string(Status)]);
-to_json(new_break, Data) ->
-    fmt("new_break:~p}",[Data]),
-    "{}";
+    #{ process => list_to_binary(pid_to_list(Pid)), status => Status };
+to_json(new_break, _) ->
+    #{};
 to_json(new_status, {Pid, Status}) ->
-    fmt("{\"process\":~p, \"status\":~p}", [pid_to_list(Pid), to_string(Status)]);
+    #{ process => list_to_binary(pid_to_list(Pid)), status => Status };
 to_json(new_status, {Pid, exit, normal}) ->
-    fmt("{\"process\":~p, \"status\":~p,\"reason\":~p}", [pid_to_list(Pid), to_string(exit), to_string(normal)]);
+    #{ process => list_to_binary(pid_to_list(Pid)), status => exit, reason => normal };
 to_json(new_status, {Pid, break, {Module, Line}}) ->
-    fmt("{\"process\":~p, \"status\":~p,\"reason\":~p,\"module\":~p, \"line\":~p}", [pid_to_list(Pid), to_string(break), 
-        to_string(normal), to_string(Module), Line]);
+    #{ process => list_to_binary(pid_to_list(Pid)), status => break, reason => normal, module => Module, line => Line };
 to_json(on_break, {Pid, break, {Module, Line}}) ->
-    StackTrace = debugger_stacktrace(Pid, Line),
-    R = io_lib:format("{\"process\":~p, \"module\":~p, \"line\":~p, \"stacktrace\":~s}", 
-        [pid_to_list(Pid), to_string(Module), Line, StackTrace]),
-    binary_to_list(list_to_binary(R));
+    #{ process => list_to_binary(pid_to_list(Pid)), module => Module, line => Line, stacktrace => debugger_stacktrace(Pid, Line) };
 to_json(_, _) ->
-    "{}".
+    #{}.
 
+sourceFileOf(undefined) ->
+    <<"<unknown.erl>">>;
 sourceFileOf(M) ->
     F = fun ({compile,_}) -> true ; (_) -> false end,
     C = [L || L <- M:module_info(), F(L)],
@@ -257,10 +315,7 @@ sourceFileOf(M) ->
     F1 = fun({source, _}) -> true ; (_) -> false end,
     S = [I || I <- O, F1(I)],
     [{source, Source}] = S,
-    Source.
-
-fmt(Fmt, Args) ->
-    binary_to_list(iolist_to_binary(io_lib:fwrite(Fmt,Args))).
+    list_to_binary(Source).
 
 to_string(X) when is_atom(X) ->
     erlang:atom_to_list(X);

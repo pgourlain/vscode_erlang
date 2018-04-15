@@ -3,6 +3,12 @@
 	"version": "0.1.0",
 	"configurations": [
 		{
+			"name": "Attach to lspserver",
+			"type": "node",
+			"request": "attach",
+			"port": 6011
+		},
+		{
 			"name": "Launch Extension",
 			"type": "extensionHost",
 			"request": "launch",

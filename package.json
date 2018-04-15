@@ -1,11 +1,11 @@
 {
 	"name": "erlang",
 	"description": "Erlang language extension for Visual Studio Code",
-	"version": "0.1.0",
+	"version": "0.2.2",
 	"icon": "images/icon.png",
 	"publisher": "pgourlain",
 	"engines": {
-        "vscode": "^1.5.0"
+		"vscode": "^1.15.0"
 	},
 	"categories": [
 		"Languages",
@@ -13,6 +13,7 @@
 		"Debuggers"
 	],
 	"activationEvents": [
+		"onLanguage:erlang",
 		"onCommand:extension.rebarBuild",
 		"onCommand:extension.rebarGetDeps",
 		"onCommand:extension.rebarUpdateDeps",
@@ -61,6 +62,16 @@
 								"type": "string",
 								"description": "Path to the erl executable or the command if in PATH",
 								"default": "erl"
+							},
+							"verbose": {
+								"type": "boolean",
+								"description": "Should extended debugging details be logged",
+								"default": false
+							},
+							"addEbinsToCodepath": {
+								"type": "boolean",
+								"description": "Add ebin directories in _build to code path",
+								"default": true
 							}
 						}
 					}
@@ -152,9 +163,51 @@
 					"default": "",
 					"description": "Directory location of erl/escript.",
 					"title": "Path of erlang binaries"
+				},
+				"erlang.rebarPath": {
+					"type": "string",
+					"default": "",
+					"description": "Directory location of rebar/rebar3.",
+					"title": "Path of rebar/rebar3"
+				},
+				"erlang.rebarBuildArgs": {
+					"type": "array",
+					"items": {
+						"type": "string",
+						"title": "argument",
+						"default": ""
+					},
+					"default": [
+						"compile"
+					],
+					"description": "Arguments to provide to rebar/rebar3 build command",
+					"title": "Arguments to provide to rebar/rebar3 build command"
+				},
+				"erlang.LanguageServerProtocol.verbose": {
+					"type": "boolean",
+					"description": "Activate technical traces while parsing documents, completion (activate trace on LSP module)",
+					"title": "Activate technical traces while parsing documents",
+					"default": "false"
 				}
 			}
-		}
+		},
+		"problemMatchers": [
+			{
+				"name": "erlang",
+				"owner": "erlang",
+				"fileLocation": [
+					"relative",
+					"${workspaceRoot}"
+				],
+				"pattern": {
+					"regexp": "^(.*):(\\d+):\\s+((Warning): )?(.*)$",
+					"file": 1,
+					"line": 2,
+					"severity": 4,
+					"message": 5
+				}
+			}
+		]
 	},
 	"repository": {
 		"type": "git",
@@ -162,20 +215,23 @@
 	},
 	"license": "MIT",
 	"scripts": {
-        "vscode:prepublish": "tsc -p ./",
-        "compile": "tsc -watch -p ./",
-        "postinstall": "node ./node_modules/vscode/bin/install",
-        "test": "node ./node_modules/vscode/bin/test"
+		"vscode:prepublish": "tsc -p ./",
+		"compile": "tsc -watch -p ./",
+		"postinstall": "node ./node_modules/vscode/bin/install",
+		"test": "node ./node_modules/vscode/bin/test",
+		"update-vscode": "node ./node_modules/vscode/bin/install"
 	},
 	"dependencies": {
+		"vscode": "^1.1.5",
 		"vscode-debugadapter": "^1.16.0",
-		"vscode-debugprotocol": "^1.16.0"
+		"vscode-debugprotocol": "^1.16.0",
+		"vscode-languageclient": "^3.4.2",
+		"vscode-languageserver": "^3.4.2"
 	},
 	"devDependencies": {
-        "typescript": "^2.0.3",
-        "vscode": "^1.0.0",
-        "mocha": "^2.3.3",
-        "@types/node": "^6.0.40",
-        "@types/mocha": "^2.2.32"
+		"@types/mocha": "^2.2.48",
+		"@types/node": "^6.0.101",
+		"mocha": "^2.3.3",
+		"typescript": "^2.7.2"
 	}
 }

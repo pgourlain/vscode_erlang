@@ -751,7 +751,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>\b(fun)\s*+(([a-z][a-zA-Z\d@_]*+)\s*+(:)\s*+)?([a-z][a-zA-Z\d@_]*+)\s*(/)</string>
+					<string>\b(fun)\s+(([a-z][a-zA-Z\d@_]*+)\s*+(:)\s*+)?([a-z][a-zA-Z\d@_]*+)\s*(/)</string>
 				</dict>
 				<dict>
 					<key>begin</key>

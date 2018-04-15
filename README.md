@@ -1,41 +1,41 @@
 # Erlang for Visual Studio Code
 This extension adds support for the Erlang language to VS Code, including:
 
-* Colorization
+## Colorization
 ![syntax](images/vscode-erlang-syntax.png)
 
-* Build
+## Build
 ![build](images/vscode-erlang-build.png)
-	- only rebar is supported
-	- I provide a sample of tasks.json for rebar, look at 'samples' directory
+- only rebar is supported
 
-* Available commands
+## Build arguments
+![build](images/vscode-erlang-build-args.png)
+
+- by default "compile" is used on build command
+- You can override defaults arguments in configuration file (i.e: workspace settings) 
+
+## Available commands
 ![commands](images/vscode-erlang-commands.png)
 
-* Debug
+## Debug
 ![debug](images/vscode-erlang-debug.png)
-	- Variables list is automatically refresh from the current scope
-	- The process list contains an additional process for communication with vscode
+- Variables list is automatically refreshed from the current scope
+- The process list contains an additional process for communication with vscode
+- Function Breakpoints are supported: use format module:function/arity
+- Conditional Breakpoints and Hit-Count Breakpoints are supported
 
-* Debug arguments  
+## Debug arguments  
 ![debug1](images/vscode-erlang-debug-args.png)
-	- you can provide a specific command line to 'erl' in launch.json configuration file.
+- you can provide a specific command line to 'erl' in launch.json configuration file.
 
+## Run build before debugging
+-  Add to launch.json file the entry "preLaunchTask": "rebar3 compile"
+- Then first time you start debugging you need to:
+   1. Select **Configure Task** in the alert, choose **Create tasks.json file from template** and then **Others: Example to run an arbitrary command**
+   1. This will create tasks.json for you. Change both label and command to "rebar3 compile".
+   1. Add entry "problemMatcher": "$erlang"
 
-
-## Versions
-* 0.1.0
-	- debugger integration
-* 0.0.9
-	- fix shortcuts (ctrl-shift-B, ctrl-shift-T)
-* 0.0.8
-	- Add debugger adapter  
-* 0.0.7
-	- Fix assertXXXX expected/value for vscode.diagnostic 
-* 0.0.6
-	- Fix 'rebar' spawning on windows
-* 0.0.5
-	- Add eunit run command without rebar (use an erlang shell)
+Then before each start debugging modified files will be recompiled automatically.
 
 ## Credits
 File 'Erlang.tmLanguage' is inspired from https://github.com/textmate/erlang.tmbundle/blob/master/Syntaxes/Erlang.plist
