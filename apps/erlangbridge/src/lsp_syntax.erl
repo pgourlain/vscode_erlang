@@ -51,12 +51,12 @@ lint(Forms, File) ->
         errors_warnings =>
             extract_error_or_warning(<<"warning">>, Warnings)};
     % errors, no warnings
-    {error, [Errors], []} ->
+    {error, Errors, []} ->
     #{parse_result => true,
         errors_warnings =>
             extract_error_or_warning(<<"error">>, Errors)};
     % errors and warnings
-    {error, [Errors], [Warnings]} ->
+    {error, Errors, [Warnings]} ->
     #{parse_result => true,
         errors_warnings =>
             extract_error_or_warning(<<"error">>, Errors) ++
