@@ -45,6 +45,7 @@ export class ErlangLspConnection extends ErlangConnection {
 
     public validateTextDocument(uri : string, numberOfProblems : number, callback: (parsingResult : ParsingResult) => void): void {
         //this.debug("begin validateTextDocument");
+        uri = uri.replace(/file:\/\/\/([A-Za-z])%3A\//, 'file://$1:/');        
         this.post("validate_text_document", uri).then(
             res => {
                 if (res.error) {
