@@ -1,6 +1,16 @@
 
 # Change log
 
+## Version 0.2.3 (April 21, 2018)
+### LSP fixes 
+* [PR #46](https://github.com/pgourlain/vscode_erlang/pull/46)
+	- LSP fixes
+	- README update
+	
+Thanks to [Wojtek Surowka](https://github.com/wojteksurowka)
+
+---
+
 ## Version 0.2.2 (March 27, 2018)
 ### Debugging Fix and improvements 
 * [PR #42](https://github.com/pgourlain/vscode_erlang/pull/43)
