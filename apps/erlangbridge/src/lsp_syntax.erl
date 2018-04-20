@@ -20,7 +20,7 @@ parse(File) ->
         gen_lsp_doc_server:add_or_update_document(File, Forms),
         {ok, Forms};
     {error, Any} -> {error, Any};
-    _Other -> error_logger:info_msg("parse_file other case '~p'",[_Other]), {error, "uknown"}
+    _Other -> error_logger:info_msg("parse_file other case '~p'",[_Other]), {error, "unknown"}
     end.
 
 epp_parse_file(File) ->
@@ -51,12 +51,12 @@ lint(Forms, File) ->
         errors_warnings =>
             extract_error_or_warning(<<"warning">>, Warnings)};
     % errors, no warnings
-    {error, [Errors], []} ->
+    {error, Errors, []} ->
     #{parse_result => true,
         errors_warnings =>
             extract_error_or_warning(<<"error">>, Errors)};
     % errors and warnings
-    {error, [Errors], [Warnings]} ->
+    {error, Errors, [Warnings]} ->
     #{parse_result => true,
         errors_warnings =>
             extract_error_or_warning(<<"error">>, Errors) ++
@@ -92,7 +92,7 @@ extract_error_or_warning(Type, ErrorsOrWarnings) ->
        info => extract_info(X)}
      || X <- element(2, ErrorsOrWarnings)];
 
-extract_error_or_warning(Type, {_, []}) ->
+extract_error_or_warning(_Type, {_, []}) ->
     [].
 
 extract_info(X) ->

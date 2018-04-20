@@ -26,8 +26,8 @@ export class RebarRunner implements vscode.Disposable {
 		this.getDepsCommand = vscode.commands.registerCommand('extension.rebarGetDeps', () => { this.runRebarCommand(['get-deps']); });
 		this.updateDepsCommand = vscode.commands.registerCommand('extension.rebarUpdateDeps', () => { this.runRebarCommand(['update-deps']); });
 		this.eunitCommand = vscode.commands.registerCommand('extension.rebareunit', () => { this.runRebarCommand(['eunit']) });
-		vscode.workspace.onDidCloseTextDocument(this.onCloseDocument, null, subscriptions);
-		//vscode.workspace.onDidOpenTextDocument(this.onOpenDocument, null, subscriptions);
+		vscode.workspace.onDidCloseTextDocument(this.onCloseDocument.bind(this), null, subscriptions);
+		vscode.workspace.onDidOpenTextDocument(this.onOpenDocument.bind(this), null, subscriptions);
 		this.diagnosticCollection = vscode.languages.createDiagnosticCollection("erlang");
 		subscriptions.push(this);
 	}

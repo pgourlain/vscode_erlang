@@ -151,6 +151,9 @@ documents.onDidChangeContent((change) => {
 async function validateTextDocument(textDocument: TextDocument): Promise<void> {
 	// In this simple example we get the settings for every validate run.
 	let settings = await getDocumentSettings(textDocument.uri);
+	// .hrl files show incorrect errors e.g. about not used records, ddisabled for now
+	if (textDocument.uri.endsWith(".hrl"))
+		return;
 
 	erlangLspConnection.validateTextDocument(textDocument.uri, 
 		100,
