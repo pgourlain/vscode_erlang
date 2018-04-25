@@ -45,7 +45,7 @@ export class ErlangLspConnection extends ErlangConnection {
 
     public validateTextDocument(uri : string, numberOfProblems : number, callback: (parsingResult : ParsingResult) => void): void {
         //this.debug("begin validateTextDocument");
-        this.post("validate_text_document", uri).then(
+        this.post("validate_text_document", this.toErlangUri(uri)).then(
             res => {
                 if (res.error) {
                     this.debug(`validateTextDocument error:${res.error}`);                    
@@ -59,7 +59,7 @@ export class ErlangLspConnection extends ErlangConnection {
     }
 
     public FormatDocument(uri : string) : void {
-        this.post("format_document", uri).then(
+        this.post("format_document", this.toErlangUri(uri)).then(
             res => {
                 if (res.error) {
                     this.debug(`validateTextDocument error:${res.error}`);                    
@@ -73,7 +73,7 @@ export class ErlangLspConnection extends ErlangConnection {
     }
 
     public async GetCompletionItems(uri : string, line : number, character : number, lastEnterChar : string) : Promise<string[]> {
-        return await this.post("completion_items", uri + "\r\n" + line.toString() +  "\r\n" + (character-1).toString()+"\r\n" + lastEnterChar).then(
+        return await this.post("completion_items", this.toErlangUri(uri) + "\r\n" + line.toString() +  "\r\n" + (character-1).toString()+"\r\n" + lastEnterChar).then(
             res => {
                 if (res.error) {
                     this.debug(`completion_items error:${res.error}`);                    
@@ -92,19 +92,19 @@ export class ErlangLspConnection extends ErlangConnection {
     }
 
     public onDocumentClosed(uri : string) : void {
-        this.post("document_closed", uri).then( 
+        this.post("document_closed", this.toErlangUri(uri)).then( 
             res => { return true;}, 
             err => {return false;} 
         );
     }
 
     public async getDefinitionLocation(uri : string, line : number, character : number ) : Promise<ReferenceLocation> {
-        return await this.post("goto_definition", uri + "\r\n" + line.toString() +  "\r\n" + (character-1).toString()).then(
+        return await this.post("goto_definition", this.toErlangUri(uri) + "\r\n" + line.toString() +  "\r\n" + (character-1).toString()).then(
             res => {
                 //this.debug(`goto_definition result : ${JSON.stringify(res)}`);
                 if (res.result == "ok") {
                     return {
-                        uri : res.uri,
+                        uri : this.fromErlangUri(res.uri),
                         line : res.line,
                         character : res.character
                     };
@@ -117,5 +117,19 @@ export class ErlangLspConnection extends ErlangConnection {
 
     public Quit() : void {
         this.events_receiver.close();
+    }
+
+    private toErlangUri(uri: string): string {
+        if (process.platform == 'win32')
+            return uri.replace(/file:\/\/\/([A-Za-z])%3A\//, 'file://$1:/');
+        else
+            return uri;    
+    }
+
+    private fromErlangUri(uri: string): string {
+        if (process.platform == 'win32')
+            return uri.replace(/file:\/\/([A-Za-z]):/, 'file:///$1%3A');
+        else
+            return uri;
     }
 }
