@@ -98,15 +98,15 @@ export class ErlangLspConnection extends ErlangConnection {
         );
     }
 
-    public async getDefinitionLocation(uri : string, line : number, character : number ) : Promise<ReferenceLocation> {
-        return await this.post("goto_definition", this.toErlangUri(uri) + "\r\n" + line.toString() +  "\r\n" + (character-1).toString()).then(
+    public async getDefinitionLocation(uri: string, line: number, character: number): Promise<ReferenceLocation> {
+        return await this.post("goto_definition", this.toErlangUri(uri) + "\r\n" + (line + 1).toString() +  "\r\n" + (character + 1).toString()).then(
             res => {
                 //this.debug(`goto_definition result : ${JSON.stringify(res)}`);
                 if (res.result == "ok") {
                     return {
                         uri : this.fromErlangUri(res.uri),
-                        line : res.line,
-                        character : res.character
+                        line : res.line - 1,
+                        character : res.character - 1
                     };
                 }
                 return null;
@@ -133,3 +133,4 @@ export class ErlangLspConnection extends ErlangConnection {
             return uri;
     }
 }
+
