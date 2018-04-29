@@ -78,7 +78,7 @@ remove_include_errors(_Any) ->
 
 filter_epp_errors({File, Errors}) ->
     case lists:filter(fun (X) -> is_not_epp(X) end, Errors) of
-    [] -> [];
+    [] -> {File, []};
     _Any -> {File, _Any}
     end.
 
