@@ -170,7 +170,7 @@ connection.onDefinition(async (textDocumentPosition: TextDocumentPositionParams)
 	let res = await erlangLspConnection.getDefinitionLocation(fileName, textDocumentPosition.position.line, 
 		textDocumentPosition.position.character);
 	if (res) {
-		return Location.create("file://"+res.uri, Range.create(res.line, res.character, res.line, res.character));
+		return Location.create(res.uri, Range.create(res.line, res.character, res.line, res.character));
 	}
 	return null;
 });
