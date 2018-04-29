@@ -1,6 +1,19 @@
 
 # Change log
 
+## Version 0.2.4 (April 29, 2018)
+### LSP fixes 
+* [PR #47](https://github.com/pgourlain/vscode_erlang/pull/47)
+	- fix crash after remove epp error
+* [PR #48](https://github.com/pgourlain/vscode_erlang/pull/48)
+	- Go to Definition for function calls 
+	
+	
+Thanks to 
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+* [Shian](https://github.com/shian)
+---
+
 ## Version 0.2.3 (April 21, 2018)
 ### LSP fixes 
 * [PR #46](https://github.com/pgourlain/vscode_erlang/pull/46)
