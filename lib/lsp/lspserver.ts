@@ -235,7 +235,7 @@ function onValidatedTextDocument(parsingResult : ParsingResult, textDocument : T
 					severity: severity,					
 					range: Range.create(error.info.line-1, 0, error.info.line-1, 255),
 					message: error.info.message,
-					source: 'ex'
+					source: "erl"
 				});			
 			}
 		}
