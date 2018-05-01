@@ -1,6 +1,15 @@
 
 # Change log
 
+## Version 0.2.5 (May 1, 2018)
+### LSP Improvements 
+* [PR #47](https://github.com/pgourlain/vscode_erlang/pull/49)
+	- LSP Improvements (navigation and lint)
+	
+Thanks to 
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+---
+
 ## Version 0.2.4 (April 29, 2018)
 ### LSP fixes 
 * [PR #47](https://github.com/pgourlain/vscode_erlang/pull/47)
