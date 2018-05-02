@@ -28,8 +28,12 @@ epp_parse_file(File) ->
     {ok, FIO} -> 
         OriginalCodePath = code:get_path(),
         DepsDir = filename:join(filename:dirname(File), "../deps"),
-        {ok, Dirs} = file:list_dir(DepsDir),
-        [code:add_path(filename:join(DepsDir, X)) || X <- Dirs],
+        case file:list_dir(DepsDir) of
+            {ok, Dirs} ->
+                [code:add_path(filename:join(DepsDir, X)) || X <- Dirs];
+            {error, _} ->
+                ok
+        end,
 
         Ret = do_epp_parse_file(File, FIO),
 
