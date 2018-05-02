@@ -170,7 +170,7 @@ connection.onDefinition(async (textDocumentPosition: TextDocumentPositionParams)
 	let res = await erlangLspConnection.getDefinitionLocation(fileName, textDocumentPosition.position.line, 
 		textDocumentPosition.position.character);
 	if (res) {
-		return Location.create("file://"+res.uri, Range.create(res.line, res.character, res.line, res.character));
+		return Location.create(res.uri, Range.create(res.line, res.character, res.line, res.character));
 	}
 	return null;
 });
@@ -235,7 +235,7 @@ function onValidatedTextDocument(parsingResult : ParsingResult, textDocument : T
 					severity: severity,					
 					range: Range.create(error.info.line-1, 0, error.info.line-1, 255),
 					message: error.info.message,
-					source: 'ex'
+					source: "erl"
 				});			
 			}
 		}
