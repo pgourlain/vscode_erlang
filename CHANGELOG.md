@@ -1,6 +1,15 @@
 
 # Change log
 
+## Version 0.2.6 (May 2, 2018)
+### LSP : Help hover for standard functions and some LSP fixes 
+* [PR #52](https://github.com/pgourlain/vscode_erlang/pull/52) : Hover sample
+![lsp](images/vscode-erlang-hover.png)
+
+Thanks to 
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+---
+
 ## Version 0.2.5 (May 1, 2018)
 ### LSP Improvements 
 * [PR #47](https://github.com/pgourlain/vscode_erlang/pull/49)

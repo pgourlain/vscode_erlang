@@ -41,7 +41,10 @@ internal_hover_info(File, Line, Column) ->
             Module = list_to_atom(filename:rootname(filename:basename(File))),
             case element_at_position(Module, FileSyntaxTree, Line, Column) of
                 {function_use, FunctionModule, Function, _Arity} ->
-                    #{result => <<"ok">>, moduleName => list_to_binary(atom_to_list(FunctionModule)), functionName => list_to_binary(atom_to_list(Function))};
+                    #{result => <<"ok">>, 
+                        moduleName => list_to_binary(atom_to_list(FunctionModule)), 
+                        functionName => list_to_binary(atom_to_list(Function))
+                    };
                 _ ->
                     #{result => <<"ko">>}
             end
