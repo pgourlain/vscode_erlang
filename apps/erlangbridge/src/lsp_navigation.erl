@@ -1,6 +1,6 @@
 -module(lsp_navigation).
 
--export([goto_definition/3]).
+-export([goto_definition/3, hover_info/3]).
 
 goto_definition(File, Line, Column) ->
     try internal_goto_definition(File, Line, Column) of
@@ -15,16 +15,36 @@ internal_goto_definition(File, Line, Column) ->
         undefined ->
             #{result => <<"ko">>};
         _ ->
-            Module = list_to_atom(filename:basename(File)),
+            Module = list_to_atom(filename:rootname(filename:basename(File))),
             What = element_at_position(Module, FileSyntaxTree, Line, Column),
             case find_element(What, FileSyntaxTree, File) of
                 {FoundFile, FoundLine, FoundColumn} ->
                     #{result => <<"ok">>, uri => list_to_binary("file://" ++ FoundFile), line => FoundLine, character => FoundColumn};
                 _ ->
                     #{result => <<"ko">>}
-            end;
+            end
+    end.
+
+hover_info(File, Line, Column) ->
+    try internal_hover_info(File, Line, Column) of
+        _Any -> _Any
+    catch
+        _Err:_Reason -> error_logger:info_msg("hover_info error ~p:~p", [_Err, _Reason])
+    end.
+
+internal_hover_info(File, Line, Column) ->
+    FileSyntaxTree = file_syntax_tree(File),
+    case FileSyntaxTree of
+        undefined ->
+            #{result => <<"ko">>};
         _ ->
-            #{result => <<"ko">>}
+            Module = list_to_atom(filename:rootname(filename:basename(File))),
+            case element_at_position(Module, FileSyntaxTree, Line, Column) of
+                {function_use, FunctionModule, Function, _Arity} ->
+                    #{result => <<"ok">>, moduleName => list_to_binary(atom_to_list(FunctionModule)), functionName => list_to_binary(atom_to_list(Function))};
+                _ ->
+                    #{result => <<"ko">>}
+            end
     end.
 
 file_syntax_tree(File) ->
@@ -103,43 +123,65 @@ find_element({function_use, Module, Function, Arity}, CurrentFileSyntaxTree, Cur
         _ -> undefined
     end;
 find_element({variable, Variable, Line, Column}, CurrentFileSyntaxTree, CurrentFile) ->
-    AllClauses = lists:foldl(fun (TopLevelSyntaxTree, Acc) ->
+    AllFunctionsInReverseOrder = lists:foldl(fun (TopLevelSyntaxTree, Acc) ->
         erl_syntax_lib:fold(fun (SyntaxTree, SingleAcc) ->
             case SyntaxTree of
-                {clause, {_, _}, _, _, _} ->
+                {function, {_, _}, _, _, _} ->
                     [SyntaxTree | SingleAcc];
                 _ ->
                     SingleAcc
             end
         end, Acc, TopLevelSyntaxTree)
     end, [], CurrentFileSyntaxTree),
-    ClausesWithVariable = lists:keysort(2, lists:filter(fun (ClauseSyntaxTree) ->
-        lists:member({Line, Column}, find_variable_in_tree(Variable, ClauseSyntaxTree))
-    end, AllClauses)),
-    case ClausesWithVariable of
-        [_H | _T] ->
-            Occurrences = find_variable_in_tree(Variable, lists:last(ClausesWithVariable)),
-            case Occurrences of
+    [FunctionWithVariable | _] = lists:dropwhile(fun ({function, {FunctionStartLine, _}, _, _, _}) ->
+         FunctionStartLine > Line
+    end, AllFunctionsInReverseOrder),
+    FunClausesShadowingVariable = lists:sort(erl_syntax_lib:fold(fun (SyntaxTree, SingleAcc) ->
+        case SyntaxTree of
+            {'fun', {_, _}, {clauses, Clauses}} ->
+                lists:foldl(fun (Clause, FunClauseAcc) ->
+                    FunHasVariable =
+                        variable_location_in_fun_clause(Variable, Line, Column, Clause) andalso
+                        variable_in_fun_clause_arguments(Variable, Clause),
+                    case FunHasVariable of
+                        true -> [Clause | FunClauseAcc];
+                        _ -> FunClauseAcc
+                    end
+                end, SingleAcc, Clauses);
+            _ ->
+                SingleAcc
+        end
+    end, [], FunctionWithVariable)),
+    case FunClausesShadowingVariable of
+        [] ->
+            case find_variable_occurrences(Variable, FunctionWithVariable) of
                 [{L, C} | _Tail] ->
                     {CurrentFile, L, C};
                 _ ->
                     undefined
             end;
         _ ->
-            undefined
+            [{L, C} | _] = find_variable_occurrences(Variable, lists:last(FunClausesShadowingVariable)),
+            {CurrentFile, L, C}
     end.
 
-find_variable_in_tree(Variable, Tree) ->
-    lists:sort(find_variable_in_tree(Variable, Tree, [])).
+find_variable_occurrences(Variable, Tree) ->
+    lists:sort(find_variable_occurrences(Variable, Tree, [])).
 
-find_variable_in_tree(Variable, {var, {Line, Column}, Variable}, Acc) ->
+find_variable_occurrences(Variable, {var, {Line, Column}, Variable}, Acc) ->
     [{Line, Column} | Acc];
-find_variable_in_tree(Variable, T, Acc) when is_tuple(T) ->
-    find_variable_in_tree(Variable, tuple_to_list(T), Acc);
-find_variable_in_tree(Variable, [H | T], Acc) ->
-     find_variable_in_tree(Variable, T, find_variable_in_tree(Variable, H, Acc));
-find_variable_in_tree(_Variable, _, Acc) ->
+find_variable_occurrences(Variable, T, Acc) when is_tuple(T) ->
+    find_variable_occurrences(Variable, tuple_to_list(T), Acc);
+find_variable_occurrences(Variable, [H | T], Acc) ->
+     find_variable_occurrences(Variable, T, find_variable_occurrences(Variable, H, Acc));
+find_variable_occurrences(_Variable, _, Acc) ->
     Acc.
+
+variable_location_in_fun_clause(Variable, Line, Column, Clause) ->
+    lists:member({Line, Column}, find_variable_occurrences(Variable, Clause)).
+
+variable_in_fun_clause_arguments(Variable, {clause, {_, _}, Arguments, _, _}) ->
+    length(find_variable_occurrences(Variable, Arguments)) > 0.
 
 find_function(FileSyntaxTree, Function, Arity) ->
     Fun = fun

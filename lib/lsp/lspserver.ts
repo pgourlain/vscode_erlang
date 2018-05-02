@@ -5,9 +5,9 @@
 'use strict';
 
 import {
-	createConnection, TextDocuments, TextDocument, Diagnostic, DiagnosticSeverity,
-	ProposedFeatures, InitializeParams, Proposed, Range, DocumentFormattingParams, CompletionItem,
-	TextDocumentPositionParams, Definition, Location
+    createConnection, TextDocuments, TextDocument, Diagnostic, DiagnosticSeverity,
+    ProposedFeatures, InitializeParams, Proposed, Range, DocumentFormattingParams, CompletionItem,
+    TextDocumentPositionParams, Definition, Hover, Location, MarkedString
 } from 'vscode-languageserver';
 
 import { ErlangLspConnection, ParsingResult } from './erlangLspConnection';
@@ -15,14 +15,15 @@ import { ErlangShellLSP } from './ErlangShellLSP';
 import { IErlangShellOutput } from '../GenericShell';
 import { erlangBridgePath } from '../erlangConnection';
 import { ErlangSettings } from '../erlangSettings';
+import * as http from 'http'; 
 
 class ChannelWrapper implements IErlangShellOutput {
-	
-	show(): void {
-	}
-	appendLine(value: string): void {
-		debugLog(value);
-	}
+    
+    show(): void {
+    }
+    appendLine(value: string): void {
+        debugLog(value);
+    }
 
 }
 
@@ -39,68 +40,72 @@ let documents: TextDocuments = new TextDocuments();
 
 let hasConfigurationCapability = false;
 let hasWorkspaceFolderCapability = false;
+
+let module2helpPage: Map<string, string[]> = new Map();  
+
 //trace for debugging 
 let traceEnabled = false;
 
 connection.onInitialize(async (params: InitializeParams) => {
 
-	//connection.console.log("onInitialize.");
-	
-	await erlangLspConnection.Start(traceEnabled).then(port => {
-		return erlangLsp.Start("", erlangBridgePath+"/..", port, "src", "");
-	}, (reason) => {
-		connection.console.log(`LspConnection Start failed : ${reason}`);		
-	});
+    //connection.console.log("onInitialize.");
+    
+    await erlangLspConnection.Start(traceEnabled).then(port => {
+        return erlangLsp.Start("", erlangBridgePath+"/..", port, "src", "");
+    }, (reason) => {
+        connection.console.log(`LspConnection Start failed : ${reason}`);       
+    });
 
-	//erlangLspConnection.on("validatedTextDocument", onValidatedTextDocument);
-	let capabilities = params.capabilities;
+    //erlangLspConnection.on("validatedTextDocument", onValidatedTextDocument);
+    let capabilities = params.capabilities;
 
-	// Does the client support the `workspace/configuration` request? 
-	// If not, we will fall back using global settings
-	hasWorkspaceFolderCapability = (capabilities as Proposed.WorkspaceFoldersClientCapabilities).workspace && !!(capabilities as Proposed.WorkspaceFoldersClientCapabilities).workspace.workspaceFolders;
-	hasConfigurationCapability = (capabilities as Proposed.ConfigurationClientCapabilities).workspace && !!(capabilities as Proposed.ConfigurationClientCapabilities).workspace.configuration;
-	if (hasConfigurationCapability) {
-		debugLog(JSON.stringify((capabilities as Proposed.ConfigurationClientCapabilities).workspace.configuration));
-	}
-	debugLog(`capabilities => hasWorkspaceFolderCapability:${hasWorkspaceFolderCapability}, hasConfigurationCapability:${hasConfigurationCapability}`);
-	return {
-		capabilities: {
-			textDocumentSync: documents.syncKind,
-			documentFormattingProvider : true,
-			definitionProvider : true,
-			// completionProvider : {
-			// 	resolveProvider: true,
-			// 	triggerCharacters: [ ':' ]
-			// }
-		}
-	}
+    // Does the client support the `workspace/configuration` request? 
+    // If not, we will fall back using global settings
+    hasWorkspaceFolderCapability = (capabilities as Proposed.WorkspaceFoldersClientCapabilities).workspace && !!(capabilities as Proposed.WorkspaceFoldersClientCapabilities).workspace.workspaceFolders;
+    hasConfigurationCapability = (capabilities as Proposed.ConfigurationClientCapabilities).workspace && !!(capabilities as Proposed.ConfigurationClientCapabilities).workspace.configuration;
+    if (hasConfigurationCapability) {
+        debugLog(JSON.stringify((capabilities as Proposed.ConfigurationClientCapabilities).workspace.configuration));
+    }
+    debugLog(`capabilities => hasWorkspaceFolderCapability:${hasWorkspaceFolderCapability}, hasConfigurationCapability:${hasConfigurationCapability}`);
+    return {
+        capabilities: {
+            textDocumentSync: documents.syncKind,
+            documentFormattingProvider : true,
+            definitionProvider: true,
+            hoverProvider: true
+            // completionProvider : {
+            //  resolveProvider: true,
+            //  triggerCharacters: [ ':' ]
+            // }
+        }
+    }
 });
 
 connection.onInitialized(async () => {
-	var globalConfig = await connection.workspace.getConfiguration("erlang");
-	if (globalConfig) {
-		let erlangConfig = globalConfig;
-		if (erlangConfig && erlangConfig.languageServerProtocol.verbose) {
-			traceEnabled = true;
-		}
-	}
+    var globalConfig = await connection.workspace.getConfiguration("erlang");
+    if (globalConfig) {
+        let erlangConfig = globalConfig;
+        if (erlangConfig && erlangConfig.languageServerProtocol.verbose) {
+            traceEnabled = true;
+        }
+    }
 
-	//debugLog("connection.onInitialized");
-	if (hasWorkspaceFolderCapability) {
-		connection.workspace.onDidChangeWorkspaceFolders((_event) => {
-			debugLog('Workspace folder change event received');
-		});
-	}
+    //debugLog("connection.onInitialized");
+    if (hasWorkspaceFolderCapability) {
+        connection.workspace.onDidChangeWorkspaceFolders((_event) => {
+            debugLog('Workspace folder change event received');
+        });
+    }
 });
 
 connection.onShutdown(() => {
-	debugLog("connection.onShutDown");
-	erlangLsp.Kill();
+    debugLog("connection.onShutDown");
+    erlangLsp.Kill();
 });
 
 connection.onExit(() => {
-	debugLog("connection.onExit");
-	erlangLsp.Kill();
+    debugLog("connection.onExit");
+    erlangLsp.Kill();
 });
 
 // The global settings, used when the `workspace/configuration` request is not supported by the client.
@@ -113,134 +118,234 @@ let globalSettings: ErlangSettings = defaultSettings;
 let documentSettings: Map<string, Thenable<ErlangSettings>> = new Map();
 
 connection.onDidChangeConfiguration(change => {
-	if (hasConfigurationCapability) {
-		// Reset all cached document settings
-		documentSettings.clear();
-	} else {
-		globalSettings = <ErlangSettings>(change.settings.lspMultiRootSample || defaultSettings);
-	}
+    if (hasConfigurationCapability) {
+        // Reset all cached document settings
+        documentSettings.clear();
+    } else {
+        globalSettings = <ErlangSettings>(change.settings.lspMultiRootSample || defaultSettings);
+    }
 
-	// Revalidate all open text documents
-	documents.all().forEach(validateTextDocument);
+    // Revalidate all open text documents
+    documents.all().forEach(validateTextDocument);
 });
 
 function getDocumentSettings(resource: string): Thenable<ErlangSettings> {
-	if (!hasConfigurationCapability) {
-		return Promise.resolve(globalSettings);
-	}
-	let result = documentSettings.get(resource);
-	if (!result) {
-		result = connection.workspace.getConfiguration({ scopeUri: resource });
-		documentSettings.set(resource, result);
-	}
-	return result;
+    if (!hasConfigurationCapability) {
+        return Promise.resolve(globalSettings);
+    }
+    let result = documentSettings.get(resource);
+    if (!result) {
+        result = connection.workspace.getConfiguration({ scopeUri: resource });
+        documentSettings.set(resource, result);
+    }
+    return result;
 }
 
 // Only keep settings for open documents
 documents.onDidClose(e => {
-	documentSettings.delete(e.document.uri);
-	erlangLspConnection.onDocumentClosed(e.document.uri);
+    documentSettings.delete(e.document.uri);
+    erlangLspConnection.onDocumentClosed(e.document.uri);
 });
 
 // The content of a text document has changed. This event is emitted
 // when the text document first opened or when its content has changed.
 documents.onDidChangeContent((change) => {
-	validateTextDocument(change.document);
+    validateTextDocument(change.document);
 });
 
 async function validateTextDocument(textDocument: TextDocument): Promise<void> {
-	// In this simple example we get the settings for every validate run.
-	let settings = await getDocumentSettings(textDocument.uri);
-	// .hrl files show incorrect errors e.g. about not used records, ddisabled for now
-	if (textDocument.uri.endsWith(".hrl"))
-		return;
+    // In this simple example we get the settings for every validate run.
+    let settings = await getDocumentSettings(textDocument.uri);
+    // .hrl files show incorrect errors e.g. about not used records, ddisabled for now
+    if (textDocument.uri.endsWith(".hrl"))
+        return;
 
-	erlangLspConnection.validateTextDocument(textDocument.uri, 
-		100,
-		parsingResult => onValidatedTextDocument(parsingResult, textDocument));
+    erlangLspConnection.validateTextDocument(textDocument.uri, 
+        100,
+        parsingResult => onValidatedTextDocument(parsingResult, textDocument));
 }
 
 connection.onDocumentFormatting(async (params : DocumentFormattingParams) => {
-	erlangLspConnection.FormatDocument(params.textDocument.uri);
-	return [];
+    erlangLspConnection.FormatDocument(params.textDocument.uri);
+    return [];
 });
 
 connection.onDefinition(async (textDocumentPosition: TextDocumentPositionParams):Promise<Definition> => {
-	let fileName = textDocumentPosition.textDocument.uri;
-	let res = await erlangLspConnection.getDefinitionLocation(fileName, textDocumentPosition.position.line, 
-		textDocumentPosition.position.character);
-	if (res) {
-		return Location.create(res.uri, Range.create(res.line, res.character, res.line, res.character));
+    let fileName = textDocumentPosition.textDocument.uri;
+    let res = await erlangLspConnection.getDefinitionLocation(fileName, textDocumentPosition.position.line, 
+        textDocumentPosition.position.character);
+    if (res) {
+        return Location.create(res.uri, Range.create(res.line, res.character, res.line, res.character));
+    }
+    return null;
+});
+
+function markdown(str: string): string {
+    str = str.trim();
+    var reg = /(((< *\/[^>]+>)|(<[^>]+>))|([^<]+))/g;
+    var out = '';
+    var result;
+    var tags = [];
+    var off = [];
+    while ((result = reg.exec(str)) !== null) {
+        if (result[4]) {
+            var tag = ''
+            var endTag = '';
+            if (result[4].indexOf('<p') >= 0 || result[4].indexOf('name="') >= 0) {
+                tag = '';
+                endTag = '  \n';
+            }
+            else if (result[4].indexOf('REFTYPES') >= 0 || result[4].indexOf('func-types-title') >= 0) {
+                off.push(true);
+                tag = '';
+                endTag = 'ON';
+            }
+            else if (result[4].indexOf('<dt') >= 0) {
+                tag = '  \n**';
+                endTag = '**  \n';
+            }
+            else if (result[4].indexOf('bold_code') >= 0 && off.length === 0)
+                tag = endTag = ' **';
+            else if (result[4].indexOf('h3') >= 0) {
+                tag = '\n#### ';
+                endTag = '\n';
+            }
+            out += tag;
+            tags.push(endTag);
+        }
+        else if (result[3]) {
+            var top = tags.pop();
+            if (top === 'ON')
+                off.pop();
+            else
+                out += top;
+        }
+        else if (result[5] && off.length === 0)
+            out += result[5];
+    }
+    return out;
+}
+
+async function getModuleHelpPage(moduleName: string): Promise<string[]> {
+	if (module2helpPage.has(moduleName)) {
+		return module2helpPage.get(moduleName);
 	}
-	return null;
+	else {
+		return new Promise<string[]>(resolve => {
+			http.get('http://erlang.org/doc/man/' + moduleName + '.html', (response) => {
+				let contents:string = '';
+				response.on('data', (chunk) => {
+					contents += chunk;
+				});
+				response.on('end', () => {
+					module2helpPage.set(moduleName, contents.split('\n'));
+					resolve(module2helpPage.get(moduleName));
+				});   
+			}).on("error", (error) => {
+				module2helpPage.set(moduleName, []);
+				resolve([]);
+			});		  
+		});
+	}
+};
+
+function extractHelpForFunction(functionName: string, htmlLines: string[]): string {
+	var helpText: string = '';
+	var found = false;
+	for (var i = 0; i < htmlLines.length; ++i) {
+		var trimmed = htmlLines[i].trim();
+		if (!found) {
+			if (trimmed.indexOf('name="' + functionName) >= 0) {
+				found = true;
+				helpText = trimmed;
+			}
+		}
+		else {
+			if (!trimmed || trimmed.indexOf('name="') !== trimmed.indexOf('name="' + functionName))
+				break;
+			else
+				helpText += '\n' + trimmed;
+		}
+	}
+	return helpText;
+}
+
+connection.onHover(async (textDocumentPosition: TextDocumentPositionParams): Promise<Hover> => {
+	var uri = textDocumentPosition.textDocument.uri;
+    let res = await erlangLspConnection.getHoverInfo(uri, textDocumentPosition.position.line, textDocumentPosition.position.character);
+    if (res) {
+		var htmlLines = await getModuleHelpPage(res.moduleName);
+		return {contents: markdown(extractHelpForFunction(res.functionName, htmlLines))};
+    }
+    return null;
 });
 
 //https://stackoverflow.com/questions/38378410/can-i-add-a-completions-intellisense-file-to-a-language-support-extension
 connection.onCompletion(async (textDocumentPosition: TextDocumentPositionParams):Promise<CompletionItem[]> => {
-	let document = documents.get(textDocumentPosition.textDocument.uri);
-	if (document == null) {
-		debugLog(`unable to get document '${textDocumentPosition.textDocument.uri}'`);
-		return [];
-	}
-	let textDocument = document.getText();
-	
-	let offset = document.offsetAt(textDocumentPosition.position);
-	let char = textDocument.substr(offset-1, 1);
+    let document = documents.get(textDocumentPosition.textDocument.uri);
+    if (document == null) {
+        debugLog(`unable to get document '${textDocumentPosition.textDocument.uri}'`);
+        return [];
+    }
+    let textDocument = document.getText();
+    
+    let offset = document.offsetAt(textDocumentPosition.position);
+    let char = textDocument.substr(offset-1, 1);
 
-	if (char == ':') {
-		var items = await erlangLspConnection.GetCompletionItems(textDocumentPosition.textDocument.uri, 
-			textDocumentPosition.position.line, 
-			textDocumentPosition.position.character, char);
-		return <CompletionItem[]>items.map(x => { return {label: x, kind:2}});	
-	}
-	return [];
-	// return [{
-	// 	label : "test",
-	// 	kind : 2
-	// }];
+    if (char == ':') {
+        var items = await erlangLspConnection.GetCompletionItems(textDocumentPosition.textDocument.uri, 
+            textDocumentPosition.position.line, 
+            textDocumentPosition.position.character, char);
+        return <CompletionItem[]>items.map(x => { return {label: x, kind:2}});  
+    }
+    return [];
+    // return [{
+    //  label : "test",
+    //  kind : 2
+    // }];
 });
 
 connection.onCompletionResolve((item: CompletionItem): CompletionItem =>{
-	debugLog("resolve :" +JSON.stringify(item));
-	return item;
+    debugLog("resolve :" +JSON.stringify(item));
+    return item;
 });
 
 
 function debugLog(msg : string) : void {
-	if (true /*traceEnabled*/) {
-		connection.console.log(msg);
-	}
+    if (true /*traceEnabled*/) {
+        connection.console.log(msg);
+    }
 }
 
 function onValidatedTextDocument(parsingResult : ParsingResult, textDocument : TextDocument) : void {
 
-	if (parsingResult.parse_result) {	
-		let diagnostics: Diagnostic[] = [];
-		if (parsingResult.errors_warnings) {
-			for (var i = 0; i < parsingResult.errors_warnings.length; i++) {
-				let error = parsingResult.errors_warnings[i];
-				var severity:DiagnosticSeverity = DiagnosticSeverity.Error;
-				switch(error.type) {
-					case "warning" :
-						severity = DiagnosticSeverity.Warning;
-					break;
-					case "info" :
-						severity = DiagnosticSeverity.Information;
-					break;
-					default :
-						severity = DiagnosticSeverity.Error;
-					break;
-				}
-				diagnostics.push({
-					severity: severity,					
-					range: Range.create(error.info.line-1, 0, error.info.line-1, 255),
-					message: error.info.message,
-					source: "erl"
-				});			
-			}
-		}
-		connection.sendDiagnostics({ uri: textDocument.uri, diagnostics });	
-	}
+    if (parsingResult.parse_result) {   
+        let diagnostics: Diagnostic[] = [];
+        if (parsingResult.errors_warnings) {
+            for (var i = 0; i < parsingResult.errors_warnings.length; i++) {
+                let error = parsingResult.errors_warnings[i];
+                var severity:DiagnosticSeverity = DiagnosticSeverity.Error;
+                switch(error.type) {
+                    case "warning" :
+                        severity = DiagnosticSeverity.Warning;
+                    break;
+                    case "info" :
+                        severity = DiagnosticSeverity.Information;
+                    break;
+                    default :
+                        severity = DiagnosticSeverity.Error;
+                    break;
+                }
+                diagnostics.push({
+                    severity: severity,                 
+                    range: Range.create(error.info.line-1, error.info.character-1, error.info.line-1, 255),
+                    message: error.info.message,
+                    source: 'erl'
+                });         
+            }
+        }
+        connection.sendDiagnostics({ uri: textDocument.uri, diagnostics });
+    }
 }
 
 // Make the text document manager listen on the connection
