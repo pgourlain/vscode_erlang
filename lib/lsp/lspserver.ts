@@ -233,7 +233,7 @@ function onValidatedTextDocument(parsingResult : ParsingResult, textDocument : T
 				}
 				diagnostics.push({
 					severity: severity,					
-					range: Range.create(error.info.line-1, 0, error.info.line-1, 255),
+					range: Range.create(error.info.line-1, error.info.character-1, error.info.line-1, 255),
 					message: error.info.message,
 					source: "erl"
 				});			

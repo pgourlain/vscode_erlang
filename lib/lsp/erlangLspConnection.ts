@@ -13,6 +13,7 @@ export interface ErrorOrWarning {
 
 export interface ErrorInfo {
     line : number;
+    character : number;
     message : string;
 }
 
