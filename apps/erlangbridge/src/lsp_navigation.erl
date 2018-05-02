@@ -1,6 +1,6 @@
 -module(lsp_navigation).
 
--export([goto_definition/3]).
+-export([goto_definition/3, hover_info/3]).
 
 goto_definition(File, Line, Column) ->
     try internal_goto_definition(File, Line, Column) of
@@ -15,16 +15,36 @@ internal_goto_definition(File, Line, Column) ->
         undefined ->
             #{result => <<"ko">>};
         _ ->
-            Module = list_to_atom(filename:basename(File)),
+            Module = list_to_atom(filename:rootname(filename:basename(File))),
             What = element_at_position(Module, FileSyntaxTree, Line, Column),
             case find_element(What, FileSyntaxTree, File) of
                 {FoundFile, FoundLine, FoundColumn} ->
                     #{result => <<"ok">>, uri => list_to_binary("file://" ++ FoundFile), line => FoundLine, character => FoundColumn};
                 _ ->
                     #{result => <<"ko">>}
-            end;
+            end
+    end.
+
+hover_info(File, Line, Column) ->
+    try internal_hover_info(File, Line, Column) of
+        _Any -> _Any
+    catch
+        _Err:_Reason -> error_logger:info_msg("hover_info error ~p:~p", [_Err, _Reason])
+    end.
+
+internal_hover_info(File, Line, Column) ->
+    FileSyntaxTree = file_syntax_tree(File),
+    case FileSyntaxTree of
+        undefined ->
+            #{result => <<"ko">>};
         _ ->
-            #{result => <<"ko">>}
+            Module = list_to_atom(filename:rootname(filename:basename(File))),
+            case element_at_position(Module, FileSyntaxTree, Line, Column) of
+                {function_use, FunctionModule, Function, _Arity} ->
+                    #{result => <<"ok">>, moduleName => list_to_binary(atom_to_list(FunctionModule)), functionName => list_to_binary(atom_to_list(Function))};
+                _ ->
+                    #{result => <<"ko">>}
+            end
     end.
 
 file_syntax_tree(File) ->

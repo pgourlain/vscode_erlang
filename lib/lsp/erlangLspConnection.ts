@@ -23,6 +23,11 @@ export interface ReferenceLocation {
     character : number;
 }
 
+export interface HoverInfo {
+    moduleName: string;
+    functionName: string;
+}
+
 export class ErlangLspConnection extends ErlangConnection {
     
     protected get_ErlangFiles() : string[] {
@@ -115,6 +120,21 @@ export class ErlangLspConnection extends ErlangConnection {
             err =>  {return null;}
         );
     }
+
+    public async getHoverInfo(uri: string, line: number, character: number): Promise<HoverInfo> {
+        return await this.post("hover_info", this.toErlangUri(uri) + "\r\n" + (line + 1).toString() +  "\r\n" + (character + 1).toString()).then(
+            res => {
+                if (res.result == "ok") {
+                    return {
+                        moduleName: res.moduleName,
+                        functionName: res.functionName
+                    };
+                }
+                return null;
+            },
+            err =>  {return null;}
+        );
+    }    
 
     public Quit() : void {
         this.events_receiver.close();

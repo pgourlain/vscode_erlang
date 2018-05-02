@@ -45,17 +45,19 @@ handle_info({tcp, Socket, RawData}, State) ->
     %entry point for each feature
     inet:setopts(Socket, [{active, once}]),
     Result = case parse_request(RawData) of
-      {validate_text_document, FileName} ->
-	  parse_file_uri(FileName);
-      {format_document, FileName} ->
-	  format_file_uri(FileName);   
-      {document_closed, FileName} ->
-      gen_lsp_doc_server:remove_document(file_uri_to_file(FileName)), #{result => true};
-      {goto_definition, FileName, Line, Column} -> 
-      lsp_navigation:goto_definition(file_uri_to_file(FileName), to_int(Line), to_int(Column));
-      _ ->
-	  #{parse_result => false,
-	    error_message => <<"unknown command">>}
+        {validate_text_document, FileName} ->
+	        parse_file_uri(FileName);
+        {format_document, FileName} ->
+	        format_file_uri(FileName);   
+        {document_closed, FileName} ->
+            gen_lsp_doc_server:remove_document(file_uri_to_file(FileName)), #{result => true};
+        {goto_definition, FileName, Line, Column} -> 
+            lsp_navigation:goto_definition(file_uri_to_file(FileName), to_int(Line), to_int(Column));
+        {hover_info, FileName, Line, Column} -> 
+            lsp_navigation:hover_info(file_uri_to_file(FileName), to_int(Line), to_int(Column));
+        _ ->
+	        #{parse_result => false,
+	        error_message => <<"unknown command">>}
     end,
     send(Socket, Result),
     {noreply, State};
