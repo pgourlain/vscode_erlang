@@ -26,7 +26,18 @@ parse(File) ->
 epp_parse_file(File) ->
     case file:open(File, [read]) of
     {ok, FIO} -> 
+        OriginalCodePath = code:get_path(),
+        DepsDir = filename:join(filename:dirname(File), "../deps"),
+        case file:list_dir(DepsDir) of
+            {ok, Dirs} ->
+                [code:add_path(filename:join(DepsDir, X)) || X <- Dirs];
+            {error, _} ->
+                ok
+        end,
+
         Ret = do_epp_parse_file(File, FIO),
+
+        code:set_path(OriginalCodePath),
         file:close(FIO), 
         %error_logger:info_msg("epp_parse_file '~p'",[Ret]),
         Ret;
@@ -34,7 +45,7 @@ epp_parse_file(File) ->
     end.
 
 do_epp_parse_file(File, FIO) ->
-    case epp:open(File, FIO, {1,1},[],[]) of
+    case epp:open(File, FIO, {1,1},["../include"],[]) of
     {ok, Epp} -> {ok, epp:parse_file(Epp)};
     {error, _Err} -> {error, _Err} 
     end.
