@@ -24,6 +24,7 @@ export interface ReferenceLocation {
 }
 
 export interface HoverInfo {
+    text: string;
     moduleName: string;
     functionName: string;
 }
@@ -126,6 +127,7 @@ export class ErlangLspConnection extends ErlangConnection {
             res => {
                 if (res.result == "ok") {
                     return {
+                        text: res.text,
                         moduleName: res.moduleName,
                         functionName: res.functionName
                     };

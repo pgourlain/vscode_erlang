@@ -4,9 +4,9 @@
 
 goto_definition(File, Line, Column) ->
     try internal_goto_definition(File, Line, Column) of
-    _Any -> _Any
+        _Any -> _Any
     catch
-    _Err:_Reason -> error_logger:info_msg("goto_definition error ~p:~p", [_Err, _Reason])
+        _Err:_Reason -> error_logger:info_msg("goto_definition error ~p:~p", [_Err, _Reason])
     end.
 
 internal_goto_definition(File, Line, Column) ->
@@ -39,16 +39,38 @@ internal_hover_info(File, Line, Column) ->
             #{result => <<"ko">>};
         _ ->
             Module = list_to_atom(filename:rootname(filename:basename(File))),
-            case element_at_position(Module, FileSyntaxTree, Line, Column) of
-                {function_use, FunctionModule, Function, _Arity} ->
-                    #{result => <<"ok">>, 
-                        moduleName => list_to_binary(atom_to_list(FunctionModule)), 
-                        functionName => list_to_binary(atom_to_list(Function))
-                    };
+            What = element_at_position(Module, FileSyntaxTree, Line, Column),
+            case What of
+                {function_use, FunctionModule, Function, Arity} ->
+                    SyntaxTreeFile = get_module_syntax_tree(FunctionModule, FileSyntaxTree, File),
+                    case SyntaxTreeFile of
+                        {SyntaxTree, _File} ->
+                            case find_function(SyntaxTree, Function, Arity) of
+                                {function, _, _, _, Clauses} ->
+                                    FunctionHeaders = join_strings(lists:map(fun ({clause, _Location, Args, _Guard, _Body}) ->
+                                        function_header(Function, Args)
+                                    end, Clauses), "  \n"),
+                                    #{result => <<"ok">>, text => list_to_binary(FunctionHeaders)};
+                                _ ->
+                                    #{result => <<"ko">>}
+                            end;                                
+                        _ ->
+                            #{result => <<"ok">>, moduleName => list_to_binary(atom_to_list(FunctionModule)), functionName => list_to_binary(atom_to_list(Function))}
+                    end;
                 _ ->
                     #{result => <<"ko">>}
             end
     end.
+
+function_header(Function, Args) ->
+    atom_to_list(Function) ++ "(" ++ join_strings(lists:map(fun erl_prettypr:format/1, Args), ", ") ++ ")".
+
+join_strings([], _) ->
+    [];
+join_strings([String], _) ->
+    String;
+join_strings([String|Rest], Joiner) ->
+    String ++ Joiner ++ join_strings(Rest, Joiner).
 
 file_syntax_tree(File) ->
     case gen_lsp_doc_server:get_document(File) of
@@ -112,17 +134,25 @@ element_at_position(CurrentModule, FileSyntaxTree, Line, Column) ->
     end,
     find_in_file_syntax_tree(FileSyntaxTree, Fun).
 
-find_element({function_use, Module, Function, Arity}, CurrentFileSyntaxTree, CurrentFile) ->
+get_module_syntax_tree(Module, CurrentFileSyntaxTree, CurrentFile) ->
     CurrentModule = list_to_atom(filename:basename(CurrentFile)),
-    {File, SyntaxTree} = case Module of
+    case Module of
         CurrentModule ->
-            {CurrentFile, CurrentFileSyntaxTree};
+            {CurrentFileSyntaxTree, CurrentFile};
         _ ->
             OtherFile = filename:dirname(CurrentFile) ++ "/" ++ atom_to_list(Module) ++ ".erl",
-            {OtherFile, file_syntax_tree(OtherFile)} % TODO search in project not in the file directory
-    end,
+            case filelib:is_regular(OtherFile) of
+                true ->
+                    {file_syntax_tree(OtherFile), OtherFile}; % TODO search in project not in the file directory
+                _ ->
+                    undefined
+            end
+    end.
+
+find_element({function_use, Module, Function, Arity}, CurrentFileSyntaxTree, CurrentFile) ->
+    {SyntaxTree, File} = get_module_syntax_tree(Module, CurrentFileSyntaxTree, CurrentFile),
     case find_function(SyntaxTree, Function, Arity) of
-        {Line, Column} -> {File, Line, Column};
+        {function, {Line, Column}, _Function, _Arity, _Clauses} -> {File, Line, Column};
         _ -> undefined
     end;
 find_element({variable, Variable, Line, Column}, CurrentFileSyntaxTree, CurrentFile) ->
@@ -187,10 +217,11 @@ variable_in_fun_clause_arguments(Variable, {clause, {_, _}, Arguments, _, _}) ->
     length(find_variable_occurrences(Variable, Arguments)) > 0.
 
 find_function(FileSyntaxTree, Function, Arity) ->
-    Fun = fun
-        ({function, Position, FoundFunction, FoundArity, _Clauses}) when FoundFunction =:= Function andalso FoundArity =:= Arity ->
-            Position;
-        (_SyntaxTree) ->
+    Fun = fun (SyntaxTree) ->
+        case SyntaxTree of {function, Position, FoundFunction, FoundArity, _Clauses} when FoundFunction =:= Function andalso FoundArity =:= Arity ->
+            SyntaxTree;
+        _ ->
             undefined
+        end
     end,
     find_in_file_syntax_tree(FileSyntaxTree, Fun).
