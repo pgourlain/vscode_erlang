@@ -106,26 +106,17 @@ extract_error_or_warning(Type, ErrorsOrWarnings) ->
 extract_error_or_warning(_Type, {_, []}) ->
     [].
 
-extract_info({{Line, _Column}, Source, MessageElements}) ->
-    extract_info({Line, Source, MessageElements});
-extract_info({Line, Source, MessageElements}) ->
+extract_info({Line, Module, MessageBody}) when is_number(Line) ->
+    extract_info({{Line, 1}, Module, MessageBody});
+extract_info({{Line, Column}, Module, MessageBody}) ->
     % samples of X
     %{20,erl_parse,["syntax error before: ","load_xy"]}
     %{11,erl_lint,{undefined_function,{load_xy,1}}}]}
     #{
         line => Line,
-        message => erlang:list_to_binary(format_message_elements(Source, MessageElements))
+        character => Column,
+        message => erlang:list_to_binary(lists:flatten(apply(Module, format_error, [MessageBody]), []))
     }.
-
-format_message_elements(erl_parse, MessageElements) ->
-    lists:flatten(MessageElements);
-format_message_elements(erl_lint, MessageElements) ->
-    lists:flatten(lists:join(" ", lists:map(fun format_lint_message_element/1, tuple_to_list(MessageElements)))).
-
-format_lint_message_element({Function, Arity}) when is_atom(Function) andalso is_integer(Arity) ->
-    atom_to_list(Function) ++ "/" ++ integer_to_list(Arity);
-format_lint_message_element(Element) when is_atom(Element) ->
-    string:replace(atom_to_list(Element), "_", " ").
 
 parse_src_file(File) ->
     case file:path_consult(filename:dirname(File), File) of
