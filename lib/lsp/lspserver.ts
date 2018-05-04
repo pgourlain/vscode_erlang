@@ -182,16 +182,22 @@ connection.onDefinition(async (textDocumentPosition: TextDocumentPositionParams)
 
 function markdown(str: string): string {
     str = str.trim();
-    var reg = /(((< *\/[^>]+>)|(<[^>]+>))|([^<]+))/g;
+    var reg = /(((< *\/[^>]+>)|(< *([a-zA-Z0-9]+)[^>]*>))|([^<]+))/g;
     var out = '';
     var result;
     var tags = [];
     var off = [];
     while ((result = reg.exec(str)) !== null) {
         if (result[4]) {
+            var tagName = result[5];            
             var tag = ''
             var endTag = '';
-            if (result[4].indexOf('<p') >= 0 || result[4].indexOf('name="') >= 0) {
+            if (tagName === 'br') {
+                if (off.length === 0)
+                    out += '  \n';
+                continue;
+            }
+            else if (tagName === 'p' || result[4].indexOf('name="') >= 0) {
                 tag = '';
                 endTag = '  \n';
             }
@@ -220,62 +226,68 @@ function markdown(str: string): string {
             else
                 out += top;
         }
-        else if (result[5] && off.length === 0)
-            out += result[5];
+        else if (result[6] && off.length === 0)
+            out += result[6];
     }
     return out;
 }
 
 async function getModuleHelpPage(moduleName: string): Promise<string[]> {
-	if (module2helpPage.has(moduleName)) {
-		return module2helpPage.get(moduleName);
-	}
-	else {
-		return new Promise<string[]>(resolve => {
-			http.get('http://erlang.org/doc/man/' + moduleName + '.html', (response) => {
-				let contents:string = '';
-				response.on('data', (chunk) => {
-					contents += chunk;
-				});
-				response.on('end', () => {
-					module2helpPage.set(moduleName, contents.split('\n'));
-					resolve(module2helpPage.get(moduleName));
-				});   
-			}).on("error", (error) => {
-				module2helpPage.set(moduleName, []);
-				resolve([]);
-			});		  
-		});
-	}
+    if (module2helpPage.has(moduleName)) {
+        return module2helpPage.get(moduleName);
+    }
+    else {
+        return new Promise<string[]>(resolve => {
+            http.get('http://erlang.org/doc/man/' + moduleName + '.html', (response) => {
+                let contents:string = '';
+                response.on('data', (chunk) => {
+                    contents += chunk;
+                });
+                response.on('end', () => {
+                    module2helpPage.set(moduleName, contents.split('\n'));
+                    resolve(module2helpPage.get(moduleName));
+                });   
+            }).on("error", (error) => {
+                module2helpPage.set(moduleName, []);
+                resolve([]);
+            });       
+        });
+    }
 };
 
 function extractHelpForFunction(functionName: string, htmlLines: string[]): string {
-	var helpText: string = '';
-	var found = false;
-	for (var i = 0; i < htmlLines.length; ++i) {
-		var trimmed = htmlLines[i].trim();
-		if (!found) {
-			if (trimmed.indexOf('name="' + functionName) >= 0) {
-				found = true;
-				helpText = trimmed;
-			}
-		}
-		else {
-			if (!trimmed || trimmed.indexOf('name="') !== trimmed.indexOf('name="' + functionName))
-				break;
-			else
-				helpText += '\n' + trimmed;
-		}
-	}
-	return helpText;
+    var helpText: string = '';
+    var found = false;
+    for (var i = 0; i < htmlLines.length; ++i) {
+        var trimmed = htmlLines[i].trim();
+        if (!found) {
+            if (trimmed.indexOf('name="' + functionName) >= 0) {
+                found = true;
+                helpText = trimmed;
+            }
+        }
+        else {
+            if (!trimmed || trimmed.indexOf('name="') !== trimmed.indexOf('name="' + functionName))
+                break;
+            else
+                helpText += '\n' + trimmed;
+        }
+    }
+    return helpText;
 }
 
 connection.onHover(async (textDocumentPosition: TextDocumentPositionParams): Promise<Hover> => {
-	var uri = textDocumentPosition.textDocument.uri;
+    var uri = textDocumentPosition.textDocument.uri;
     let res = await erlangLspConnection.getHoverInfo(uri, textDocumentPosition.position.line, textDocumentPosition.position.character);
     if (res) {
-		var htmlLines = await getModuleHelpPage(res.moduleName);
-		return {contents: markdown(extractHelpForFunction(res.functionName, htmlLines))};
+		debugLog(JSON.stringify(res))
+		if (res.text) {
+	        return {contents: res.text};
+		}
+		else {
+			var htmlLines = await getModuleHelpPage(res.moduleName);
+        	return {contents: markdown(extractHelpForFunction(res.functionName, htmlLines))};
+		}
     }
     return null;
 });
