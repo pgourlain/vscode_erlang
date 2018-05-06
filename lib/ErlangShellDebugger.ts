@@ -126,24 +126,23 @@ export class ErlangShellForDebugging extends ErlGenericShell {
     private createArgsFile(startDir: string, noDebug: boolean, addEbinsToCodepath: boolean): string[] {
         var result: string[] = [];
         if (this.breakPoints) {
-            var argsFileContents = "-eval 'int:start()";
-            var modulesWithoutBp: { [sourcePath: string]: boolean} = {};
-            this.findErlFiles(startDir).forEach(fileName => {
-                modulesWithoutBp[fileName] = true;
-            });
-            //first interpret source
+            var argsFileContents = "";
             if (!noDebug) {
+                argsFileContents += "-eval 'int:start()";
+                var modulesWithoutBp: { [sourcePath: string]: boolean} = {};
+                this.findErlFiles(startDir).forEach(fileName => {
+                    modulesWithoutBp[fileName] = true;
+                });
+                //first interpret source
                 var bps = this.uniqueBy(this.breakPoints, bp => bp.source.path);
                 bps.forEach(bp => {
                     argsFileContents += ",int:ni(\\\"" + this.formatPath(bp.source.path) + "\\\")";
                     delete modulesWithoutBp[bp.source.path];
                 });
-            }
-            for (var fileName in modulesWithoutBp) {
-                argsFileContents += ",int:ni(\\\"" + this.formatPath(fileName) + "\\\")";
-            }
-            //then set break
-            if (!noDebug) {
+                for (var fileName in modulesWithoutBp) {
+                    argsFileContents += ",int:ni(\\\"" + this.formatPath(fileName) + "\\\")";
+                }
+                //then set break
                 this.breakPoints.forEach(bp => {
                     var moduleName = path.basename(bp.source.name, ".erl");
                     argsFileContents += `,int:break(${moduleName}, ${bp.line})`;
@@ -151,8 +150,8 @@ export class ErlangShellForDebugging extends ErlGenericShell {
                 this.functionBreakPoints.forEach(bp => {
                     argsFileContents += `,vscode_connection:set_breakpoint(${bp.moduleName}, {function, ${bp.functionName}, ${bp.arity}})`;
                 });
+                argsFileContents += "'";
             }
-            argsFileContents += "'";
             if (addEbinsToCodepath) {
                 this.findEbinDirs(path.join(startDir, "_build")).forEach(ebin => {
                     argsFileContents += " -pz \"" + this.formatPath(ebin) + "\"";
