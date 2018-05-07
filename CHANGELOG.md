@@ -1,5 +1,16 @@
+# Change log
 
 # Change log
+## Version 0.2.7 (May 7, 2018)
+### LSP and Debugger 
+* [PR #53](https://github.com/pgourlain/vscode_erlang/pull/53)
+	- Hover shows clause heads for project functions
+* [PR #54](https://github.com/pgourlain/vscode_erlang/pull/54) 
+	- Start Without Debugging no longer starts debugger
+
+Thanks to 
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+---
 
 ## Version 0.2.6 (May 2, 2018)
 ### LSP : Help hover for standard functions and some LSP fixes 

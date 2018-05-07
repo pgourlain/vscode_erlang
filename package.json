@@ -1,14 +1,14 @@
 {
 	"name": "erlang",
 	"description": "Erlang language extension for Visual Studio Code",
-	"version": "0.2.6",
+	"version": "0.2.7",
 	"icon": "images/icon.png",
 	"publisher": "pgourlain",
 	"engines": {
 		"vscode": "^1.15.0"
 	},
 	"categories": [
-		"Languages",
+		"Programming Languages",
 		"Snippets",
 		"Debuggers"
 	],
