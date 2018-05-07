@@ -35,7 +35,7 @@ compile_needed_modules() ->
     do_compile(["src/vscode_lsp_app", "src/gen_lsp_server", 
         "src/gen_lsp_sup", "src/gen_lsp_doc_sup","src/gen_lsp_doc_server",
         "src/vscode_lsp_app_sup", "src/lsp_navigation", "src/lsp_syntax",
-        "src/gen_connection", "src/vscode_jsone"], CompileOptions)
+        "src/gen_connection", "src/vscode_jsone","src/hover_doc_layout"], CompileOptions)
     .
 
 do_compile([H|T], CompileOptions) ->
