@@ -21,7 +21,7 @@ This extension adds support for the Erlang language to Visual Studio Code, inclu
 ![build](images/vscode-erlang-build-args.png)
 
 ## Debugger
-- Variables list shows variables from the current scope
+- Variables List shows variables from the current scope
 - Call Stack shows Erlang processes and allows to control them with e.g. Pause and Continue
 - Standard commands Step Over, Step Into, Step Out supported
 - Full breakpoints support:
