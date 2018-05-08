@@ -41,7 +41,6 @@ The modified code may be automatically build before debugger is started. To set 
   1. Select **Configure Task** in the alert, choose **Create tasks.json file from template** and then **Others: Example to run an arbitrary command**
   1. This will create tasks.json for you. Change both label and command to "rebar3 compile".
   1. Add entry "problemMatcher": "$erlang"
-
 ![debug](images/vscode-erlang-build-task.png)
 
 Then, before debugging is started, modified files will be recompiled automatically.
