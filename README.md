@@ -10,6 +10,7 @@ This extension adds support for the Erlang language to VS Code, including:
 ![editing](images/vscode-editing.gif)
 
 ## Build
+
 ![build](images/vscode-erlang-build.png)
 
 - Standard rebar3 is the default build tool, also rebar is supported. The rebar.config file should be placed in the root directory.
@@ -42,6 +43,7 @@ The modified code may be automatically build before debugger is started. To set 
   1. Add entry "problemMatcher": "$erlang"
 
 ![debug](images/vscode-erlang-build-task.png)
+
 Then, before debugging is started, modified files will be recompiled automatically.
 
 ## Available commands
