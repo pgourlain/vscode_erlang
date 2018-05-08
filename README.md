@@ -1,9 +1,9 @@
 # Erlang for Visual Studio Code
-This extension adds support for the Erlang language to VS Code, including:
+This extension adds support for the Erlang language to Visual Studio Code, including editing, building and debugging.
 
 ## Editing support
 - Syntax highlighting
-- Shows errors and warnings while you type (requires File/Auto Save to be on)
+- Shows errors and warnings dynamically while you type (requires File/Auto Save to be on)
 - Go To Definition/Peek Definition
 - Hover help for standard functions
 - Hover for project functions showing head clauses
@@ -15,7 +15,7 @@ This extension adds support for the Erlang language to VS Code, including:
 ![build](images/vscode-erlang-build.png)
 
 - Standard rebar3 is the default build tool, also rebar is supported. The rebar.config file should be placed in the root directory.
-- Build arguments are configurable, by default "compile" is used in build command
+- Build arguments are configurable, by default "compile" is used
 - You can override the default in configuration file (i.e. workspace settings)
 
 ![build](images/vscode-erlang-build-args.png)
