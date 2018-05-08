@@ -11,6 +11,7 @@ This extension adds support for the Erlang language to VS Code, including:
 
 ## Build
 ![build](images/vscode-erlang-build.png)
+
 - Standard rebar3 is the default build tool, also rebar is supported. The rebar.config file should be placed in the root directory.
 - Build arguments are configurable, by default "compile" is used in build command
 - You can override the default in configuration file (i.e. workspace settings)
@@ -33,6 +34,7 @@ This extension adds support for the Erlang language to VS Code, including:
 You can provide a specific command line to 'erl' in launch.json configuration file in "arguments" ebtry.
 
 ![debug1](images/vscode-erlang-debug-args.png)
+
 The modified code may be automatically build before debugger is started. To set automatic build you need to:
   1. Add to launch.json file the entry "preLaunchTask": "rebar3 compile"
   1. Select **Configure Task** in the alert, choose **Create tasks.json file from template** and then **Others: Example to run an arbitrary command**
