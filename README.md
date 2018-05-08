@@ -8,7 +8,7 @@ This extension adds support for the Erlang language to Visual Studio Code, inclu
 - Hover help for standard functions
 - Hover for project functions showing head clauses
 
-![editing](images/vscode-editing.gif)
+![editing](images/vscode-erlang-editing.gif)
 
 ## Build
 
