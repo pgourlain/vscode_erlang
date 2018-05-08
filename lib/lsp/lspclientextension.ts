@@ -122,7 +122,7 @@ function getOuterMostWorkspaceFolder(folder: WorkspaceFolder): WorkspaceFolder {
 
 export function activate(context: ExtensionContext) {
 
-	lspOutputChannel = Window.createOutputChannel('lsp-multi-root-sample');
+	lspOutputChannel = Window.createOutputChannel('Erlang Language Server');
 	let serverModule = context.asAbsolutePath(path.join('lib', 'lsp','lspserver.js'));
 	if (!fs.existsSync(serverModule)) {
 		serverModule = context.asAbsolutePath(path.join('out', 'lib', 'lsp','lspserver.js'));
@@ -162,11 +162,11 @@ export function activate(context: ExtensionContext) {
 			// configurationSection: [ 'lspMultiRootSample' ]
 		},
 		middleware: middleware as Middleware,
-		diagnosticCollectionName: 'lsp-multi-root-sample',
+		diagnosticCollectionName: 'Erlang Language Server',
 		outputChannel: lspOutputChannel
 	}
 
-	client = new LanguageClient('lsp-multi-root-sample', 'LSP Multi Root for Erlang', serverOptions, clientOptions);
+	client = new LanguageClient('Erlang Language Server', 'Erlang Language Server', serverOptions, clientOptions);
 	client.registerProposedFeatures();
 	// Create the language client and start the client.
 	//client = new LanguageClient('languageServerExample', 'Language Server Example', serverOptions, clientOptions);
