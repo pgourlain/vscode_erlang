@@ -3,6 +3,7 @@ This extension adds support for the Erlang language to VS Code, including:
 
 ## Editing support
 - Syntax highlighting
+- Shows errors and warnings while you type (requires File/Auto Save to be on)
 - Go To Definition/Peek Definition
 - Hover help for standard functions
 - Hover for project functions showing head clauses
