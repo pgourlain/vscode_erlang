@@ -85,15 +85,14 @@ filter_epp_errors({File, Errors}) ->
 is_not_epp(X) ->
     element(2, X) =/= epp.
 
+extract_error_or_warning(_Type, {_, []}) ->
+    [];
 extract_error_or_warning(Type, ErrorsOrWarnings) ->
     [#{type => Type,
        file =>
 	   erlang:list_to_binary(element(1, ErrorsOrWarnings)),
        info => extract_info(X)}
-     || X <- element(2, ErrorsOrWarnings)];
-
-extract_error_or_warning(_Type, {_, []}) ->
-    [].
+     || X <- element(2, ErrorsOrWarnings)].
 
 extract_info({Line, Module, MessageBody}) when is_number(Line) ->
     extract_info({{Line, 1}, Module, MessageBody});

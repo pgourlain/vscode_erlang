@@ -42,15 +42,20 @@ internal_hover_info(File, Line, Column) ->
             What = element_at_position(Module, FileSyntaxTree, Line, Column),
             case What of
                 {function_use, FunctionModule, Function, Arity} ->
-                    SyntaxTreeFile = get_module_syntax_tree(FunctionModule, FileSyntaxTree, File),
+                    SyntaxTreeFile = get_module_syntax_tree(FunctionModule, FileSyntaxTree, File),                    
                     case SyntaxTreeFile of
                         {SyntaxTree, _File} ->
                             case find_function(SyntaxTree, Function, Arity) of
                                 {function, _, _, _, Clauses} ->
-                                    FunctionHeaders = join_strings(lists:map(fun ({clause, _Location, Args, _Guard, _Body}) ->
-                                        function_header(Function, Args)
-                                    end, Clauses), "  \n"),
-                                    #{result => <<"ok">>, text => list_to_binary(FunctionHeaders)};
+                                    DocAsString = edoc:layout(edoc:get_doc(_File, [{hidden, true}, {private, true}]), 
+                                        [{layout, hover_doc_layout}, {filter, [{function, {Function, Arity}}]} ]),                            
+                                    %error_logger:info_msg("Documentation : ~p~n", [DocAsString]),                                
+                                    #{result => <<"ok">>, text => list_to_binary(DocAsString)};
+                                                                        
+                                    %FunctionHeaders = join_strings(lists:map(fun ({clause, _Location, Args, _Guard, _Body}) ->
+                                    %    function_header(Function, Args)
+                                    %end, Clauses), "  \n"),
+                                    %#{result => <<"ok">>, text => list_to_binary(FunctionHeaders)};
                                 _ ->
                                     #{result => <<"ko">>}
                             end;                                
@@ -218,7 +223,8 @@ variable_in_fun_clause_arguments(Variable, {clause, {_, _}, Arguments, _, _}) ->
 
 find_function(FileSyntaxTree, Function, Arity) ->
     Fun = fun (SyntaxTree) ->
-        case SyntaxTree of {function, Position, FoundFunction, FoundArity, _Clauses} when FoundFunction =:= Function andalso FoundArity =:= Arity ->
+        case SyntaxTree of 
+        {function, _Position, FoundFunction, FoundArity, _Clauses} when FoundFunction =:= Function andalso FoundArity =:= Arity ->
             SyntaxTree;
         _ ->
             undefined
