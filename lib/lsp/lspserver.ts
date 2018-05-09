@@ -141,8 +141,13 @@ function getDocumentSettings(resource: string): Thenable<ErlangSettings> {
     return result;
 }
 
-// Only keep settings for open documents
+documents.onDidOpen(e => {
+    validateTextDocument(e.document);
+});
+	
 documents.onDidClose(e => {
+	let diagnostics: Diagnostic[] = [];
+	connection.sendDiagnostics({ uri: e.document.uri, diagnostics });
     documentSettings.delete(e.document.uri);
     erlangLspConnection.onDocumentClosed(e.document.uri);
 });
