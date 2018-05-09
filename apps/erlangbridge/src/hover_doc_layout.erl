@@ -11,7 +11,8 @@
 %% @doc return a string
 module(Element, Options) ->
     Functions = layout_module(Element, init_opts(Element,Options)),
-    Ret = [ FName ++ "  \n" ++ FDesc || {FName, FDesc} <- Functions],
+    %return only description
+    Ret = [FDesc || {_FName, FDesc} <- Functions],
     lists:flatten(join_strings(Ret, "  \n")).
 
 init_opts(_Element, Options) ->

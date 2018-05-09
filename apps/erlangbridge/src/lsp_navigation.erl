@@ -50,12 +50,11 @@ internal_hover_info(File, Line, Column) ->
                                     DocAsString = edoc:layout(edoc:get_doc(_File, [{hidden, true}, {private, true}]), 
                                         [{layout, hover_doc_layout}, {filter, [{function, {Function, Arity}}]} ]),                            
                                     %error_logger:info_msg("Documentation : ~p~n", [DocAsString]),                                
-                                    #{result => <<"ok">>, text => list_to_binary(DocAsString)};
                                                                         
-                                    %FunctionHeaders = join_strings(lists:map(fun ({clause, _Location, Args, _Guard, _Body}) ->
-                                    %    function_header(Function, Args)
-                                    %end, Clauses), "  \n"),
-                                    %#{result => <<"ok">>, text => list_to_binary(FunctionHeaders)};
+                                    FunctionHeaders = join_strings(lists:map(fun ({clause, _Location, Args, _Guard, _Body}) ->
+                                        function_header(Function, Args)
+                                    end, Clauses), "  \n") ++ "  \n" ++ DocAsString,
+                                    #{result => <<"ok">>, text => list_to_binary(FunctionHeaders)};
                                 _ ->
                                     #{result => <<"ko">>}
                             end;                                
