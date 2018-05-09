@@ -1,6 +1,17 @@
 # Change log
 
-# Change log
+## Version 0.2.8 (May 9, 2018)
+### LSP  
+* [PR #55](https://github.com/pgourlain/vscode_erlang/pull/55)
+	- LSP updates and README update
+* [PR #56](https://github.com/pgourlain/vscode_erlang/pull/56) 
+	- Hover shows edoc for project functions
+
+Thanks to 
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+---
+
+
 ## Version 0.2.7 (May 7, 2018)
 ### LSP and Debugger 
 * [PR #53](https://github.com/pgourlain/vscode_erlang/pull/53)
