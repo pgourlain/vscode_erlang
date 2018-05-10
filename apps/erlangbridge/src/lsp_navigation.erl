@@ -1,6 +1,6 @@
 -module(lsp_navigation).
 
--export([goto_definition/3, hover_info/3, find_rebar_config/1]).
+-export([goto_definition/3, hover_info/3, find_rebar_config/1, references_info/3, codelens_info/1]).
 
 goto_definition(File, Line, Column) ->
     try internal_goto_definition(File, Line, Column) of
@@ -71,6 +71,78 @@ internal_hover_info(File, Line, Column) ->
             end
     end.
 
+references_info(File, Line, Column) ->
+    try internal_references_info(File, Line, Column) of
+        _Any -> _Any
+    catch
+        _Err:_Reason -> error_logger:info_msg("references_info error ~p:~p", [_Err, _Reason])
+    end.
+
+internal_references_info(File, _Line, _Column) ->
+    #{result => <<"ok">>, references => [
+        #{uri => list_to_binary("file://" ++ File), line => 1, character => 1},
+        #{uri => list_to_binary("file://" ++ File), line => 10, character => 1}        
+    ]}.
+
+codelens_info(File) ->
+    try internal_codelens_info(File) of
+        _Any -> _Any
+    catch
+        _Err:_Reason -> error_logger:info_msg("codelens_info error ~p:~p", [_Err, _Reason])
+    end.
+
+internal_codelens_info(File) ->
+    case file_syntax_tree(File) of
+        undefined -> #{result => <<"ko">>};
+        FileSyntaxTree ->
+            %filter only defined functions
+            MapResult = maps:filter(fun (_K,V) -> maps:is_key(func_name, V) end,
+                fold_in_file_syntax_tree(FileSyntaxTree, #{}, fun codelens_analyze/2)),
+            Result = lists:map(fun (V) ->
+                {Line, Column} = maps:get(location, V),
+                Count = maps:get(count, V),
+                FName = list_to_binary(atom_to_list(maps:get(func_name, V))),
+                #{
+                    line => Line, character => Column,
+                    data => #{
+                        count => Count,
+                        func_name => FName
+                    }
+                }
+            end, maps:values(MapResult)),
+            io:format("MapResult : ~p~n", [Result]),
+            #{result => <<"ok">>, codelens => Result}
+    end.
+
+codelens_analyze(SyntaxTree, Map) ->
+    case SyntaxTree of
+    {function, Location, FuncName, Arity, _} -> 
+        FunKey = lists:flatten(io_lib:format("~p/~p", [FuncName,Arity])),
+        codelens_add_or_update_ref(Map, FunKey, FuncName, Location);
+    {call,_LocationCall, {atom,_,FName},Args} -> 
+        FunKey1 = lists:flatten(io_lib:format("~p/~p", [FName,length(Args)])),
+        codelens_add_or_update_refcount(Map, FunKey1, 1);
+    _ -> Map
+    end.
+
+codelens_add_or_update_ref(Map, Key, FuncName, Location) ->
+    case maps:get(Key, Map, undefined) of
+    undefined -> maps:put(Key, #{location => Location, count=> 0, func_name => FuncName}, Map);
+    FMap -> 
+        NewFMap = maps:put(location, Location, FMap), 
+        NewFMap1 = maps:put(func_name, FuncName, NewFMap), 
+        maps:put(Key, NewFMap1, Map)
+    end.
+    
+codelens_add_or_update_refcount(Map, Key, Count) ->
+    case maps:get(Key, Map, undefined) of
+    undefined -> maps:put(Key, #{count=> Count}, Map);
+    FMap ->
+        NewCount = maps:get(count, FMap) + Count,
+        NewFMap = maps:put(count, NewCount, FMap), 
+        maps:put(Key, NewFMap, Map)
+    end.
+
 function_header(Function, Args) ->
     atom_to_list(Function) ++ "(" ++ join_strings(lists:map(fun erl_prettypr:format/1, Args), ", ") ++ ")".
 
@@ -94,17 +166,21 @@ file_syntax_tree(File) ->
             end        
     end.
 
-find_in_file_syntax_tree(FileSyntaxTree, Fun) ->
+fold_in_file_syntax_tree(FileSyntaxTree, StartAcc, Fun) ->
     lists:foldl(fun (TopLevelSyntaxTree, Acc) ->
-        erl_syntax_lib:fold(fun (SyntaxTree, SingleAcc) ->
+        erl_syntax_lib:fold(Fun, Acc, TopLevelSyntaxTree)
+        end, StartAcc, FileSyntaxTree).
+
+find_in_file_syntax_tree(FileSyntaxTree, Fun) ->
+    fold_in_file_syntax_tree(FileSyntaxTree, undefined, 
+        fun (SyntaxTree, SingleAcc) ->
             case SingleAcc of
                 undefined ->
                     Fun(SyntaxTree);
                 _ ->
                     SingleAcc
             end
-        end, Acc, TopLevelSyntaxTree)
-    end, undefined, FileSyntaxTree).
+        end).
 
 element_at_position(CurrentModule, FileSyntaxTree, Line, Column) ->
     Fun = fun

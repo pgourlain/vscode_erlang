@@ -7,7 +7,8 @@
 import {
     createConnection, TextDocuments, TextDocument, Diagnostic, DiagnosticSeverity,
     ProposedFeatures, InitializeParams, DidChangeConfigurationNotification, Range, DocumentFormattingParams, CompletionItem,
-    TextDocumentPositionParams, Definition, Hover, Location, MarkedString
+    TextDocumentPositionParams, Definition, Hover, Location, MarkedString,
+	ReferenceParams, CodeLensParams, CodeLens, Command, Position
 } from 'vscode-languageserver';
 
 import { ErlangLspConnection, ParsingResult } from './erlangLspConnection';
@@ -72,7 +73,9 @@ connection.onInitialize(async (params: InitializeParams) => {
             textDocumentSync: documents.syncKind,
             documentFormattingProvider : true,
             definitionProvider: true,
-            hoverProvider: true
+            hoverProvider: true,
+			codeLensProvider : true
+			//referencesProvider : true,
             // completionProvider : {
             //  resolveProvider: true,
             //  triggerCharacters: [ ':' ]
@@ -299,6 +302,42 @@ connection.onHover(async (textDocumentPosition: TextDocumentPositionParams): Pro
     }
     return null;
 });
+
+connection.onReferences(async (reference : ReferenceParams) : Promise<Location[]> => {
+    var uri = reference.textDocument.uri;
+    let res = await erlangLspConnection.getReferencesInfo(uri, reference.position.line, reference.position.character);
+	if (res) {
+		var Result = new Array<Location>();
+		res.forEach(ref => {
+			Result.push(Location.create(ref.uri, Range.create(ref.line, ref.character, ref.line, ref.character)));
+		});
+		return Result;
+	}
+	return null;
+});
+
+connection.onCodeLens(async (codeLens: CodeLensParams) : Promise<CodeLens[]>  => {
+    var uri = codeLens.textDocument.uri;
+    let res = await erlangLspConnection.getCodeLensInfo(uri);
+	if (res) {
+		var Result = new Array<CodeLens>();
+		res.forEach(ref => {
+			let codeLens = CodeLens.create(Range.create(ref.line, ref.character, ref.line, ref.character + ref.data.func_name.length), ref.data);
+			codeLens.command = Command.create(`${ref.data.count} references(in module)`, "");
+			//codeLens.command = Command.create(`${ref.data.count} references`, "editor.action.showReferences", 
+			//						ref.uri, Position.create(ref.line, ref.character), []);
+			Result.push(codeLens);
+		});
+		return Result;
+	}
+	return null;
+});
+
+connection.onCodeLensResolve(async (codeLens : CodeLens) : Promise<CodeLens> => {	
+	debugLog(`onCodeLensResolve`);
+	return codeLens;
+});
+
 
 //https://stackoverflow.com/questions/38378410/can-i-add-a-completions-intellisense-file-to-a-language-support-extension
 connection.onCompletion(async (textDocumentPosition: TextDocumentPositionParams):Promise<CompletionItem[]> => {
