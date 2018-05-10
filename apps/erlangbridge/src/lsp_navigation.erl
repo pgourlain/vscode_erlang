@@ -1,6 +1,6 @@
 -module(lsp_navigation).
 
--export([goto_definition/3, hover_info/3]).
+-export([goto_definition/3, hover_info/3, find_rebar_config/1]).
 
 goto_definition(File, Line, Column) ->
     try internal_goto_definition(File, Line, Column) of
@@ -153,12 +153,55 @@ get_module_syntax_tree(Module, CurrentFileSyntaxTree, CurrentFile) ->
         CurrentModule ->
             {CurrentFileSyntaxTree, CurrentFile};
         _ ->
-            OtherFile = filename:dirname(CurrentFile) ++ "/" ++ atom_to_list(Module) ++ ".erl",
-            case filelib:is_regular(OtherFile) of
-                true ->
-                    {file_syntax_tree(OtherFile), OtherFile}; % TODO search in project not in the file directory
+            ModuleFile = find_module_file(Module, CurrentFile),
+            case ModuleFile of
+                undefined ->
+                    undefined;
                 _ ->
-                    undefined
+                    {file_syntax_tree(ModuleFile), ModuleFile}
+            end
+    end.
+
+find_module_file(Module, CurrentFile) ->
+    CurrentDir = filename:dirname(CurrentFile),
+    RebarConfig = find_rebar_config(CurrentDir),
+    RootDir = case RebarConfig of
+        undefined -> CurrentDir;
+        _ -> filename:dirname(RebarConfig)
+    end,
+    Found = filelib:fold_files(RootDir, atom_to_list(Module) ++ ".erl", true, fun (Found, Acc) ->
+        [Found | Acc]
+    end, []),
+    case Found of
+        [] ->
+            undefined;
+        [OneFile] ->
+            OneFile;
+        [AFile|_] ->
+            BuildElements = filename:split(RootDir) ++ ["_build"],
+            NoBuildFiles = lists:filter(fun (Filename) ->
+                not lists:prefix(BuildElements, filename:split(Filename))
+            end, Found),
+            case NoBuildFiles of
+                [ANoBuioldFile|_] ->
+                    ANoBuioldFile;
+                _ ->
+                    AFile
+            end
+    end.
+
+find_rebar_config(CurrentDir) ->
+    RebarConfig = filename:join(CurrentDir, "rebar.config"),
+    case filelib:is_file(RebarConfig) of
+        true ->
+            RebarConfig;
+        _ ->
+            Elements = filename:split(CurrentDir),
+            case Elements of
+                [_] ->
+                    undefined;
+                _ ->
+                    find_rebar_config(filename:join(lists:droplast(Elements)))
             end
     end.
 
