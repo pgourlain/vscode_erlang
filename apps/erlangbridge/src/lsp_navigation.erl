@@ -56,7 +56,12 @@ internal_hover_info(File, Line, Column) ->
                                     end, Clauses), "  \n") ++ "  \n" ++ DocAsString,
                                     #{result => <<"ok">>, text => list_to_binary(FunctionHeaders)};
                                 _ ->
-                                    #{result => <<"ko">>}
+                                    %check if a BIF
+                                    case lists:keyfind(Function,1, erlang:module_info(exports)) of
+                                    {Function, _} -> 
+                                        #{result => <<"ok">>, moduleName => list_to_binary("erlang"), functionName => list_to_binary(atom_to_list(Function))};
+                                    _  -> #{result => <<"ko">>}
+                                    end
                             end;                                
                         _ ->
                             #{result => <<"ok">>, moduleName => list_to_binary(atom_to_list(FunctionModule)), functionName => list_to_binary(atom_to_list(Function))}
@@ -109,11 +114,15 @@ element_at_position(CurrentModule, FileSyntaxTree, Line, Column) ->
                 Column =< EndColumn -> {function_use, CurrentModule, Function, length(Args)};
                 true -> undefined
             end;
-        ({call, {_, _}, {remote, {_, _}, {atom, {_, _}, Module}, {atom, {L, StartColumn}, Function}}, Args}) when L =:= Line andalso StartColumn =< Column ->
+        ({call, {_, _}, {remote, {_, _}, {atom, {_, MStartColumn}, Module}, {atom, {L, StartColumn}, Function}}, Args}) when L =:= Line andalso MStartColumn =< Column ->
+            MEndColumn = MStartColumn + length(atom_to_list(Module)), 
             EndColumn = StartColumn + length(atom_to_list(Module)) + 1 + length(atom_to_list(Function)),
-            if
-                Column =< EndColumn -> {function_use, Module, Function, length(Args)};
-                true -> undefined
+            if 
+                Column =< MEndColumn -> {module_use, Module};
+                true -> if 
+                            Column =< EndColumn -> {function_use, Module, Function, length(Args)};
+                            true -> undefined
+                        end
             end;
         ({'fun',{L, StartColumn}, {function, Function, Arity}}) when L =:= Line andalso StartColumn =< Column ->
             EndColumn = StartColumn + 4 + length(atom_to_list(Function)),
@@ -153,6 +162,13 @@ get_module_syntax_tree(Module, CurrentFileSyntaxTree, CurrentFile) ->
             end
     end.
 
+find_element({module_use, Module}, CurrentFileSyntaxTree, CurrentFile) ->
+    {SyntaxTree, File} = get_module_syntax_tree(Module, CurrentFileSyntaxTree, CurrentFile),
+    case find_module(SyntaxTree, Module) of
+        {attribute, {Line, Column}, _} -> {File, Line, Column};
+        _ -> undefined
+    end;
+    
 find_element({function_use, Module, Function, Arity}, CurrentFileSyntaxTree, CurrentFile) ->
     {SyntaxTree, File} = get_module_syntax_tree(Module, CurrentFileSyntaxTree, CurrentFile),
     case find_function(SyntaxTree, Function, Arity) of
@@ -230,3 +246,9 @@ find_function(FileSyntaxTree, Function, Arity) ->
         end
     end,
     find_in_file_syntax_tree(FileSyntaxTree, Fun).
+
+find_module(FileSyntaxTree, Module) ->
+    case lists:keyfind(module, 3, FileSyntaxTree) of
+    {attribute, Position, module, Module} -> {attribute, Position, Module};
+    _ -> undefined
+    end.
