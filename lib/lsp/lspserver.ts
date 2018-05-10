@@ -323,7 +323,7 @@ connection.onCodeLens(async (codeLens: CodeLensParams) : Promise<CodeLens[]>  =>
 		var Result = new Array<CodeLens>();
 		res.forEach(ref => {
 			let codeLens = CodeLens.create(Range.create(ref.line, ref.character, ref.line, ref.character + ref.data.func_name.length), ref.data);
-			codeLens.command = Command.create(`${ref.data.count} references(in module)`, "");
+			codeLens.command = Command.create(`${ref.data.count} private references`, "");
 			//codeLens.command = Command.create(`${ref.data.count} references`, "editor.action.showReferences", 
 			//						ref.uri, Position.create(ref.line, ref.character), []);
 			Result.push(codeLens);
