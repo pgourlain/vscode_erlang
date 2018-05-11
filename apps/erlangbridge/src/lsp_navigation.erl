@@ -266,10 +266,38 @@ element_at_position(CurrentModule, FileSyntaxTree, Line, Column) ->
                 Column =< EndColumn -> {variable, Variable, L, StartColumn};
                 true -> undefined
             end;
+        ({record, {L, StartColumn}, Record, Fields}) when L =:= Line andalso StartColumn =< Column ->
+            EndColumn = StartColumn + length(atom_to_list(Record)) + 1,
+            if
+                Column =< EndColumn -> {record, Record};
+                true -> find_record_field_use(Record, Fields, Column)
+            end;
+        ({record, {L, StartColumn}, _, Record, Fields}) when L =:= Line andalso StartColumn =< Column ->
+            EndColumn = StartColumn + length(atom_to_list(Record)) + 1,
+            if
+                Column =< EndColumn -> {record, Record};
+                true -> find_record_field_use(Record, Fields, Column)
+            end;
+        ({record_field, {L, RecordSttartColumn}, _, Record, {atom, {L, FieldStartColumn}, Field}}) when L =:= Line andalso RecordSttartColumn =< Column ->
+            FieldEndColumn = FieldStartColumn + length(atom_to_list(Field)),
+            if
+                Column < FieldStartColumn -> {record, Record};
+                Column < FieldEndColumn -> {field, Record, Field};
+                true -> undefined
+            end;
         (_SyntaxTree) ->
             undefined
     end,
     find_in_file_syntax_tree(FileSyntaxTree, Fun).
+
+find_record_field_use(_Record, [], _Column) ->
+    undefined;
+find_record_field_use(Record, [{record_field, _, {atom, {_, StartColumn}, Field}, _} | Tail], Column) ->
+    EndColumn = StartColumn + length(atom_to_list(Field)),
+    if
+        StartColumn =< Column andalso Column =< EndColumn -> {field, Record, Field};
+        true -> find_record_field_use(Record, Tail, Column)
+    end.
 
 get_module_syntax_tree(Module, CurrentFileSyntaxTree, CurrentFile) ->
     CurrentModule = list_to_atom(filename:basename(CurrentFile)),
@@ -335,12 +363,21 @@ find_element({module_use, Module}, CurrentFileSyntaxTree, CurrentFile) ->
         {attribute, {Line, Column}, _} -> {File, Line, Column};
         _ -> undefined
     end;
-    
 find_element({function_use, Module, Function, Arity}, CurrentFileSyntaxTree, CurrentFile) ->
     {SyntaxTree, File} = get_module_syntax_tree(Module, CurrentFileSyntaxTree, CurrentFile),
     case find_function(SyntaxTree, Function, Arity) of
         {function, {Line, Column}, _Function, _Arity, _Clauses} -> {File, Line, Column};
         _ -> undefined
+    end;
+find_element({record, Record}, CurrentFileSyntaxTree, CurrentFile) ->
+    case find_record(CurrentFileSyntaxTree, Record) of
+        {attribute, {Line, Column}, record, {Record, _}} -> {CurrentFile, Line, Column};
+        undefined -> undefined
+    end;
+find_element({field, Record, Field}, CurrentFileSyntaxTree, CurrentFile) ->
+    case find_record(CurrentFileSyntaxTree, Record) of
+        {attribute, _, record, {Record, Fields}} -> find_record_field(Record, Field, Fields, CurrentFile);
+        undefined -> undefined
     end;
 find_element({variable, Variable, Line, Column}, CurrentFileSyntaxTree, CurrentFile) ->
     AllFunctionsInReverseOrder = lists:foldl(fun (TopLevelSyntaxTree, Acc) ->
@@ -419,3 +456,19 @@ find_module(FileSyntaxTree, Module) ->
     {attribute, Position, module, Module} -> {attribute, Position, Module};
     _ -> undefined
     end.
+
+find_record(FileSyntaxTree, Record) ->
+    Fun = fun (SyntaxTree) ->
+        case SyntaxTree of
+            {attribute, _, record, {Record, _}} -> SyntaxTree;
+            _ -> undefined
+        end
+    end,
+    find_in_file_syntax_tree(FileSyntaxTree, Fun).
+
+find_record_field(_Record, _Field, [], _CurrentFile) ->
+    undefined;
+find_record_field(Record, Field, [{record_field, _, {atom, {Line, Column}, Field}} | _], CurrentFile) ->
+    {CurrentFile, Line, Column};
+find_record_field(Record, Field, [_ | Tail], CurrentFile) ->
+    find_record_field(Record, Field, Tail, CurrentFile).
