@@ -55,6 +55,10 @@ handle_info({tcp, Socket, RawData}, State) ->
             lsp_navigation:goto_definition(file_uri_to_file(FileName), to_int(Line), to_int(Column));
         {hover_info, FileName, Line, Column} -> 
             lsp_navigation:hover_info(file_uri_to_file(FileName), to_int(Line), to_int(Column));
+        {references_info, FileName, Line, Column} ->
+            lsp_navigation:references_info(file_uri_to_file(FileName), to_int(Line), to_int(Column));
+        {codelens_info, FileName} ->
+            lsp_navigation:codelens_info(file_uri_to_file(FileName));
         _ ->
 	        #{parse_result => false,
 	        error_message => <<"unknown command">>}

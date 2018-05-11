@@ -183,12 +183,18 @@
 					"description": "Arguments to provide to rebar/rebar3 build command",
 					"title": "Arguments to provide to rebar/rebar3 build command"
 				},
-				"erlang.LanguageServerProtocol.verbose": {
+				"erlang.languageServerProtocol.verbose": {
 					"type": "boolean",
 					"description": "Activate technical traces while parsing documents, completion (activate trace on LSP module)",
 					"title": "Activate technical traces while parsing documents",
 					"default": "false"
-				}
+				},
+				"erlang.languageServerProtocol.codeLensEnabled": {
+					"type": "boolean",
+					"default": false,
+					"title": "Enable/Disable CodeLens",
+					"description": "Enable/Disable CodeLens on top of each module function."
+					}
 			}
 		},
 		"problemMatchers": [
@@ -226,7 +232,8 @@
 		"vscode-debugadapter": "^1.16.0",
 		"vscode-debugprotocol": "^1.16.0",
 		"vscode-languageclient": "^4.1.3",
-		"vscode-languageserver": "^4.1.2"
+		"vscode-languageserver": "^4.1.2",
+		"vscode-uri": "^1.0.3"
 	},
 	"devDependencies": {
 		"@types/mocha": "^2.2.48",

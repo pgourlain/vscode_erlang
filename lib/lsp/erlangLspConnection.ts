@@ -23,6 +23,22 @@ export interface ReferenceLocation {
     character : number;
 }
 
+export interface CodeLensInfoResult {
+    uri: string;
+    codelens : CodeLensInfo[]
+}
+export interface CodeLensInfo {
+    line : number;
+    character : number;
+    data : CodeLensInfoData;
+}
+
+export interface CodeLensInfoData {
+    count : number;
+    func_name : string;
+    exported : boolean;
+}
+
 export interface HoverInfo {
     text: string;
     moduleName: string;
@@ -136,7 +152,53 @@ export class ErlangLspConnection extends ErlangConnection {
             },
             err =>  {return null;}
         );
-    }    
+    }
+    
+    public async getReferencesInfo(uri: string, line: number, character: number): Promise<ReferenceLocation[]> {
+        return await this.post("references_info", this.toErlangUri(uri) + "\r\n" + (line + 1).toString() +  "\r\n" + (character + 1).toString()).then(
+            res => {
+                //this.debug(`references_info result : ${JSON.stringify(res)}`);
+                if (res.result == "ok") {
+                    let refs = (<ReferenceLocation[]>res.references);
+                    let self = this;
+                    refs.map(x => {
+                        x.uri = self.fromErlangUri(x.uri);
+                        x.line = x.line-1;
+                        x.character = x.character-1;
+                        return x;
+                    })
+                    return refs;
+                }
+                return null;
+            },
+            err =>  {return null;}
+        );
+    }
+    
+    public async getCodeLensInfo(uri: string): Promise<CodeLensInfoResult> {
+        return await this.post("codelens_info", this.toErlangUri(uri)).then(
+            res => {
+                //this.debug(`getCodeLensInfo result : ${JSON.stringify(res)}`);
+                if (res.result == "ok") {
+                    let result = <CodeLensInfoResult>{};
+                    result.uri = this.fromErlangUri(res.uri);
+                    let codelens = (<CodeLensInfo[]>res.codelens);
+                    let self = this;
+                    codelens.map(x => {
+                        x.line = x.line-1;
+                        x.character = x.character-1;
+                        return x;
+                    });
+                    return <CodeLensInfoResult>{
+                        uri : res.uri,
+                        codelens : codelens
+                    };
+                }
+                return null;
+            },
+            err =>  {return null;}
+        );
+    }
 
     public Quit() : void {
         this.events_receiver.close();

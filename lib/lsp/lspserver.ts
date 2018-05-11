@@ -6,10 +6,13 @@
 
 import {
     createConnection, TextDocuments, TextDocument, Diagnostic, DiagnosticSeverity,
-    ProposedFeatures, InitializeParams, DidChangeConfigurationNotification, Range, DocumentFormattingParams, CompletionItem,
-    TextDocumentPositionParams, Definition, Hover, Location, MarkedString
+    ProposedFeatures, InitializeParams, InitializeResult, DidChangeConfigurationNotification, Range, DocumentFormattingParams, CompletionItem,
+    TextDocumentPositionParams, Definition, Hover, Location, MarkedString,
+	ReferenceParams, CodeLensParams, CodeLens, Command, ExecuteCommandParams, Position
 } from 'vscode-languageserver';
 
+import URI from 'vscode-uri';
+ 
 import { ErlangLspConnection, ParsingResult } from './erlangLspConnection';
 import { ErlangShellLSP } from './ErlangShellLSP';
 import { IErlangShellOutput } from '../GenericShell';
@@ -46,7 +49,7 @@ let module2helpPage: Map<string, string[]> = new Map();
 //trace for debugging 
 let traceEnabled = false;
 
-connection.onInitialize(async (params: InitializeParams) => {
+connection.onInitialize(async (params: InitializeParams): Promise<InitializeResult> => {
 
     //connection.console.log("onInitialize.");
     
@@ -67,12 +70,18 @@ connection.onInitialize(async (params: InitializeParams) => {
         debugLog(JSON.stringify(capabilities.workspace.configuration));
     }
     debugLog(`capabilities => hasWorkspaceFolderCapability:${hasWorkspaceFolderCapability}, hasConfigurationCapability:${hasConfigurationCapability}`);
-    return {
+	//return new InitializeResult()
+    return <InitializeResult>{
         capabilities: {
             textDocumentSync: documents.syncKind,
             documentFormattingProvider : true,
             definitionProvider: true,
-            hoverProvider: true
+            hoverProvider: true,
+			codeLensProvider :  { resolveProvider : true },
+			referencesProvider : true,
+			// executeCommandProvider: {
+			// 	commands : ["erlang.showReferences"]
+			// },
             // completionProvider : {
             //  resolveProvider: true,
             //  triggerCharacters: [ ':' ]
@@ -101,6 +110,12 @@ connection.onInitialized(async () => {
     }
 });
 
+connection.onExecuteCommand((cmdParams: ExecuteCommandParams): any => {
+	debugLog(`onExecuteCommand : ${JSON.stringify(cmdParams)}`);
+	//connection.sendRequest(CommandReques)
+	return null;
+});
+
 connection.onShutdown(() => {
     debugLog("connection.onShutDown");
     erlangLsp.Kill();
@@ -114,7 +129,10 @@ connection.onExit(() => {
 // The global settings, used when the `workspace/configuration` request is not supported by the client.
 // Please note that this is not the case when using this server with the client provided in this example
 // but could happen with other clients.
-const defaultSettings: ErlangSettings = { erlangPath: "", rebarBuildArgs:[],  rebarPath: "",  languageServerProtocol : { verbose : false} };
+const defaultSettings: ErlangSettings = { erlangPath: "", rebarBuildArgs:[],  rebarPath: "",  
+		languageServerProtocol : { verbose : false, codeLensEnabled: false} 
+
+	};
 let globalSettings: ErlangSettings = defaultSettings;
 
 // Cache the settings of all open documents
@@ -299,6 +317,59 @@ connection.onHover(async (textDocumentPosition: TextDocumentPositionParams): Pro
     }
     return null;
 });
+
+connection.onReferences(async (reference : ReferenceParams) : Promise<Location[]> => {
+    var uri = reference.textDocument.uri;
+    let res = await erlangLspConnection.getReferencesInfo(uri, reference.position.line, reference.position.character);
+	if (res) {
+		var Result = new Array<Location>();
+		res.forEach(ref => {
+			Result.push(Location.create(ref.uri, Range.create(ref.line, ref.character, ref.line, ref.character)));
+		});
+		return Result;
+	}
+	return null;
+});
+
+connection.onCodeLens(async (codeLens: CodeLensParams) : Promise<CodeLens[]>  => {
+	var erlangConfig = await connection.workspace.getConfiguration("erlang");
+	if (erlangConfig) {
+		if (!erlangConfig.languageServerProtocol.codeLensEnabled) {
+			return [];
+		}
+	}
+    var uri = codeLens.textDocument.uri;
+    let res = await erlangLspConnection.getCodeLensInfo(uri);
+	if (res) {		
+		var Result = new Array<CodeLens>();
+		res.codelens.forEach(ref => {
+			if (ref.data.exported) {
+				let exportedCodeLens = CodeLens.create(Range.create(ref.line, ref.character, ref.line, ref.character + ref.data.func_name.length), ref.data);
+				exportedCodeLens.command = Command.create("exported", "");
+				Result.push(exportedCodeLens);
+			}
+			if (!ref.data.exported || ref.data.count > 0) {
+				let codeLens = CodeLens.create(Range.create(ref.line, ref.character, ref.line, ref.character + ref.data.func_name.length), ref.data);
+				//codeLens.command = null; //set to null to invoke OnCodeLensResolve
+				codeLens.command = ref.data.count == 0 ? Command.create("unused","") : 
+					Command.create(`${ref.data.count} private references`, "editor.action.findReferences", 
+										URI.parse(res.uri), {lineNumber : ref.line+1, column:ref.character+1});
+				Result.push(codeLens);	
+			}
+		});
+		return Result;
+	}
+	return null;
+});
+
+connection.onCodeLensResolve(async (codeLens : CodeLens) : Promise<CodeLens> => {	
+
+	// let command = Command.create(`${codeLens.data.count} private references`, "erlang.showReferences", 
+	// 						 codeLens.data.uri, codeLens.range.start, []);
+	codeLens.command = Command.create("onCodeLensResolve","");
+	return codeLens;
+});
+
 
 //https://stackoverflow.com/questions/38378410/can-i-add-a-completions-intellisense-file-to-a-language-support-extension
 connection.onCompletion(async (textDocumentPosition: TextDocumentPositionParams):Promise<CompletionItem[]> => {

@@ -9,4 +9,5 @@ export interface ErlangSettings {
 
 export interface LanguageServerProtocol {
 	verbose : boolean;
+	codeLensEnabled : boolean;
 }
