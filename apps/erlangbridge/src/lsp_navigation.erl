@@ -78,11 +78,42 @@ references_info(File, Line, Column) ->
         _Err:_Reason -> error_logger:info_msg("references_info error ~p:~p", [_Err, _Reason])
     end.
 
-internal_references_info(File, _Line, _Column) ->
-    #{result => <<"ok">>, references => [
-        #{uri => list_to_binary("file://" ++ File), line => 1, character => 1},
-        #{uri => list_to_binary("file://" ++ File), line => 10, character => 1}        
-    ]}.
+internal_references_info(File, Line, Column) ->
+    case file_syntax_tree(File) of
+        undefined -> #{result => <<"ko">>};
+        FileSyntaxTree ->
+            MapResult = fold_in_file_syntax_tree(FileSyntaxTree, 
+                #{location => {Line, Column}, references => []}, 
+                fun references_analyze/2),
+            References = maps:get(references, MapResult),
+            case maps:get(ref, MapResult, undefined) of
+                undefined -> #{result => <<"ko">>};
+                RefKey -> 
+                    Result = lists:map(fun ({_, {L,C}}) -> 
+                        #{uri => list_to_binary("file://" ++ File), line => L, character => C}
+                    end, lists:filter(fun ({K,_L}) -> K =:= RefKey end, References)),
+                    #{result => <<"ok">>, references => Result}
+            end
+    end.
+
+references_analyze(SyntaxTree, Map) ->
+    {Line, Column} = maps:get(location, Map),
+    case SyntaxTree of
+    {function, {FLine, FColumn}, FuncName, Arity, _} when FLine =:= Line andalso FColumn =< Column -> 
+        FunKey = lists:flatten(io_lib:format("~p/~p", [FuncName,Arity])),
+        EndColumn = FColumn + length(atom_to_list(FuncName)),
+        NewMap = if 
+            Column =< EndColumn ->
+                maps:put(ref, FunKey, Map);
+            true -> Map
+        end,
+        NewMap;
+    {call, CLocation, {atom,_,FName},Args} -> 
+        FunKey1 = lists:flatten(io_lib:format("~p/~p", [FName,length(Args)])),
+        References = maps:get(references, Map) ++ [{FunKey1, CLocation}],
+        maps:put(references, References, Map);
+    _ -> Map
+    end.
 
 codelens_info(File) ->
     try internal_codelens_info(File) of

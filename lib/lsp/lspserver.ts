@@ -8,7 +8,7 @@ import {
     createConnection, TextDocuments, TextDocument, Diagnostic, DiagnosticSeverity,
     ProposedFeatures, InitializeParams, InitializeResult, DidChangeConfigurationNotification, Range, DocumentFormattingParams, CompletionItem,
     TextDocumentPositionParams, Definition, Hover, Location, MarkedString,
-	ReferenceParams, CodeLensParams, CodeLens, Command
+	ReferenceParams, CodeLensParams, CodeLens, Command, ExecuteCommandParams, Position
 } from 'vscode-languageserver';
 
 import URI from 'vscode-uri';
@@ -77,8 +77,11 @@ connection.onInitialize(async (params: InitializeParams): Promise<InitializeResu
             documentFormattingProvider : true,
             definitionProvider: true,
             hoverProvider: true,
-			codeLensProvider :  { resolveProvider : true }
-			//referencesProvider : true,
+			codeLensProvider :  { resolveProvider : true },
+			referencesProvider : true,
+			// executeCommandProvider: {
+			// 	commands : ["erlang.showReferences"]
+			// },
             // completionProvider : {
             //  resolveProvider: true,
             //  triggerCharacters: [ ':' ]
@@ -105,6 +108,12 @@ connection.onInitialized(async () => {
             debugLog('Workspace folder change event received');
         });
     }
+});
+
+connection.onExecuteCommand((cmdParams: ExecuteCommandParams): any => {
+	debugLog(`onExecuteCommand : ${JSON.stringify(cmdParams)}`);
+	//connection.sendRequest(CommandReques)
+	return null;
 });
 
 connection.onShutdown(() => {
@@ -325,16 +334,13 @@ connection.onReferences(async (reference : ReferenceParams) : Promise<Location[]
 connection.onCodeLens(async (codeLens: CodeLensParams) : Promise<CodeLens[]>  => {
 	var erlangConfig = await connection.workspace.getConfiguration("erlang");
 	if (erlangConfig) {
-		debugLog(JSON.stringify(erlangConfig));
 		if (!erlangConfig.languageServerProtocol.codeLensEnabled) {
 			return [];
 		}
 	}
     var uri = codeLens.textDocument.uri;
     let res = await erlangLspConnection.getCodeLensInfo(uri);
-	if (res) {
-		//debugLog(`onCodeLens : ${JSON.stringify(res)}`);
-		
+	if (res) {		
 		var Result = new Array<CodeLens>();
 		res.codelens.forEach(ref => {
 			if (ref.data.exported) {
@@ -342,28 +348,25 @@ connection.onCodeLens(async (codeLens: CodeLensParams) : Promise<CodeLens[]>  =>
 				exportedCodeLens.command = Command.create("exported", "");
 				Result.push(exportedCodeLens);
 			}
-			let codeLens = CodeLens.create(Range.create(ref.line, ref.character, ref.line, ref.character + ref.data.func_name.length), ref.data);
-			codeLens.command = Command.create(`${ref.data.count} private references`, "");
-			// TODO: showReferences by invoke specific command
-			// codeLens.command = {
-			// 	title: `${ref.data.count} private references`,
-			// 	command: ref.data.count ? 'editor.action.showReferences' : '',
-			// 	arguments: [ res.uri, {line: ref.line, character:ref.character},[
-			// 		Location.create(res.uri, Range.create(ref.line, ref.character, ref.line, ref.character))
-			// 	]]
-			// };
-			// codeLens.command = Command.create(`${ref.data.count} private references`, "editor.action.showReferences", 
-			// 						ref.uri, Position.create(ref.line, ref.character), []);
-			Result.push(codeLens);
+			if (!ref.data.exported || ref.data.count > 0) {
+				let codeLens = CodeLens.create(Range.create(ref.line, ref.character, ref.line, ref.character + ref.data.func_name.length), ref.data);
+				//codeLens.command = null; //set to null to invoke OnCodeLensResolve
+				codeLens.command = ref.data.count == 0 ? Command.create("unused","") : 
+					Command.create(`${ref.data.count} private references`, "editor.action.findReferences", 
+										URI.parse(res.uri), {lineNumber : ref.line+1, column:ref.character+1});
+				Result.push(codeLens);	
+			}
 		});
-		//debugLog(`onCodeLensResult : ${JSON.stringify(Result)}`);
 		return Result;
 	}
 	return null;
 });
 
 connection.onCodeLensResolve(async (codeLens : CodeLens) : Promise<CodeLens> => {	
-	debugLog(`onCodeLensResolve : ${codeLens}`);
+
+	// let command = Command.create(`${codeLens.data.count} private references`, "erlang.showReferences", 
+	// 						 codeLens.data.uri, codeLens.range.start, []);
+	codeLens.command = Command.create("onCodeLensResolve","");
 	return codeLens;
 });
 

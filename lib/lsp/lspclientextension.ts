@@ -2,7 +2,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import {
 	workspace as Workspace, window as Window, ExtensionContext, TextDocument, OutputChannel, WorkspaceFolder, 
-	Uri, Disposable, WorkspaceConfiguration
+	Uri, Disposable, WorkspaceConfiguration, CodeLens, ProviderResult
 } from 'vscode';
 
 import {
@@ -139,12 +139,11 @@ export function activate(context: ExtensionContext) {
 		run : { module: serverModule, transport: TransportKind.ipc },
 		debug: { module: serverModule, transport: TransportKind.ipc, options: debugOptions }
 	}
-
-//	let middleware: ProposedFeatures.ConfigurationMiddleware | Middleware = {
+	
 	let middleware: Middleware = {
 			workspace: {
-			configuration: Configuration.computeConfiguration
-		}
+				configuration: Configuration.computeConfiguration
+			},	
 	};
 
 	lspOutputChannel.appendLine("middleware :" + JSON.stringify(middleware));

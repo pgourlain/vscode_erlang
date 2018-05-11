@@ -157,7 +157,7 @@ export class ErlangLspConnection extends ErlangConnection {
     public async getReferencesInfo(uri: string, line: number, character: number): Promise<ReferenceLocation[]> {
         return await this.post("references_info", this.toErlangUri(uri) + "\r\n" + (line + 1).toString() +  "\r\n" + (character + 1).toString()).then(
             res => {
-                this.debug(`references_info result : ${JSON.stringify(res)}`);
+                //this.debug(`references_info result : ${JSON.stringify(res)}`);
                 if (res.result == "ok") {
                     let refs = (<ReferenceLocation[]>res.references);
                     let self = this;
@@ -181,7 +181,7 @@ export class ErlangLspConnection extends ErlangConnection {
                 //this.debug(`getCodeLensInfo result : ${JSON.stringify(res)}`);
                 if (res.result == "ok") {
                     let result = <CodeLensInfoResult>{};
-                    result.uri = res.uri;
+                    result.uri = this.fromErlangUri(res.uri);
                     let codelens = (<CodeLensInfo[]>res.codelens);
                     let self = this;
                     codelens.map(x => {
