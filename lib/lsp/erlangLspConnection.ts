@@ -201,6 +201,7 @@ export class ErlangLspConnection extends ErlangConnection {
     }
 
     public Quit() : void {
+        this.post("stop_server");
         this.events_receiver.close();
     }
 
