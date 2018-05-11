@@ -12,6 +12,7 @@
 * [PR #61](https://github.com/pgourlain/vscode_erlang/pull/61)
 	- Add CodeLens support on functions
 	- Add codelens configuration (erlang.languageServerProtocol.codeLensEnabled)
+![codelens](images/vscode-erlang-codelens.png)
 
 ---
 
