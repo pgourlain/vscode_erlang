@@ -120,7 +120,10 @@ connection.onExit(() => {
 // The global settings, used when the `workspace/configuration` request is not supported by the client.
 // Please note that this is not the case when using this server with the client provided in this example
 // but could happen with other clients.
-const defaultSettings: ErlangSettings = { erlangPath: "", rebarBuildArgs:[],  rebarPath: "",  languageServerProtocol : { verbose : false} };
+const defaultSettings: ErlangSettings = { erlangPath: "", rebarBuildArgs:[],  rebarPath: "",  
+		languageServerProtocol : { verbose : false, codeLensEnabled: false} 
+
+	};
 let globalSettings: ErlangSettings = defaultSettings;
 
 // Cache the settings of all open documents
@@ -320,12 +323,25 @@ connection.onReferences(async (reference : ReferenceParams) : Promise<Location[]
 });
 
 connection.onCodeLens(async (codeLens: CodeLensParams) : Promise<CodeLens[]>  => {
+	var erlangConfig = await connection.workspace.getConfiguration("erlang");
+	if (erlangConfig) {
+		debugLog(JSON.stringify(erlangConfig));
+		if (!erlangConfig.languageServerProtocol.codeLensEnabled) {
+			return [];
+		}
+	}
     var uri = codeLens.textDocument.uri;
     let res = await erlangLspConnection.getCodeLensInfo(uri);
 	if (res) {
 		//debugLog(`onCodeLens : ${JSON.stringify(res)}`);
+		
 		var Result = new Array<CodeLens>();
 		res.codelens.forEach(ref => {
+			if (ref.data.exported) {
+				let exportedCodeLens = CodeLens.create(Range.create(ref.line, ref.character, ref.line, ref.character + ref.data.func_name.length), ref.data);
+				exportedCodeLens.command = Command.create("exported", "");
+				Result.push(exportedCodeLens);
+			}
 			let codeLens = CodeLens.create(Range.create(ref.line, ref.character, ref.line, ref.character + ref.data.func_name.length), ref.data);
 			codeLens.command = Command.create(`${ref.data.count} private references`, "");
 			// TODO: showReferences by invoke specific command

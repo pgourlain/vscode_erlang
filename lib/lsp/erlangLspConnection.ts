@@ -36,6 +36,7 @@ export interface CodeLensInfo {
 export interface CodeLensInfoData {
     count : number;
     func_name : string;
+    exported : boolean;
 }
 
 export interface HoverInfo {

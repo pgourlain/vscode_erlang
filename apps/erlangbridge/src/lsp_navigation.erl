@@ -95,6 +95,7 @@ internal_codelens_info(File) ->
     case file_syntax_tree(File) of
         undefined -> #{result => <<"ko">>};
         FileSyntaxTree ->
+            %io:format("~p~n", [FileSyntaxTree]),
             %filter only defined functions
             MapResult = maps:filter(fun (_K,V) -> maps:is_key(func_name, V) end,
                 fold_in_file_syntax_tree(FileSyntaxTree, #{}, fun codelens_analyze/2)),
@@ -106,7 +107,8 @@ internal_codelens_info(File) ->
                     line => Line, character => Column,                    
                     data => #{
                         count => Count,
-                        func_name => FName
+                        func_name => FName,
+                        exported => maps:get(exported, V, false)
                     }
                 }
             end, maps:values(MapResult)),
@@ -122,7 +124,22 @@ codelens_analyze(SyntaxTree, Map) ->
     {call,_LocationCall, {atom,_,FName},Args} -> 
         FunKey1 = lists:flatten(io_lib:format("~p/~p", [FName,length(Args)])),
         codelens_add_or_update_refcount(Map, FunKey1, 1);
+    {attribute,_,export,Exports} ->
+        %export sample : [{start,0},{stop,0}]
+        lists:foldl(fun ({FuncName, Arity}, AccMap) ->
+            FunKey = lists:flatten(io_lib:format("~p/~p", [FuncName,Arity])),
+            codelens_add_or_update_exported(AccMap, FunKey, FuncName, true)
+        end, Map, Exports);
     _ -> Map
+    end.
+
+codelens_add_or_update_exported(Map, Key, FuncName, Exported) ->
+    case maps:get(Key, Map, undefined) of
+    undefined -> maps:put(Key, #{exported => Exported, count=> 0, func_name => FuncName}, Map);
+    FMap -> 
+        NewFMap = maps:put(exported, Exported, FMap), 
+        NewFMap1 = maps:put(func_name, FuncName, NewFMap), 
+        maps:put(Key, NewFMap1, Map)
     end.
 
 codelens_add_or_update_ref(Map, Key, FuncName, Location) ->
