@@ -6,7 +6,7 @@ import {
 } from 'vscode';
 
 import {
-	LanguageClient, LanguageClientOptions, TransportKind, Proposed, ProposedFeatures, 
+	LanguageClient, LanguageClientOptions, TransportKind, ConfigurationParams,
 	CancellationToken, DidChangeConfigurationNotification, ServerOptions, Middleware
 } from 'vscode-languageclient';
 
@@ -40,7 +40,7 @@ namespace Configuration {
 
 	// Convert VS Code specific settings to a format acceptable by the server. Since
 	// both client and server do use JSON the conversion is trivial. 
-	export function computeConfiguration(params: Proposed.ConfigurationParams, _token: CancellationToken, _next: Function): any[] {
+	export function computeConfiguration(params: ConfigurationParams, _token: CancellationToken, _next: Function): any[] {
 
 		//lspOutputChannel.appendLine("computeConfiguration :"+ JSON.stringify(params));
 		
@@ -141,7 +141,7 @@ export function activate(context: ExtensionContext) {
 	}
 
 //	let middleware: ProposedFeatures.ConfigurationMiddleware | Middleware = {
-	let middleware: ProposedFeatures.ConfigurationMiddleware | Middleware = {
+	let middleware: Middleware = {
 			workspace: {
 			configuration: Configuration.computeConfiguration
 		}
@@ -161,21 +161,12 @@ export function activate(context: ExtensionContext) {
 			// necessary anymore. 
 			// configurationSection: [ 'lspMultiRootSample' ]
 		},
-		middleware: middleware as Middleware,
+		middleware: middleware,
 		diagnosticCollectionName: 'Erlang Language Server',
 		outputChannel: lspOutputChannel
 	}
 
 	client = new LanguageClient('Erlang Language Server', 'Erlang Language Server', serverOptions, clientOptions);
-	client.registerProposedFeatures();
-	// Create the language client and start the client.
-	//client = new LanguageClient('languageServerExample', 'Language Server Example', serverOptions, clientOptions);
-	// Register new proposed protocol if available.
-	//client.registerProposedFeatures();
-	client.onReady().then(() => {
-		Configuration.initialize();
-	});
-	
 	// Start the client. This will also launch the server
 	client.start();
 }
