@@ -163,7 +163,16 @@ function getDocumentSettings(resource: string): Thenable<ErlangSettings> {
 }
 
 documents.onDidOpen(e => {
-    validateTextDocument(e.document);
+	var validateWhenReady = function () {
+		if (erlangLspConnection.isConnected)
+		    validateTextDocument(e.document);
+		else {
+			setTimeout(function () {
+				validateWhenReady();
+			}, 100);
+		}
+	};
+	validateWhenReady();
 });
 	
 documents.onDidClose(e => {
