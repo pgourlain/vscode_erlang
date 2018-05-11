@@ -6,7 +6,7 @@
 
 import {
     createConnection, TextDocuments, TextDocument, Diagnostic, DiagnosticSeverity,
-    ProposedFeatures, InitializeParams, Proposed, Range, DocumentFormattingParams, CompletionItem,
+    ProposedFeatures, InitializeParams, DidChangeConfigurationNotification, Range, DocumentFormattingParams, CompletionItem,
     TextDocumentPositionParams, Definition, Hover, Location, MarkedString
 } from 'vscode-languageserver';
 
@@ -61,10 +61,10 @@ connection.onInitialize(async (params: InitializeParams) => {
 
     // Does the client support the `workspace/configuration` request? 
     // If not, we will fall back using global settings
-    hasWorkspaceFolderCapability = (capabilities as Proposed.WorkspaceFoldersClientCapabilities).workspace && !!(capabilities as Proposed.WorkspaceFoldersClientCapabilities).workspace.workspaceFolders;
-    hasConfigurationCapability = (capabilities as Proposed.ConfigurationClientCapabilities).workspace && !!(capabilities as Proposed.ConfigurationClientCapabilities).workspace.configuration;
+    hasWorkspaceFolderCapability = capabilities.workspace && !!capabilities.workspace.workspaceFolders;
+    hasConfigurationCapability = capabilities.workspace && !!capabilities.workspace.configuration;
     if (hasConfigurationCapability) {
-        debugLog(JSON.stringify((capabilities as Proposed.ConfigurationClientCapabilities).workspace.configuration));
+        debugLog(JSON.stringify(capabilities.workspace.configuration));
     }
     debugLog(`capabilities => hasWorkspaceFolderCapability:${hasWorkspaceFolderCapability}, hasConfigurationCapability:${hasConfigurationCapability}`);
     return {
@@ -89,6 +89,9 @@ connection.onInitialized(async () => {
             traceEnabled = true;
         }
     }
+	if (hasConfigurationCapability) {
+		connection.client.register(DidChangeConfigurationNotification.type, undefined);
+	}
 
     //debugLog("connection.onInitialized");
     if (hasWorkspaceFolderCapability) {
