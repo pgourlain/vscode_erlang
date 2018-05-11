@@ -6,11 +6,13 @@
 
 import {
     createConnection, TextDocuments, TextDocument, Diagnostic, DiagnosticSeverity,
-    ProposedFeatures, InitializeParams, DidChangeConfigurationNotification, Range, DocumentFormattingParams, CompletionItem,
+    ProposedFeatures, InitializeParams, InitializeResult, DidChangeConfigurationNotification, Range, DocumentFormattingParams, CompletionItem,
     TextDocumentPositionParams, Definition, Hover, Location, MarkedString,
-	ReferenceParams, CodeLensParams, CodeLens, Command, Position
+	ReferenceParams, CodeLensParams, CodeLens, Command
 } from 'vscode-languageserver';
 
+import URI from 'vscode-uri';
+ 
 import { ErlangLspConnection, ParsingResult } from './erlangLspConnection';
 import { ErlangShellLSP } from './ErlangShellLSP';
 import { IErlangShellOutput } from '../GenericShell';
@@ -47,7 +49,7 @@ let module2helpPage: Map<string, string[]> = new Map();
 //trace for debugging 
 let traceEnabled = false;
 
-connection.onInitialize(async (params: InitializeParams) => {
+connection.onInitialize(async (params: InitializeParams): Promise<InitializeResult> => {
 
     //connection.console.log("onInitialize.");
     
@@ -68,13 +70,14 @@ connection.onInitialize(async (params: InitializeParams) => {
         debugLog(JSON.stringify(capabilities.workspace.configuration));
     }
     debugLog(`capabilities => hasWorkspaceFolderCapability:${hasWorkspaceFolderCapability}, hasConfigurationCapability:${hasConfigurationCapability}`);
-    return {
+	//return new InitializeResult()
+    return <InitializeResult>{
         capabilities: {
             textDocumentSync: documents.syncKind,
             documentFormattingProvider : true,
             definitionProvider: true,
             hoverProvider: true,
-			codeLensProvider : true
+			codeLensProvider :  { resolveProvider : true }
 			//referencesProvider : true,
             // completionProvider : {
             //  resolveProvider: true,
@@ -320,21 +323,31 @@ connection.onCodeLens(async (codeLens: CodeLensParams) : Promise<CodeLens[]>  =>
     var uri = codeLens.textDocument.uri;
     let res = await erlangLspConnection.getCodeLensInfo(uri);
 	if (res) {
+		//debugLog(`onCodeLens : ${JSON.stringify(res)}`);
 		var Result = new Array<CodeLens>();
-		res.forEach(ref => {
+		res.codelens.forEach(ref => {
 			let codeLens = CodeLens.create(Range.create(ref.line, ref.character, ref.line, ref.character + ref.data.func_name.length), ref.data);
 			codeLens.command = Command.create(`${ref.data.count} private references`, "");
-			//codeLens.command = Command.create(`${ref.data.count} references`, "editor.action.showReferences", 
-			//						ref.uri, Position.create(ref.line, ref.character), []);
+			// TODO: showReferences by invoke specific command
+			// codeLens.command = {
+			// 	title: `${ref.data.count} private references`,
+			// 	command: ref.data.count ? 'editor.action.showReferences' : '',
+			// 	arguments: [ res.uri, {line: ref.line, character:ref.character},[
+			// 		Location.create(res.uri, Range.create(ref.line, ref.character, ref.line, ref.character))
+			// 	]]
+			// };
+			// codeLens.command = Command.create(`${ref.data.count} private references`, "editor.action.showReferences", 
+			// 						ref.uri, Position.create(ref.line, ref.character), []);
 			Result.push(codeLens);
 		});
+		//debugLog(`onCodeLensResult : ${JSON.stringify(Result)}`);
 		return Result;
 	}
 	return null;
 });
 
 connection.onCodeLensResolve(async (codeLens : CodeLens) : Promise<CodeLens> => {	
-	debugLog(`onCodeLensResolve`);
+	debugLog(`onCodeLensResolve : ${codeLens}`);
 	return codeLens;
 });
 

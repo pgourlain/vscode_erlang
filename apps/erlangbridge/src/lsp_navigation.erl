@@ -103,15 +103,15 @@ internal_codelens_info(File) ->
                 Count = maps:get(count, V),
                 FName = list_to_binary(atom_to_list(maps:get(func_name, V))),
                 #{
-                    line => Line, character => Column,
+                    line => Line, character => Column,                    
                     data => #{
                         count => Count,
                         func_name => FName
                     }
                 }
             end, maps:values(MapResult)),
-            io:format("MapResult : ~p~n", [Result]),
-            #{result => <<"ok">>, codelens => Result}
+            %io:format("MapResult : ~p~n", [Result]),
+            #{result => <<"ok">>, codelens => Result, uri => list_to_binary("file://" ++ File)}
     end.
 
 codelens_analyze(SyntaxTree, Map) ->

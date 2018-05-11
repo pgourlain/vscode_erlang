@@ -23,7 +23,13 @@ export interface ReferenceLocation {
     character : number;
 }
 
-export interface CodeLensInfo extends ReferenceLocation {
+export interface CodeLensInfoResult {
+    uri: string;
+    codelens : CodeLensInfo[]
+}
+export interface CodeLensInfo {
+    line : number;
+    character : number;
     data : CodeLensInfoData;
 }
 
@@ -168,19 +174,24 @@ export class ErlangLspConnection extends ErlangConnection {
         );
     }
     
-    public async getCodeLensInfo(uri: string): Promise<CodeLensInfo[]> {
+    public async getCodeLensInfo(uri: string): Promise<CodeLensInfoResult> {
         return await this.post("codelens_info", this.toErlangUri(uri)).then(
             res => {
                 //this.debug(`getCodeLensInfo result : ${JSON.stringify(res)}`);
                 if (res.result == "ok") {
+                    let result = <CodeLensInfoResult>{};
+                    result.uri = res.uri;
                     let codelens = (<CodeLensInfo[]>res.codelens);
                     let self = this;
                     codelens.map(x => {
                         x.line = x.line-1;
                         x.character = x.character-1;
                         return x;
-                    })
-                    return codelens;
+                    });
+                    return <CodeLensInfoResult>{
+                        uri : res.uri,
+                        codelens : codelens
+                    };
                 }
                 return null;
             },
