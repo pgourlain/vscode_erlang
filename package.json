@@ -1,7 +1,7 @@
 {
 	"name": "erlang",
 	"description": "Erlang language extension for Visual Studio Code",
-	"version": "0.2.8",
+	"version": "0.2.9",
 	"icon": "images/icon.png",
 	"publisher": "pgourlain",
 	"engines": {
@@ -194,7 +194,7 @@
 					"default": false,
 					"title": "Enable/Disable CodeLens",
 					"description": "Enable/Disable CodeLens on top of each module function."
-					}
+				}
 			}
 		},
 		"problemMatchers": [

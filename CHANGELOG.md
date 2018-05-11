@@ -1,5 +1,20 @@
 # Change log
 
+## Version 0.2.9 (May 11, 2018)
+### LSP  
+* [PR #58](https://github.com/pgourlain/vscode_erlang/pull/58) 
+	- Goto definition on module, hover info on BIF
+* [PR #59](https://github.com/pgourlain/vscode_erlang/pull/59) 
+	- Navigation works in all directories. Linter can find include files
+	- Thanks to [Wojtek Surowka](https://github.com/wojteksurowka)
+* [PR #60](https://github.com/pgourlain/vscode_erlang/pull/60) 
+	- Update to the latest vscode LSP
+* [PR #61](https://github.com/pgourlain/vscode_erlang/pull/61)
+	- Add CodeLens support on functions
+	- Add codelens configuration (erlang.languageServerProtocol.codeLensEnabled)
+
+---
+
 ## Version 0.2.8 (May 9, 2018)
 ### LSP  
 * [PR #55](https://github.com/pgourlain/vscode_erlang/pull/55)
