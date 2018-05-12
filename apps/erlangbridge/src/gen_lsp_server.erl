@@ -81,8 +81,8 @@ handle_info(_Info, StateData) ->
 terminate(_Reason, #state{socket = Socket, parent=Parent}) ->
     (catch gen_tcp:close(Socket)),
     spawn_link(
-        fun () -> Ret = supervisor:start_child(Parent, []),
-                %error_logger:info_msg("terminate start_child(~p)", [Ret]),
+        fun () -> _Ret = supervisor:start_child(Parent, []),
+                %error_logger:info_msg("terminate start_child(~p)", [_Ret]),
                 ok
         end),    
     ok.

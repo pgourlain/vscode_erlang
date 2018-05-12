@@ -50,5 +50,14 @@ Then, before debugging is started, modified files will be recompiled automatical
 ## Available commands
 ![commands](images/vscode-erlang-commands.png)
 
+## Settings
+  * `erlang.erlangPath` - Directory location of erl/escript
+  * `erlang.rebarPath` - Directory location of rebar/rebar3
+  * `erlang.rebarBuildArgs` - Arguments to provide to rebar/rebar3 build command
+  * `erlang.linting` - Enable/disable dynamic validation of opened Erlang source files
+  * `erlang.codeLensEnabled` - Enable/Disable CodeLens
+  * `erlang.verbose` - Activate technical traces for use in the extension development
+
+
 ## Credits
 File 'Erlang.tmLanguage' is inspired from https://github.com/textmate/erlang.tmbundle/blob/master/Syntaxes/Erlang.plist

@@ -10,7 +10,6 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { EventEmitter } from 'events'
 import * as http from 'http';
-import * as vscode from 'vscode';
 import * as erlang from './ErlangShell';
 import { erlangBridgePath } from './erlangConnection';
 import { ErlangDebugConnection } from './erlangDebugConnection';
@@ -50,7 +49,7 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 	private _LaunchArguments: LaunchRequestArguments;
 	private _port: number;
 
-	public constructor() {
+	public constructor(verbose: boolean) {
 		super();
 		this._breakPoints = [];
 		this._variableHandles = new Handles<DebugVariable>();
