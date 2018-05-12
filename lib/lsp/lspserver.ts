@@ -118,12 +118,12 @@ connection.onExecuteCommand((cmdParams: ExecuteCommandParams): any => {
 
 connection.onShutdown(() => {
     debugLog("connection.onShutDown");
-    erlangLsp.Kill();
+	erlangLspConnection.Quit();
 });
 
 connection.onExit(() => {
     debugLog("connection.onExit");
-    erlangLsp.Kill();
+	erlangLspConnection.Quit();
 });
 
 // The global settings, used when the `workspace/configuration` request is not supported by the client.
@@ -163,7 +163,16 @@ function getDocumentSettings(resource: string): Thenable<ErlangSettings> {
 }
 
 documents.onDidOpen(e => {
-    validateTextDocument(e.document);
+	var validateWhenReady = function () {
+		if (erlangLspConnection.isConnected)
+		    validateTextDocument(e.document);
+		else {
+			setTimeout(function () {
+				validateWhenReady();
+			}, 100);
+		}
+	};
+	validateWhenReady();
 });
 	
 documents.onDidClose(e => {
