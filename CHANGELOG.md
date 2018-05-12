@@ -1,5 +1,17 @@
 # Change log
 
+## Version 0.3.0 (May 12, 2018)
+### LSP fixes and improvements  
+* [PR #62](https://github.com/pgourlain/vscode_erlang/pull/62) 
+	- Navigation works for records and fields
+	- Navigation works for records in included files
+* [PR #63](https://github.com/pgourlain/vscode_erlang/pull/63) 
+	- Settings cleanup
+
+Thanks to 
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+---
+
 ## Version 0.2.9 (May 11, 2018)
 ### LSP  
 * [PR #58](https://github.com/pgourlain/vscode_erlang/pull/58) 
