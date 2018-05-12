@@ -1,15 +1,16 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import {
-	workspace as Workspace, window as Window, ExtensionContext, TextDocument, OutputChannel, WorkspaceFolder, 
-	Uri, Disposable, WorkspaceConfiguration, CodeLens, ProviderResult
+	workspace as Workspace, window as Window, ExtensionContext, TextDocument, OutputChannel, WorkspaceFolder,
+	Uri, Disposable, WorkspaceConfiguration
 } from 'vscode';
 
 import {
 	LanguageClient, LanguageClientOptions, TransportKind, ConfigurationParams,
-	CancellationToken, DidChangeConfigurationNotification, ServerOptions, Middleware
+	CancellationToken, DidChangeConfigurationNotification, ServerOptions, Middleware	
 } from 'vscode-languageclient';
 
+import * as lspcodelens from './lspcodelens';
 
 import { ErlangShellForDebugging } from '../ErlangShellDebugger';
 
@@ -30,7 +31,7 @@ https://tomassetti.me/language-server-dot-visual-studio/
 
 */
 
-let client: LanguageClient;
+export let client: LanguageClient;
 let clients: Map<string, LanguageClient> = new Map();
 let lspOutputChannel: OutputChannel;
 
@@ -43,7 +44,7 @@ namespace Configuration {
 	export function computeConfiguration(params: ConfigurationParams, _token: CancellationToken, _next: Function): any[] {
 
 		//lspOutputChannel.appendLine("computeConfiguration :"+ JSON.stringify(params));
-		
+
 		if (!params.items) {
 			return null;
 		}
@@ -55,7 +56,7 @@ namespace Configuration {
 			if (item.section) {
 				let erlSectionConfig = JSON.parse(JSON.stringify(Workspace.getConfiguration('erlang')));
 				result.push(erlSectionConfig);
-					result.push(null);
+				result.push(null);
 				continue;
 			}
 			let config: WorkspaceConfiguration;
@@ -70,11 +71,14 @@ namespace Configuration {
 		}
 		return result;
 	}
-	
+
 	export function initialize() {
+		//force to read configuration
+		lspcodelens.configurationChanged();
 		// VS Code currently doesn't sent fine grained configuration changes. So we 
 		// listen to any change. However this will change in the near future.
 		configurationListener = Workspace.onDidChangeConfiguration(() => {
+			lspcodelens.configurationChanged();
 			client.sendNotification(DidChangeConfigurationNotification.type, { settings: null });
 		});
 	}
@@ -123,35 +127,36 @@ function getOuterMostWorkspaceFolder(folder: WorkspaceFolder): WorkspaceFolder {
 export function activate(context: ExtensionContext) {
 
 	lspOutputChannel = Window.createOutputChannel('Erlang Language Server');
-	let serverModule = context.asAbsolutePath(path.join('lib', 'lsp','lspserver.js'));
+	let serverModule = context.asAbsolutePath(path.join('lib', 'lsp', 'lspserver.js'));
 	if (!fs.existsSync(serverModule)) {
-		serverModule = context.asAbsolutePath(path.join('out', 'lib', 'lsp','lspserver.js'));
+		serverModule = context.asAbsolutePath(path.join('out', 'lib', 'lsp', 'lspserver.js'));
 	}
 	let erlLSPPath = erlConnection.erlangBridgePath;
-//	let erlangCmd = "erl "
-
+	//	let erlangCmd = "erl "
 	// The debug options for the server
 	let debugOptions = { execArgv: ["--nolazy", "--inspect=6009"] };
-	
+
 	// If the extension is launched in debug mode then the debug server options are used
 	// Otherwise the run options are used
 	let serverOptions: ServerOptions = {
-		run : { module: serverModule, transport: TransportKind.ipc },
+		run: { module: serverModule, transport: TransportKind.ipc },
 		debug: { module: serverModule, transport: TransportKind.ipc, options: debugOptions }
 	}
-	
+
 	let middleware: Middleware = {
-			workspace: {
-				configuration: Configuration.computeConfiguration
-			},	
+		workspace: {
+			configuration: Configuration.computeConfiguration
+		},
+		provideCodeLenses: lspcodelens.onProvideCodeLenses,
+		resolveCodeLens: lspcodelens.onResolveCodeLenses
 	};
 
-	lspOutputChannel.appendLine("middleware :" + JSON.stringify(middleware));
+	//lspOutputChannel.appendLine("middleware :" + JSON.stringify(middleware));
 
 	// Options to control the language client
 	let clientOptions: LanguageClientOptions = {
 		// Register the server for plain text documents
-		documentSelector: [{scheme: 'file', language: 'erlang'}],
+		documentSelector: [{ scheme: 'file', language: 'erlang' }],
 		synchronize: {
 			// Notify the server about file changes to '.clientrc files contain in the workspace
 			fileEvents: Workspace.createFileSystemWatcher('**/.clientrc'),
@@ -166,97 +171,16 @@ export function activate(context: ExtensionContext) {
 	}
 
 	client = new LanguageClient('Erlang Language Server', 'Erlang Language Server', serverOptions, clientOptions);
+	Configuration.initialize();
 	// Start the client. This will also launch the server
 	client.start();
 }
 
-
-// export function activate(context : ExtensionContext) {
-// 	lspOutputChannel = Window.createOutputChannel('lsp-multi-server-erlang');
-
-// 	connectToDocuments(context);
-// }
-
-// export function connectToDocuments(context: ExtensionContext) {
-// 	let module = context.asAbsolutePath(path.join('lib', 'lsp','lspserver.js'));
-// 	if (!fs.existsSync(module)) {
-// 		module = context.asAbsolutePath(path.join('out', 'lib', 'lsp','lspserver.js'));
-// 	}
-// 	let erlLSPPath = erlConnection.erlangBridgePath;
-// 	let erlangCmd = "erl "
-
-// 	function didOpenTextDocument(document: TextDocument): void {
-// 		// We are only interested in language mode text
-// 		if (document.languageId !== 'erlang' || (document.uri.scheme !== 'file' && document.uri.scheme !== 'untitled')) {
-// 			return;
-// 		}
-
-// 		let uri = document.uri;
-// 		// Untitled files go to a default client.
-// 		if (uri.scheme === 'untitled' && !defaultClient) {
-// 			let debugOptions = { execArgv: ["--nolazy", "--inspect=6010"] };
-// 			let serverOptions = {
-// 				run: { module, transport: TransportKind.ipc },
-// 				debug: { module, transport: TransportKind.ipc, options: debugOptions}
-// 			};
-// 			let clientOptions: LanguageClientOptions = {
-// 				documentSelector: [
-// 					{ scheme: 'untitled', language: 'erlang' }
-// 				],
-// 				diagnosticCollectionName: 'multi-lsp-erlang',
-// 				outputChannel: lspOutputChannel
-// 			}
-// 			defaultClient = new LanguageClient('lsp-multi-server-erlang', 'LSP Multi Server for Erlang', serverOptions, clientOptions);
-// 			defaultClient.registerProposedFeatures();
-// 			defaultClient.start();
-// 			return;
-// 		}
-// 		let folder = Workspace.getWorkspaceFolder(uri);
-// 		// Files outside a folder can't be handled. This might depend on the language.
-// 		// Single file languages like JSON might handle files outside the workspace folders.
-// 		if (!folder) {
-// 			return;
-// 		}
-// 		// If we have nested workspace folders we only start a server on the outer most workspace folder.
-// 		folder = getOuterMostWorkspaceFolder(folder);
-
-// 		if (!clients.has(folder.uri.toString())) {
-// 			let debugOptions = { execArgv: ["--nolazy", `--inspect=${6011 + clients.size}`] };
-// 			let serverOptions = {
-// 				run: { module, transport: TransportKind.ipc },
-// 				debug: { module, transport: TransportKind.ipc, options: debugOptions}
-// 			};
-// 			let clientOptions: LanguageClientOptions = {
-// 				documentSelector: [
-// 					{ scheme: 'file', language: 'erlang', 
-// 					//pattern: `${folder.uri.fsPath}/**/*` 
-// 				}],
-// 				synchronize : {
-// 					fileEvents: Workspace.createFileSystemWatcher('**/.clientrc'),
-// 				},
-// 				diagnosticCollectionName: 'lsp-multi-server-erlang',
-// 				workspaceFolder: folder,
-// 				outputChannel: lspOutputChannel
-// 			}
-// 			let client = new LanguageClient('lsp-multi-server-erlang', 'LSP Multi Server for Erlang', serverOptions, clientOptions);
-// 			client.registerProposedFeatures();
-// 			client.start();
-// 			clients.set(folder.uri.toString(), client);
-// 		}
-// 	}
-
-// 	Workspace.onDidOpenTextDocument(didOpenTextDocument);
-// 	Workspace.textDocuments.forEach(didOpenTextDocument);
-// 	Workspace.onDidChangeWorkspaceFolders((event) => {
-// 		for (let folder of event.removed) {
-// 			let client = clients.get(folder.uri.toString());
-// 			if (client) {
-// 				clients.delete(folder.uri.toString());
-// 				client.stop();
-// 			}
-// 		}
-// 	});
-// }
+export function debugLog(msg: string): void {
+	if (lspOutputChannel) {
+		lspOutputChannel.appendLine(msg);
+	}
+}
 
 export function deactivate(): Thenable<void> {
 	if (!client) {
@@ -264,13 +188,4 @@ export function deactivate(): Thenable<void> {
 	}
 	Configuration.dispose();
 	return client.stop();
-
-	// let promises: Thenable<void>[] = [];
-	// if (defaultClient) {
-	// 	promises.push(defaultClient.stop());
-	// }
-	// for (let client of clients.values()) {
-	// 	promises.push(client.stop());
-	// }
-	// return Promise.all(promises).then(() => undefined);
 }
