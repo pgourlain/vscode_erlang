@@ -129,7 +129,7 @@ connection.onExit(() => {
 // The global settings, used when the `workspace/configuration` request is not supported by the client.
 // Please note that this is not the case when using this server with the client provided in this example
 // but could happen with other clients.
-const defaultSettings: ErlangSettings = { erlangPath: "", rebarBuildArgs:[],  rebarPath: "",  codeLensEnabled: false, verbose: false };
+const defaultSettings: ErlangSettings = { erlangPath: "", rebarBuildArgs:[],  rebarPath: "", linting: true, codeLensEnabled: false, verbose: false };
 let globalSettings: ErlangSettings = defaultSettings;
 
 // Cache the settings of all open documents
@@ -144,7 +144,11 @@ connection.onDidChangeConfiguration(change => {
     }
 
     // Revalidate all open text documents
-    documents.all().forEach(validateTextDocument);
+    documents.all().forEach(document => {
+		let diagnostics: Diagnostic[] = [];
+		connection.sendDiagnostics({ uri: document.uri, diagnostics });
+		validateTextDocument(document);
+	});
 });
 
 function getDocumentSettings(resource: string): Thenable<ErlangSettings> {
@@ -186,6 +190,10 @@ documents.onDidChangeContent((change) => {
 });
 
 async function validateTextDocument(textDocument: TextDocument): Promise<void> {
+	var erlangConfig = await connection.workspace.getConfiguration("erlang");
+	if (erlangConfig && !erlangConfig.linting) {
+		return;
+	}
     // In this simple example we get the settings for every validate run.
     let settings = await getDocumentSettings(textDocument.uri);
     // .hrl files show incorrect errors e.g. about not used records, ddisabled for now

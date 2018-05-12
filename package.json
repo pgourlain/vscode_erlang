@@ -178,6 +178,12 @@
 					"description": "Arguments to provide to rebar/rebar3 build command",
 					"title": "Arguments to provide to rebar/rebar3 build command"
 				},
+				"erlang.linting": {
+					"type": "boolean",
+					"default": true,
+					"title": "Enable/Disable Erlang Linting",
+					"description": "Enable/Disable dynamic validation of opened Erlang source files."
+				},
 				"erlang.codeLensEnabled": {
 					"type": "boolean",
 					"default": false,
