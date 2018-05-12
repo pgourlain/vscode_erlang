@@ -63,11 +63,6 @@
 								"description": "Path to the erl executable or the command if in PATH",
 								"default": "erl"
 							},
-							"verbose": {
-								"type": "boolean",
-								"description": "Should extended debugging details be logged",
-								"default": false
-							},
 							"addEbinsToCodepath": {
 								"type": "boolean",
 								"description": "Add ebin directories in _build to code path",
@@ -183,17 +178,17 @@
 					"description": "Arguments to provide to rebar/rebar3 build command",
 					"title": "Arguments to provide to rebar/rebar3 build command"
 				},
-				"erlang.languageServerProtocol.verbose": {
-					"type": "boolean",
-					"description": "Activate technical traces while parsing documents, completion (activate trace on LSP module)",
-					"title": "Activate technical traces while parsing documents",
-					"default": "false"
-				},
-				"erlang.languageServerProtocol.codeLensEnabled": {
+				"erlang.codeLensEnabled": {
 					"type": "boolean",
 					"default": false,
 					"title": "Enable/Disable CodeLens",
 					"description": "Enable/Disable CodeLens on top of each module function."
+				},
+				"erlang.verbose": {
+					"type": "boolean",
+					"description": "Activate technical traces",
+					"title": "Activate technical traces for use in the extension development",
+					"default": "false"
 				}
 			}
 		},

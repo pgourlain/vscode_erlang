@@ -2,14 +2,15 @@
 // Import the module and reference it with the alias vscode in your code below
 import * as path from 'path';
 import { 
-	workspace as Workspace, window as Window, ExtensionContext, TextDocument, OutputChannel, WorkspaceFolder, Uri
+	workspace as Workspace, window as Window, ExtensionContext, TextDocument, OutputChannel, WorkspaceFolder, Uri, debug
 } from 'vscode'; 
 
 import * as Adapter from './vscodeAdapter';
 import * as Rebar from './RebarRunner';
 import * as Eunit from './eunitRunner';
-import * as Utils from './utils';
+import { ErlangDebugConfigurationProvider } from './ErlangConfigurationProvider';
 import * as erlangConnection from './erlangConnection';
+import * as Utils from './utils';
 
 import * as LspClient from './lsp/lspclientextension';
 
@@ -39,6 +40,8 @@ export function activate(context: ExtensionContext) {
 
 	var eunit = new Eunit.EunitRunner();
 	eunit.activate(context);
+
+	disposables.push(debug.registerDebugConfigurationProvider("erlang", new ErlangDebugConfigurationProvider()));
 
 	disposables.forEach((disposable => context.subscriptions.push(disposable)));
 	LspClient.activate(context);
