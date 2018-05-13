@@ -2,7 +2,8 @@
 // Import the module and reference it with the alias vscode in your code below
 import * as path from 'path';
 import { 
-	workspace as Workspace, window as Window, ExtensionContext, TextDocument, OutputChannel, WorkspaceFolder, Uri, debug
+	workspace as Workspace, window as Window, ExtensionContext, TextDocument, OutputChannel, WorkspaceFolder, Uri, debug,
+	languages, IndentAction
 } from 'vscode'; 
 
 import * as Adapter from './vscodeAdapter';
@@ -45,9 +46,41 @@ export function activate(context: ExtensionContext) {
 
 	disposables.forEach((disposable => context.subscriptions.push(disposable)));
 	LspClient.activate(context);
+
+	languages.setLanguageConfiguration("erlang", {
+		onEnterRules: [
+			{
+				beforeText: /^.*(->|\s+(if|of|receive))\s*$/,
+				action: { indentAction: IndentAction.Indent }
+			},
+			{
+				beforeText: /^\s*end$/,
+				action: { indentAction: IndentAction.Outdent }
+			},
+			{
+				beforeText: /^.*[^;,]\s*$/,
+				action: { indentAction: IndentAction.Outdent }
+			},
+			{
+				beforeText: /^.*->.+;\s*$/,
+				action: { indentAction: IndentAction.None }
+			},
+			{
+				beforeText: /^.*(\.|;)\s*$/,
+				action: { indentAction: IndentAction.Outdent }
+			},
+			{
+				beforeText: /^%%% .*$/,
+				action: { indentAction: IndentAction.None, appendText: "%%% " }
+			},
+			{
+				beforeText: /^%%%.*$/,
+				action: { indentAction: IndentAction.None, appendText: "%%%" }
+			}
+		]
+	});
 }
 
 export function deactivate(): Thenable<void> {
-
 	return LspClient.deactivate();
 }
