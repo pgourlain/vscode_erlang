@@ -3,10 +3,12 @@ This extension adds support for the Erlang language to Visual Studio Code, inclu
 
 ## Editing support
 - Syntax highlighting
+- Automatic indentation
 - Shows errors and warnings dynamically while you type (requires File/Auto Save to be on)
 - Go To Definition/Peek Definition
 - Hover help for standard functions
 - Hover for project functions showing head clauses
+- CodeLens showing exported functions and references
 
 ![editing](images/vscode-erlang-editing.gif)
 
