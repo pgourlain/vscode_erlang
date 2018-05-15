@@ -2,12 +2,12 @@ import * as path from 'path';
 import * as fs from 'fs';
 import {
 	workspace as Workspace, window as Window, ExtensionContext, TextDocument, OutputChannel, WorkspaceFolder,
-	Uri, Disposable, WorkspaceConfiguration
+	Uri, Disposable, WorkspaceConfiguration, ProviderResult, CodeLens
 } from 'vscode';
 
 import {
 	LanguageClient, LanguageClientOptions, TransportKind, ConfigurationParams,
-	CancellationToken, DidChangeConfigurationNotification, ServerOptions, Middleware	
+	CancellationToken, DidChangeConfigurationNotification, ServerOptions, Middleware
 } from 'vscode-languageclient';
 
 import * as lspcodelens from './lspcodelens';
@@ -147,11 +147,13 @@ export function activate(context: ExtensionContext) {
 		workspace: {
 			configuration: Configuration.computeConfiguration
 		},
-		provideCodeLenses: lspcodelens.onProvideCodeLenses,
-		resolveCodeLens: lspcodelens.onResolveCodeLenses
+		provideCodeLenses: (document, token) =>{
+			return Promise.resolve(lspcodelens.onProvideCodeLenses(document, token)).then(x => x);
+		},
+		resolveCodeLens: (codeLens) => {
+			return Promise.resolve(lspcodelens.onResolveCodeLenses(codeLens)).then(x => x);
+		}
 	};
-
-	//lspOutputChannel.appendLine("middleware :" + JSON.stringify(middleware));
 
 	// Options to control the language client
 	let clientOptions: LanguageClientOptions = {
@@ -189,3 +191,4 @@ export function deactivate(): Thenable<void> {
 	Configuration.dispose();
 	return client.stop();
 }
+

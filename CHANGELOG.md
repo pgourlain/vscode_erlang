@@ -1,5 +1,16 @@
 # Change log
 
+## Version 0.3.1 (May 15, 2018)
+### Auto indent and CodeLens fix
+* [PR #64](https://github.com/pgourlain/vscode_erlang/pull/64) 
+	- Fix on codeLens	
+* [PR #65](https://github.com/pgourlain/vscode_erlang/pull/65) 
+	- Auto indent
+
+Thanks to 
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+---
+
 ## Version 0.3.0 (May 12, 2018)
 ### LSP fixes and improvements  
 * [PR #62](https://github.com/pgourlain/vscode_erlang/pull/62) 
