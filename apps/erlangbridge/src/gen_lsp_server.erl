@@ -45,10 +45,21 @@ handle_info({tcp, Socket, RawData}, State) ->
     %entry point for each feature
     inet:setopts(Socket, [{active, once}]),
     Result = case parse_request(RawData) of
-        {validate_text_document, FileName} ->
-	        parse_file_uri(FileName);
+        {set_rebar_config, RebarConfig} ->
+            gen_lsp_doc_server:set_rebar_config(RebarConfig),
+            #{};
+        {parse_source_file, FileName} ->
+            lsp_syntax:parse_source_file(file_uri_to_file(FileName), file_uri_to_file(FileName));
+        {parse_source_file, FileName, TmpContentsFile} ->
+            lsp_syntax:parse_source_file(file_uri_to_file(FileName), TmpContentsFile);
+        {validate_parsed_source_file, FileName} ->
+            lsp_syntax:validate_parsed_source_file(file_uri_to_file(FileName));
+        {validate_config_file, FileName} ->
+            lsp_syntax:parse_config_file(file_uri_to_file(FileName), file_uri_to_file(FileName));
+        {validate_config_file, FileName, TmpContentsFile} ->
+            lsp_syntax:parse_config_file(file_uri_to_file(FileName), TmpContentsFile);
         {format_document, FileName} ->
-	        format_file_uri(FileName);   
+            format_file_uri(FileName);   
         {document_closed, FileName} ->
             gen_lsp_doc_server:remove_document(file_uri_to_file(FileName)), #{result => true};
         {goto_definition, FileName, Line, Column} -> 
@@ -62,14 +73,14 @@ handle_info({tcp, Socket, RawData}, State) ->
         {stop_server} ->
             init:stop();
         _ ->
-	        #{parse_result => false,
-	        error_message => <<"unknown command">>}
+            #{parse_result => false,
+            error_message => <<"unknown command">>}
     end,
     send(Socket, Result),
     {noreply, State};
 
 handle_info(timeout, #state{lsock = LSock} = State) ->
-    {ok, ClientSocket} = gen_tcp:accept(LSock),	
+    {ok, ClientSocket} = gen_tcp:accept(LSock), 
     {noreply, State#state{socket=ClientSocket}};
 
 handle_info({tcp_closed, _Socket}, State) ->
@@ -94,17 +105,22 @@ code_change(_OldVersion, State, _Extra) ->
 %% Features functions 
 %% TODO: move each feature in separate file
 
-parse_request(Data) ->
-    Content = binary_to_list(Data),
-    %"POST debugger_continue HTTP/1.1\r\nContent-Type: plain/text\r\nContent-Length: 1\r\nHost: 127.0.0.1:36477\r\nConnection: close\r\n\r\n3"
-    Lines = string:tokens(Content, "\r\n"),
-    Command = list_to_atom(lists:nth(2,
-				     string:tokens(lists:nth(1, Lines), " "))),
-    command_and_args({Command}, lists:nthtail(5, Lines)).
+parse_http(Packet) ->
+    {ok, {http_request,'POST', Verb, _}, Rest} = erlang:decode_packet(http, Packet, []),
+    {HeadersMap, Body} = parse_http_headers(Rest, #{}),
+    {Verb, HeadersMap, Body}.
 
-command_and_args(State, [H | T]) ->
-    command_and_args(erlang:append_element(State, H), T);
-command_and_args(State, []) -> State.
+parse_http_headers(Packet, HeadersMap) ->
+    case erlang:decode_packet(httph, Packet, []) of
+        {ok, {http_header, _, Header, _, Value}, Rest} ->
+            parse_http_headers(Rest, HeadersMap#{Header => Value});
+        {ok, http_eoh, Body} ->
+            {HeadersMap, Body}
+    end.
+
+parse_request(Data) ->
+    {Verb, _HeadersMap, Body} = parse_http(Data),
+    list_to_tuple([list_to_atom(Verb) | string:tokens(binary_to_list(Body), "\r\n")]).
 
 send(Socket, Data) ->
     Answer = response_json(Data),
@@ -114,31 +130,13 @@ send(Socket, Data) ->
 response_json(M) ->
     {ok, B} = vscode_jsone:encode(M),
     binary_to_list(iolist_to_binary(io_lib:fwrite("HTTP/1.0 200 OK\nContent-Type: application/js"
-						  "on\nContent-Length: ~p\n\n~s",
-						  [byte_size(B), B]))).
+                          "on\nContent-Length: ~p\n\n~s",
+                          [byte_size(B), B]))).
 
 file_uri_to_file(FileName) ->
     case string:left(FileName, 7) of
       "file://" -> string:sub_string(FileName, 8);
       _ -> FileName
-    end.
-
-parse_file_uri(FileName) ->
-    F = file_uri_to_file(FileName),
-    case is_src_file(F) of
-    true -> lsp_syntax:parse_src_file(F);
-    _ -> parse_file(F)
-    end.
-
-parse_file(File) ->
-    %error_logger:info_report([{parse_file, File}]),
-    lsp_syntax:parse_and_lint(File).
-
-is_src_file(File) ->
-    case filename:extension(File) of
-    ".src" -> true;
-    ".config" -> true;
-    _ -> false
     end.
 
 format_file_uri(FileName) ->

@@ -54,7 +54,7 @@ namespace Configuration {
 			// If a section is present we return null to indicate that the configuration
 			// is not supported.
 			if (item.section) {
-				let erlSectionConfig = JSON.parse(JSON.stringify(Workspace.getConfiguration('erlang')));
+				let erlSectionConfig = JSON.parse(JSON.stringify(Workspace.getConfiguration(item.section)));
 				result.push(erlSectionConfig);
 				result.push(null);
 				continue;
