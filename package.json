@@ -178,6 +178,17 @@
 					"description": "Arguments to provide to rebar/rebar3 build command",
 					"title": "Arguments to provide to rebar/rebar3 build command"
 				},
+				"erlang.includePaths": {
+					"type": "array",
+					"items": {
+						"type": "string",
+						"title": "path",
+						"default": ""
+					},
+					"default": [],
+					"description": "Include paths used when extension analyses the sources",
+					"title": "Include paths are read from rebar.config, and also standard set of paths is used. This setting is for special cases when the default behaviour is not enough."
+				},
 				"erlang.linting": {
 					"type": "boolean",
 					"default": true,

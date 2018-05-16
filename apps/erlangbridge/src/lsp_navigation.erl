@@ -1,6 +1,6 @@
 -module(lsp_navigation).
 
--export([goto_definition/3, hover_info/3, find_rebar_config/1, references_info/3, codelens_info/1]).
+-export([goto_definition/3, hover_info/3, references_info/3, codelens_info/1]).
 
 goto_definition(File, Line, Column) ->
     try internal_goto_definition(File, Line, Column) of
@@ -308,7 +308,7 @@ get_module_syntax_tree(Module, CurrentFileSyntaxTree, CurrentFile) ->
 
 find_module_file(Module, CurrentFile) ->
     CurrentDir = filename:dirname(CurrentFile),
-    RebarConfig = find_rebar_config(CurrentDir),
+    RebarConfig = maps:get(rebar_config, gen_lsp_doc_server:get_config(), undefined),
     RootDir = case RebarConfig of
         undefined -> CurrentDir;
         _ -> filename:dirname(RebarConfig)
@@ -332,26 +332,6 @@ find_module_file(Module, CurrentFile) ->
                 _ ->
                     AFile
             end
-    end.
-
-find_rebar_config(CurrentDir) ->
-    StoredRebarConfig = gen_lsp_doc_server:get_rebar_config(),
-    case StoredRebarConfig of
-        undefined ->
-            RebarConfig = filename:join(CurrentDir, "rebar.config"),
-            case filelib:is_file(RebarConfig) of
-                true ->
-                    RebarConfig;
-                _ ->
-                    Elements = filename:split(CurrentDir),
-                    case Elements of
-                        [_] ->
-                            undefined;
-                        _ ->
-                            find_rebar_config(filename:join(lists:droplast(Elements)))
-                    end
-            end;
-        _ -> StoredRebarConfig
     end.
 
 find_element({module_use, Module}, CurrentFileSyntaxTree, CurrentFile) ->
