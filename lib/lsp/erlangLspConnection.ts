@@ -68,24 +68,23 @@ export class ErlangLspConnection extends ErlangConnection {
         }
     }
 
-    public setRebarConfig(folderUris: string[], callback: () => void): void {
-        folderUris.forEach(uri => {
-            var rebarConfig = path.join(this.uriToFile(uri), "rebar.config");
-            if (fs.existsSync(rebarConfig)) {
-                this.post("set_rebar_config", rebarConfig).then(
-                    res => {
-                        if (res.error) {
-                            this.debug(`setRebarConfig error:${res.error}`);
-                        }
-                        else {
-                            callback();
-                        }
-                        return true;
-                    },
-                    err => { return false; }
-                );
-            }
+    public setConfig(entries: Map<string, string>, callback: () => void): void {
+        var body = "";
+        entries.forEach(function (value: string, key: string) {
+            body += key + "=" + value + "\r\n";
         });
+        this.post("set_config", body, true).then(
+            res => {
+                if (res.error) {
+                    this.debug(`setConfig error:${res.error}`);
+                }
+                else {
+                    callback();
+                }
+                return true;
+            },
+            err => { return false; }
+        );
     }
 
     public parseSourceFile(uri : string, tmpContentsFile: string, callback: () => void): void {
@@ -272,14 +271,5 @@ export class ErlangLspConnection extends ErlangConnection {
             return uri.replace(/file:\/\/([A-Za-z]):/, 'file:///$1%3A');
         else
             return uri;
-    }
-
-    private uriToFile(uri: string): string {
-        if (process.platform == 'win32')
-            uri = uri.replace(/file:\/\/\/([A-Za-z])%3A\//, 'file://$1:/');
-        if (uri.startsWith("file://"))
-            return uri.substr(7);
-        else
-            return uri;    
     }
 }

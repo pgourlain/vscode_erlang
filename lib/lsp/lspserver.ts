@@ -5,7 +5,7 @@
 'use strict';
 
 import {
-    createConnection, TextDocuments, TextDocument, Diagnostic, DiagnosticSeverity,
+    createConnection, TextDocuments, TextDocument, Diagnostic, DiagnosticSeverity, WorkspaceFolder,
     ProposedFeatures, InitializeParams, InitializeResult, DidChangeConfigurationNotification, Range, DocumentFormattingParams, CompletionItem,
     TextDocumentPositionParams, Definition, Hover, Location, MarkedString,
     ReferenceParams, CodeLensParams, CodeLens, Command, ExecuteCommandParams, Position
@@ -113,8 +113,11 @@ connection.onInitialized(async () => {
 
     var whenConnected = async function () {
         if (erlangLspConnection.isConnected) {
-            var folders = await connection.workspace.getWorkspaceFolders();
-            erlangLspConnection.setRebarConfig(folders.map(function (folder) { return folder.uri; }), function () {
+            var entries = new Map<string, string>();
+            var rebarConfig = findRebarConfig(await connection.workspace.getWorkspaceFolders());
+            if (rebarConfig)
+                entries.set("rebar_config", rebarConfig);
+            erlangLspConnection.setConfig(entries, function () {
                 lspServerConfigured = true;
             });
         }
@@ -126,6 +129,25 @@ connection.onInitialized(async () => {
     };
     whenConnected();    
 });
+
+function uriToFile(uri: string): string {
+    if (process.platform == 'win32')
+        uri = uri.replace(/file:\/\/\/([A-Za-z])%3A\//, 'file://$1:/');
+    if (uri.startsWith("file://"))
+        return uri.substr(7);
+    else
+        return uri;    
+}
+
+function findRebarConfig(folders: WorkspaceFolder[]): string {
+    var rebarConfig: string = "";
+    folders.forEach(folder => {
+        var rebarConfigCandidate = path.join(uriToFile(folder.uri), "rebar.config");
+        if (fs.existsSync(rebarConfigCandidate))
+            rebarConfig = rebarConfigCandidate;
+    });
+    return rebarConfig;
+}
 
 connection.onExecuteCommand((cmdParams: ExecuteCommandParams): any => {
     debugLog(`onExecuteCommand : ${JSON.stringify(cmdParams)}`);

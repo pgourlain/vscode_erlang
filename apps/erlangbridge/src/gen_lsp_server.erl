@@ -45,9 +45,8 @@ handle_info({tcp, Socket, RawData}, State) ->
     %entry point for each feature
     inet:setopts(Socket, [{active, once}]),
     Result = case parse_request(RawData) of
-        {set_rebar_config, RebarConfig} ->
-            gen_lsp_doc_server:set_rebar_config(RebarConfig),
-            #{};
+        {set_config, Entries} ->
+            gen_lsp_doc_server:set_config(get_entries_map(Entries));
         {parse_source_file, FileName} ->
             lsp_syntax:parse_source_file(file_uri_to_file(FileName), file_uri_to_file(FileName));
         {parse_source_file, FileName, TmpContentsFile} ->
@@ -119,8 +118,21 @@ parse_http_headers(Packet, HeadersMap) ->
     end.
 
 parse_request(Data) ->
-    {Verb, _HeadersMap, Body} = parse_http(Data),
-    list_to_tuple([list_to_atom(Verb) | string:tokens(binary_to_list(Body), "\r\n")]).
+    {Verb, HeadersMap, Body} = parse_http(Data),
+    case maps:get("X-Multiline-Body", HeadersMap, "false") of
+        "false" ->
+            list_to_tuple([list_to_atom(Verb) | string:tokens(binary_to_list(Body), "\r\n")]);
+        "true" ->
+            {list_to_atom(Verb), binary_to_list(Body)}
+    end.
+
+get_entries_map(Entries) ->
+    lists:foldl(fun (Line, Acc) ->
+        case string:tokens(Line, "=") of
+            [Key, Value] -> Acc#{list_to_atom(Key) => Value};
+            _ -> Acc
+        end
+    end, #{}, string:tokens(Entries, "\r\n")).
 
 send(Socket, Data) ->
     Answer = response_json(Data),

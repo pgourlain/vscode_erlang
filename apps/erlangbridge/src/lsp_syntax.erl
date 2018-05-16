@@ -63,10 +63,10 @@ do_epp_parse_file(File, FIO, IncludePath) ->
     end.
 
 get_include_path(File) ->
-    [filename:dirname(File), filename:rootname(File) | get_include_path_from_rebar_config(File)].
+    [filename:dirname(File), filename:rootname(File) | get_include_path_from_rebar_config()].
 
-get_include_path_from_rebar_config(File) ->
-    RebarConfig = lsp_navigation:find_rebar_config(File),
+get_include_path_from_rebar_config() ->
+    RebarConfig = maps:get(rebar_config, gen_lsp_doc_server:get_config(), undefined),
     case RebarConfig of
         undefined ->
             [];
