@@ -20,36 +20,11 @@ export async function onProvideCodeLenses(document: TextDocument, token: Cancell
 	if (!codeLensEnabled) {
 		return Promise.resolve([]);
 	}
-	//wait to avoid to see codelens at wrong line (when lines are suppressed)
-	await delay(300);
-	return new Promise<VSCodeLens[]>(resolve => {
-		if (document.isDirty) {
-			//if dirty return when saved
-			let onDidSavedListener: Disposable;
-			onDidSavedListener = Workspace.onDidChangeTextDocument(e => {
-				onDidSavedListener.dispose();
-				resolve(internalProvideCodeLenses(document, token));
-			});
-		} else {
-			resolve(internalProvideCodeLenses(document, token));
-		}
-	});
-
-	// because erlang read only saved document, we should save before executing codelens...
-	// but 
-	// if (client) {		
-	// 	return document.save().then( saved =>
-	// 		client.sendRequest<CodeLensParams, CodeLens[], void, CodeLensRegistrationOptions>(CodeLensRequest.type,
-	// 		<CodeLensParams>{
-	// 			textDocument: <TextDocumentIdentifier>{ uri: document.uri.toString() }
-	// 		},
-	// 		token).then(async (codelenses) => await codeLensToVSCodeLens(codelenses)));
-	// }
-	// return [];
+	return await internalProvideCodeLenses(document, token);
 }
 
-function internalProvideCodeLenses(document: TextDocument, token: CancellationToken): ProviderResult<VSCodeLens[]> {
-	return client.sendRequest<CodeLensParams, CodeLens[], void, CodeLensRegistrationOptions>(CodeLensRequest.type,
+async function internalProvideCodeLenses(document: TextDocument, token: CancellationToken): Promise<ProviderResult<VSCodeLens[]>> {
+	return await client.sendRequest<CodeLensParams, CodeLens[], void, CodeLensRegistrationOptions>(CodeLensRequest.type,
 		<CodeLensParams>{
 			textDocument: <TextDocumentIdentifier>{ uri: document.uri.toString() }
 		},

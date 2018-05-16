@@ -4,6 +4,8 @@
  * ------------------------------------------------------------------------------------------ */
 'use strict';
 
+import { EventEmitter } from 'events';
+
 import {
     createConnection, TextDocuments, TextDocument, Diagnostic, DiagnosticSeverity, WorkspaceFolder,
     ProposedFeatures, InitializeParams, InitializeResult, DidChangeConfigurationNotification, Range, DocumentFormattingParams, CompletionItem,
@@ -31,7 +33,13 @@ class ChannelWrapper implements IErlangShellOutput {
     appendLine(value: string): void {
         debugLog(value);
     }
+}
 
+class DocumentValidatedEvent extends EventEmitter {
+
+    public Fire() {
+        this.emit("documentValidated");
+    }
 }
 
 // Create a connection for the server. The connection uses Node's IPC as a transport
@@ -49,7 +57,7 @@ let hasConfigurationCapability = false;
 let hasWorkspaceFolderCapability = false;
 
 let lspServerConfigured = false;
-
+let documentValidtedEvent = new DocumentValidatedEvent();
 let module2helpPage: Map<string, string[]> = new Map();
 
 //trace for debugging 
@@ -295,6 +303,8 @@ async function validateDocument(document: TextDocument, saved: boolean = true): 
             });
         }
     }
+    // fire that document is validated
+    documentValidtedEvent.Fire();
 }
 
 connection.onDocumentFormatting(async (params : DocumentFormattingParams) => {
@@ -438,6 +448,19 @@ connection.onReferences(async (reference : ReferenceParams) : Promise<Location[]
 });
 
 connection.onCodeLens(async (codeLens: CodeLensParams) : Promise<CodeLens[]>  => {
+    //wait doucment validation before get codelenses
+    //in order to get on last version of parsed document
+    return await new Promise<CodeLens[]>(a => {
+        let fn = () =>
+        {
+            documentValidtedEvent.removeListener("documentValidated", fn);        
+            a(getCodeLenses(codeLens));        
+        };
+        documentValidtedEvent.addListener("documentValidated", fn);
+    });
+});
+
+async function getCodeLenses(codeLens: CodeLensParams) : Promise<CodeLens[]> {
     var erlangConfig = await connection.workspace.getConfiguration("erlang");
     if (erlangConfig) {
         if (!erlangConfig.codeLensEnabled) {
@@ -465,8 +488,8 @@ connection.onCodeLens(async (codeLens: CodeLensParams) : Promise<CodeLens[]>  =>
         });
         return Result;
     }
-    return null;
-});
+    return null;    
+}
 
 connection.onCodeLensResolve(async (codeLens : CodeLens) : Promise<CodeLens> => {   
 
@@ -515,7 +538,7 @@ function debugLog(msg : string) : void {
 }
 
 function onValidatedDocument(parsingResult : ParsingResult, textDocument : TextDocument) : void {
-        debugLog("onValidatedDocument: " + textDocument.uri);
+            debugLog("onValidatedDocument: " + textDocument.uri);
     if (parsingResult.parse_result) {   
         let diagnostics: Diagnostic[] = [];
         if (parsingResult.errors_warnings) {
