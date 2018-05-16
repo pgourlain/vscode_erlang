@@ -1,5 +1,18 @@
 # Change log
 
+## Version 0.3.2 (May 16, 2018)
+### LSP works without Auto Save and CodeLens fix
+* [PR #66](https://github.com/pgourlain/vscode_erlang/pull/66) 
+	- LSP works without Auto Save	
+* [PR #67](https://github.com/pgourlain/vscode_erlang/pull/67) 
+	- New setting includePaths added 
+* [PR #68](https://github.com/pgourlain/vscode_erlang/pull/68) 
+	- Fix CodeLens when Auto Save is off
+
+Thanks to 
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+---
+
 ## Version 0.3.1 (May 15, 2018)
 ### Auto indent and CodeLens fix
 * [PR #64](https://github.com/pgourlain/vscode_erlang/pull/64) 
