@@ -68,7 +68,7 @@ export class ErlangLspConnection extends ErlangConnection {
         }
     }
 
-    public setRebarConfig(folderUris: string[]): void {
+    public setRebarConfig(folderUris: string[], callback: () => void): void {
         folderUris.forEach(uri => {
             var rebarConfig = path.join(this.uriToFile(uri), "rebar.config");
             if (fs.existsSync(rebarConfig)) {
@@ -76,6 +76,9 @@ export class ErlangLspConnection extends ErlangConnection {
                     res => {
                         if (res.error) {
                             this.debug(`setRebarConfig error:${res.error}`);
+                        }
+                        else {
+                            callback();
                         }
                         return true;
                     },

@@ -48,6 +48,8 @@ let documents: TextDocuments = new TextDocuments();
 let hasConfigurationCapability = false;
 let hasWorkspaceFolderCapability = false;
 
+let lspServerConfigured = false;
+
 let module2helpPage: Map<string, string[]> = new Map();
 
 //trace for debugging 
@@ -56,7 +58,6 @@ let traceEnabled = false;
 connection.onInitialize(async (params: InitializeParams): Promise<InitializeResult> => {
 
     //connection.console.log("onInitialize.");
-    
     await erlangLspConnection.Start(traceEnabled).then(port => {
         return erlangLsp.Start("", erlangBridgePath+"/..", port, "src", "");
     }, (reason) => {
@@ -69,9 +70,6 @@ connection.onInitialize(async (params: InitializeParams): Promise<InitializeResu
     // If not, we will fall back using global settings
     hasWorkspaceFolderCapability = capabilities.workspace && !!capabilities.workspace.workspaceFolders;
     hasConfigurationCapability = capabilities.workspace && !!capabilities.workspace.configuration;
-    if (hasConfigurationCapability) {
-        debugLog(JSON.stringify(capabilities.workspace.configuration));
-    }
     debugLog(`capabilities => hasWorkspaceFolderCapability:${hasWorkspaceFolderCapability}, hasConfigurationCapability:${hasConfigurationCapability}`);
     //return new InitializeResult()
     return <InitializeResult>{
@@ -95,10 +93,6 @@ connection.onInitialize(async (params: InitializeParams): Promise<InitializeResu
 
 connection.onInitialized(async () => {
     debugLog("onInitialized");
-    var folders = await connection.workspace.getWorkspaceFolders();
-    waitForServerReady(function () {
-        erlangLspConnection.setRebarConfig(folders.map(function (folder) { return folder.uri; }));
-    });
     var globalConfig = await connection.workspace.getConfiguration("erlang");
     if (globalConfig) {
         let erlangConfig = globalConfig;
@@ -116,6 +110,21 @@ connection.onInitialized(async () => {
             debugLog('Workspace folder change event received');
         });
     }
+
+    var whenConnected = async function () {
+        if (erlangLspConnection.isConnected) {
+            var folders = await connection.workspace.getWorkspaceFolders();
+            erlangLspConnection.setRebarConfig(folders.map(function (folder) { return folder.uri; }), function () {
+                lspServerConfigured = true;
+            });
+        }
+        else {
+            setTimeout(function () {
+                whenConnected();
+            }, 100);
+        }
+    };
+    whenConnected();    
 });
 
 connection.onExecuteCommand((cmdParams: ExecuteCommandParams): any => {
@@ -159,9 +168,9 @@ connection.onDidChangeConfiguration(async change => {
     });
 });
 
-function waitForServerReady(fun) {
+function waitForServerConfigured(fun) {
     var whenReady = function () {
-        if (erlangLspConnection.isConnected)
+        if (lspServerConfigured)
             fun();
         else {
             setTimeout(function () {
@@ -180,7 +189,7 @@ async function isAutoSaveEnabled() {
 documents.onDidOpen(async event => {
     debugLog("onDidOpen: " + event.document.uri);
     if (await isAutoSaveEnabled()) {
-        waitForServerReady(function () {
+        waitForServerConfigured(function () {
             validateDocument(event.document);           
         });
     }
@@ -189,7 +198,7 @@ documents.onDidOpen(async event => {
 documents.onDidSave(async event => {
     debugLog("onDidSave: " + event.document.uri);
     if (await isAutoSaveEnabled()) {
-        waitForServerReady(function () {
+        waitForServerConfigured(function () {
             validateDocument(event.document);           
         });
     }
@@ -207,7 +216,7 @@ documents.onDidClose(event => {
 // when the text document first opened or when its content has changed.
 documents.onDidChangeContent(async event => {
     if (!await isAutoSaveEnabled()) {
-        waitForServerReady(function () {
+        waitForServerConfigured(function () {
             validateDocument(event.document, event.document.version === 1);
         });
     }

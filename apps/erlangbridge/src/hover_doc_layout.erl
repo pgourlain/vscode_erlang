@@ -43,7 +43,7 @@ are_function_equal(FName, Arity, E) ->
     Result.
 
 
-function_description(E, Opts) ->
+function_description(E, _Opts) ->
     Content = E#xmlElement.content,
     Desc = get_content(description, Content),
     %io:format("description : ~p~n", [Desc]),
@@ -51,7 +51,7 @@ function_description(E, Opts) ->
     %replace all '\n' by '  \n' for markdown rendering
     lists:flatten(string:replace(FullDesc, "\n","  \n", all)).
 
-function_name(E, Opts) ->
+function_name(E, _Opts) ->
     Children = E#xmlElement.content,
     Name = get_attrval(name, E),
     lists:flatten(Name ++ "(" ++ function_args(get_content(args, Children)) ++ ")"). 
@@ -110,9 +110,6 @@ get_attrval(Name, #xmlElement{attributes = As}) ->
 	    V;
 	[] -> ""
     end.
-
-atom(String, _Opts) ->
-    io_lib:write_atom(list_to_atom(String)).
 
 join_strings([], _) ->
     [];
