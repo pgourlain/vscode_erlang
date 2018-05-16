@@ -234,7 +234,7 @@ async function validateDocument(document: TextDocument, saved: boolean = true): 
         else {
             var tmpFileName = saveContentsToTmpFile(document);
             erlangLspConnection.parseSourceFile(document.uri, tmpFileName, () => {
-                fs.unlink(tmpFileName);
+                fs.unlinkSync(tmpFileName);
                 if (linting)
                     erlangLspConnection.validateParsedSourceFile(document.uri, 
                         parsingResult => onValidatedDocument(parsingResult, document));    
@@ -249,7 +249,7 @@ async function validateDocument(document: TextDocument, saved: boolean = true): 
         else {
             var tmpFileName = saveContentsToTmpFile(document);
             erlangLspConnection.validateConfigFile(document.uri, tmpFileName, parsingResult => {
-                fs.unlink(tmpFileName);
+                fs.unlinkSync(tmpFileName);
                 onValidatedDocument(parsingResult, document);
             });
         }
