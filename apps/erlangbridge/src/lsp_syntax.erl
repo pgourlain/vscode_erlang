@@ -1,52 +1,78 @@
 -module(lsp_syntax).
 
--export([parse/1, lint/2, parse_src_file/1, parse_and_lint/1]).
+-export([parse_source_file/2, validate_parsed_source_file/1, parse_config_file/2, file_syntax_tree/1]).
 
-parse_and_lint(File) ->
-    do_parse_and_lint(File).
-
-do_parse_and_lint(File) ->
-    case parse(File) of
-      {ok, Forms} -> lint(Forms, File);
-      {error, _} ->
-	  #{parse_result => false,
-	    error_message => <<"Cannot open file">>}
+parse_source_file(File, ContentsFile) ->
+    case epp_parse_file(ContentsFile, get_include_path(File)) of
+        {ok, FileSyntaxTree} ->
+            gen_lsp_doc_server:add_or_update_document(File, update_file_in_forms(File, ContentsFile, FileSyntaxTree)),
+            #{parse_result => true};
+        _ ->
+            #{parse_result => false, error_message => <<"Cannot open file">>}
     end.
 
-parse(File) ->
-    %error_logger:info_msg("parse '~p'",[File]),
-    case epp_parse_file(File) of
-    {ok, Forms} ->
-        gen_lsp_doc_server:add_or_update_document(File, Forms),
-        {ok, Forms};
-    {error, Any} -> {error, Any};
-    _Other -> error_logger:info_msg("parse_file other case '~p'",[_Other]), {error, "unknown"}
+validate_parsed_source_file(File) ->
+    {ok, FileSyntaxTree} = gen_lsp_doc_server:get_document(File),
+    lint(FileSyntaxTree, File).
+
+parse_config_file(File, ContentsFile) ->
+    case file:path_consult(filename:dirname(ContentsFile), ContentsFile) of
+        {ok,_, _} -> #{parse_result => true};
+        {error, Reason} -> #{
+            parse_result => true,
+            errors_warnings => [#{type => <<"error">>, 
+            file => list_to_binary(File),
+            info => extract_info(Reason)}] }
     end.
 
-epp_parse_file(File) ->
+file_syntax_tree(File) ->
+    case gen_lsp_doc_server:get_document(File) of
+        {ok, FileSyntaxTree} ->
+            FileSyntaxTree;
+        not_found -> 
+            case epp_parse_file(File, get_include_path(File)) of
+                {ok, FileSyntaxTree} -> FileSyntaxTree;
+                _ -> undefined
+            end
+    end.
+
+%{attribute,1,file, {"C:\\Users\\WOJTEK~1.SUR\\AppData\\Local\\Temp\\3607772",1}}
+update_file_in_forms(File, File, FileSyntaxTree) ->
+    FileSyntaxTree;
+update_file_in_forms(File, ContentsFile, FileSyntaxTree) ->
+    lists:map(fun
+        ({attribute, A1, file, {FunContentsFile, A2}}) when FunContentsFile =:= ContentsFile ->
+            {attribute, A1, file, {File, A2}};
+        (Form) ->
+            Form
+    end, FileSyntaxTree).
+
+epp_parse_file(File, IncludePath) ->
     case file:open(File, [read]) of
     {ok, FIO} -> 
-        Ret = do_epp_parse_file(File, FIO),
+        Ret = do_epp_parse_file(File, FIO, IncludePath),
         file:close(FIO), 
-        %error_logger:info_msg("epp_parse_file '~p'",[Ret]),
         Ret;
     _ -> {error, file_could_not_opened}
     end.
 
-do_epp_parse_file(File, FIO) ->
-    case epp:open(File, FIO, {1,1}, get_include_path(File), []) of
-    {ok, Epp} -> {ok, epp:parse_file(Epp)};
-    {error, _Err} -> {error, _Err} 
+do_epp_parse_file(File, FIO, IncludePath) ->
+    case epp:open(File, FIO, {1,1}, IncludePath, []) of
+        {ok, Epp} -> {ok, epp:parse_file(Epp)};
+        {error, _Err} -> {error, _Err} 
     end.
 
 get_include_path(File) ->
+    [filename:dirname(File), filename:rootname(File) | get_include_path_from_rebar_config(File)].
+
+get_include_path_from_rebar_config(File) ->
     RebarConfig = lsp_navigation:find_rebar_config(File),
     case RebarConfig of
         undefined ->
             [];
         _ ->
             Consult = file:consult(RebarConfig),
-            case Consult of
+            PathsFromRebarConfig = case Consult of
                 {ok, Terms} ->
                     ErlOpts = proplists:get_value(erl_opts, Terms, []),
                     IncludePaths = proplists:get_all_values(i, ErlOpts),
@@ -55,12 +81,14 @@ get_include_path(File) ->
                     end, IncludePaths);
                 _ ->
                     []
-            end
+            end,
+            LibDir = filename:join([filename:dirname(RebarConfig), "_build", "default", "lib"]),
+            [LibDir | PathsFromRebarConfig]
     end.
 
-lint(Forms, File) ->
-    LintResult = erl_lint:module(Forms, File,[ {strong_validation}]),
-    error_logger:info_msg("lint result '~p'",[LintResult]),
+lint(FileSyntaxTree, File) ->
+    LintResult = erl_lint:module(FileSyntaxTree, File,[ {strong_validation}]),
+    %error_logger:info_msg("lint result '~p'",[LintResult]),
     case LintResult of
     % nothing wrong
     {ok, []} -> #{parse_result => true};
@@ -93,7 +121,7 @@ extract_error_or_warning(_Type, {_, []}) ->
 extract_error_or_warning(Type, ErrorsOrWarnings) ->
     [#{type => Type,
        file =>
-	   erlang:list_to_binary(element(1, ErrorsOrWarnings)),
+       erlang:list_to_binary(element(1, ErrorsOrWarnings)),
        info => extract_info(X)}
      || X <- element(2, ErrorsOrWarnings)].
 
@@ -108,13 +136,3 @@ extract_info({{Line, Column}, Module, MessageBody}) ->
         character => Column,
         message => erlang:list_to_binary(lists:flatten(apply(Module, format_error, [MessageBody]), []))
     }.
-
-parse_src_file(File) ->
-    case file:path_consult(filename:dirname(File), File) of
-    {ok,_, _} -> #{parse_result => true};
-    {error, Reason} -> #{
-        parse_result => true,
-		errors_warnings => [#{type => <<"error">>, 
-        file => list_to_binary(File),
-        info => extract_info(Reason)}] }
-    end.
