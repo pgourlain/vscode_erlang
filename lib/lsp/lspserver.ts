@@ -113,12 +113,8 @@ connection.onInitialized(async () => {
 
     var whenConnected = async function () {
         if (erlangLspConnection.isConnected) {
-            var entries = new Map<string, string>();
-            var rebarConfig = findRebarConfig(await connection.workspace.getWorkspaceFolders());
-            if (rebarConfig)
-                entries.set("rebar_config", rebarConfig);
-            erlangLspConnection.setConfig(entries, function () {
-                lspServerConfigured = true;
+            setConfigInLSP(function () {
+                lspServerConfigured = true;                
             });
         }
         else {
@@ -129,6 +125,18 @@ connection.onInitialized(async () => {
     };
     whenConnected();    
 });
+
+async function setConfigInLSP(callback) {
+    var entries = new Map<string, string>();
+    var rebarConfig = findRebarConfig(await connection.workspace.getWorkspaceFolders());
+    if (rebarConfig)
+        entries.set("rebar_config", rebarConfig);
+    var globalConfig = await connection.workspace.getConfiguration("erlang");
+    if (globalConfig && globalConfig.includePaths.length > 0) {
+        entries.set("include_paths", globalConfig.includePaths.join("|"));
+    }
+    erlangLspConnection.setConfig(entries, callback);
+}
 
 function uriToFile(uri: string): string {
     if (process.platform == 'win32')
@@ -168,26 +176,28 @@ connection.onExit(() => {
 // The global settings, used when the `workspace/configuration` request is not supported by the client.
 // Please note that this is not the case when using this server with the client provided in this example
 // but could happen with other clients.
-const defaultSettings: ErlangSettings = { erlangPath: "", rebarBuildArgs:[],  rebarPath: "", linting: true, codeLensEnabled: false, verbose: false };
+const defaultSettings: ErlangSettings = { erlangPath: "", rebarBuildArgs:[],  rebarPath: "", includePaths: [], linting: true, codeLensEnabled: false, verbose: false };
 let globalSettings: ErlangSettings = defaultSettings;
 
 // Cache the settings of all open documents
 let documentSettings: Map<string, Thenable<ErlangSettings>> = new Map();
 
 connection.onDidChangeConfiguration(async change => {
+    debugLog("connection.onDidChangeConfiguration");
     if (hasConfigurationCapability) {
         // Reset all cached document settings
         documentSettings.clear();
     } else {
         globalSettings = <ErlangSettings>(change.settings.lspMultiRootSample || defaultSettings);
     }
-
-    // Revalidate all open text documents
-    documents.all().forEach(document => {
-        let diagnostics: Diagnostic[] = [];
-        connection.sendDiagnostics({ uri: document.uri, diagnostics });
-        validateDocument(document);
-    });
+    setConfigInLSP(function () {
+        // Revalidate all open text documents
+        documents.all().forEach(document => {
+            let diagnostics: Diagnostic[] = [];
+            connection.sendDiagnostics({ uri: document.uri, diagnostics });
+            validateDocument(document);
+        });
+    });
 });
 
 function waitForServerConfigured(fun) {

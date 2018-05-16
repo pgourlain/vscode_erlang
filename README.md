@@ -56,6 +56,7 @@ Then, before debugging is started, modified files will be recompiled automatical
   * `erlang.erlangPath` - Directory location of erl/escript
   * `erlang.rebarPath` - Directory location of rebar/rebar3
   * `erlang.rebarBuildArgs` - Arguments to provide to rebar/rebar3 build command
+  * `erlang.includePaths` - Include paths are read from rebar.config, and also standard set of paths is used. This setting is for special cases when the default behaviour is not enough
   * `erlang.linting` - Enable/disable dynamic validation of opened Erlang source files
   * `erlang.codeLensEnabled` - Enable/Disable CodeLens
   * `erlang.verbose` - Activate technical traces for use in the extension development
