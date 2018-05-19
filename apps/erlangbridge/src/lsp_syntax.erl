@@ -66,7 +66,22 @@ get_include_path(File) ->
     get_settings_include_paths() ++ [filename:dirname(File), filename:rootname(File) | get_include_path_from_rebar_config()].
 
 get_settings_include_paths() ->
-    string:tokens(maps:get(include_paths, gen_lsp_doc_server:get_config(), ""), "|").
+    SettingPaths = string:tokens(maps:get(include_paths, gen_lsp_doc_server:get_config(), ""), "|"),
+    RebarConfig = maps:get(rebar_config, gen_lsp_doc_server:get_config(), undefined),
+    case RebarConfig of
+        undefined ->
+            SettingPaths;
+        _ ->
+            RootDir = filename:dirname(RebarConfig),
+            lists:map(fun (Path) ->
+                case filename:pathtype(Path) of
+                    relative ->
+                        filename:absname_join(RootDir, Path);
+                    _ ->
+                        Path
+                end
+            end, SettingPaths)
+    end.
 
 get_include_path_from_rebar_config() ->
     RebarConfig = maps:get(rebar_config, gen_lsp_doc_server:get_config(), undefined),
