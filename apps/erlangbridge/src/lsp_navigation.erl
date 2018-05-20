@@ -297,40 +297,18 @@ get_module_syntax_tree(Module, CurrentFileSyntaxTree, CurrentFile) ->
         CurrentModule ->
             {CurrentFileSyntaxTree, CurrentFile};
         _ ->
-            ModuleFile = find_module_file(Module, CurrentFile),
+            CurrentDir = filename:dirname(CurrentFile),
+            RebarConfig = maps:get(rebar_config, gen_lsp_doc_server:get_config(), undefined),
+            RootDir = case RebarConfig of
+                undefined -> CurrentDir;
+                _ -> filename:dirname(RebarConfig)
+            end,
+            ModuleFile = lsp_syntax:find_module_file(Module, RootDir),
             case ModuleFile of
                 undefined ->
                     undefined;
                 _ ->
                     {lsp_syntax:file_syntax_tree(ModuleFile), ModuleFile}
-            end
-    end.
-
-find_module_file(Module, CurrentFile) ->
-    CurrentDir = filename:dirname(CurrentFile),
-    RebarConfig = maps:get(rebar_config, gen_lsp_doc_server:get_config(), undefined),
-    RootDir = case RebarConfig of
-        undefined -> CurrentDir;
-        _ -> filename:dirname(RebarConfig)
-    end,
-    Found = filelib:fold_files(RootDir, atom_to_list(Module) ++ ".erl", true, fun (Found, Acc) ->
-        [Found | Acc]
-    end, []),
-    case Found of
-        [] ->
-            undefined;
-        [OneFile] ->
-            OneFile;
-        [AFile|_] ->
-            BuildElements = filename:split(RootDir) ++ ["_build"],
-            NoBuildFiles = lists:filter(fun (Filename) ->
-                not lists:prefix(BuildElements, filename:split(Filename))
-            end, Found),
-            case NoBuildFiles of
-                [ANoBuioldFile|_] ->
-                    ANoBuioldFile;
-                _ ->
-                    AFile
             end
     end.
 

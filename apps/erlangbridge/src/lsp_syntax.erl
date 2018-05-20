@@ -1,6 +1,6 @@
 -module(lsp_syntax).
 
--export([parse_source_file/2, validate_parsed_source_file/1, parse_config_file/2, file_syntax_tree/1]).
+-export([parse_source_file/2, validate_parsed_source_file/1, parse_config_file/2, file_syntax_tree/1, module_syntax_tree/1, find_module_file/2]).
 
 parse_source_file(File, ContentsFile) ->
     case epp_parse_file(ContentsFile, get_include_path(File)) of
@@ -33,6 +33,40 @@ file_syntax_tree(File) ->
             case epp_parse_file(File, get_include_path(File)) of
                 {ok, FileSyntaxTree} -> FileSyntaxTree;
                 _ -> undefined
+            end
+    end.
+
+module_syntax_tree(Module) ->
+    RebarConfig = maps:get(rebar_config, gen_lsp_doc_server:get_config(), undefined),
+    case RebarConfig of
+        undefined -> undefined;
+        _ ->
+            File = find_module_file(Module, filename:dirname(RebarConfig)),
+            case File of
+                undefined -> undefined;
+                _ -> file_syntax_tree(File)
+            end
+    end.
+
+find_module_file(Module, RootDir) ->
+    Found = filelib:fold_files(RootDir, atom_to_list(Module) ++ ".erl", true, fun (Found, Acc) ->
+        [Found | Acc]
+    end, []),
+    case Found of
+        [] ->
+            undefined;
+        [OneFile] ->
+            OneFile;
+        [AFile|_] ->
+            BuildElements = filename:split(RootDir) ++ ["_build"],
+            NoBuildFiles = lists:filter(fun (Filename) ->
+                not lists:prefix(BuildElements, filename:split(Filename))
+            end, Found),
+            case NoBuildFiles of
+                [ANoBuioldFile|_] ->
+                    ANoBuioldFile;
+                _ ->
+                    AFile
             end
     end.
 
