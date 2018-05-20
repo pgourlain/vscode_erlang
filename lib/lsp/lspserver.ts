@@ -9,8 +9,8 @@ import { EventEmitter } from 'events';
 import {
     createConnection, TextDocuments, TextDocument, Diagnostic, DiagnosticSeverity, WorkspaceFolder,
     ProposedFeatures, InitializeParams, InitializeResult, DidChangeConfigurationNotification, Range, DocumentFormattingParams, CompletionItem,
-    TextDocumentPositionParams, Definition, Hover, Location, MarkedString,
-    ReferenceParams, CodeLensParams, CodeLens, Command, ExecuteCommandParams, Position
+    TextDocumentPositionParams, Definition, Hover, Location, MarkedString, CompletionItemKind,
+    ReferenceParams, CodeLensParams, CodeLens, Command, ExecuteCommandParams, Position, MarkupContent, MarkupKind
 } from 'vscode-languageserver';
 
 import URI from 'vscode-uri';
@@ -24,7 +24,7 @@ import * as http from 'http';
 import * as os from 'os'; 
 import * as path from 'path'; 
 import * as fs from 'fs'; 
-import { workspace } from 'vscode';
+import { workspace, TextEdit } from 'vscode';
 
 class ChannelWrapper implements IErlangShellOutput {
     
@@ -53,9 +53,6 @@ let erlangLspConnection = new ErlangLspConnection(new ChannelWrapper());
 // supports full document sync only
 let documents: TextDocuments = new TextDocuments();
 
-let hasConfigurationCapability = false;
-let hasWorkspaceFolderCapability = false;
-
 let lspServerConfigured = false;
 let documentValidtedEvent = new DocumentValidatedEvent();
 let module2helpPage: Map<string, string[]> = new Map();
@@ -72,14 +69,6 @@ connection.onInitialize(async (params: InitializeParams): Promise<InitializeResu
         connection.console.log(`LspConnection Start failed : ${reason}`);       
     });
 
-    let capabilities = params.capabilities;
-
-    // Does the client support the `workspace/configuration` request? 
-    // If not, we will fall back using global settings
-    hasWorkspaceFolderCapability = capabilities.workspace && !!capabilities.workspace.workspaceFolders;
-    hasConfigurationCapability = capabilities.workspace && !!capabilities.workspace.configuration;
-    debugLog(`capabilities => hasWorkspaceFolderCapability:${hasWorkspaceFolderCapability}, hasConfigurationCapability:${hasConfigurationCapability}`);
-    //return new InitializeResult()
     return <InitializeResult>{
         capabilities: {
             textDocumentSync: documents.syncKind,
@@ -88,6 +77,7 @@ connection.onInitialize(async (params: InitializeParams): Promise<InitializeResu
             hoverProvider: true,
             codeLensProvider :  { resolveProvider : true },
             referencesProvider : true,
+            completionProvider: { triggerCharacters: [':']}
             // executeCommandProvider: {
             //  commands : ["erlang.showReferences"]
             // },
@@ -108,16 +98,10 @@ connection.onInitialized(async () => {
             traceEnabled = true;
         }
     }
-    if (hasConfigurationCapability) {
-        connection.client.register(DidChangeConfigurationNotification.type, undefined);
-    }
 
-    //debugLog("connection.onInitialized");
-    if (hasWorkspaceFolderCapability) {
-        connection.workspace.onDidChangeWorkspaceFolders((_event) => {
-            debugLog('Workspace folder change event received');
-        });
-    }
+    connection.onDidChangeWatchedFiles( event => {
+        debugLog('onDidChangeWatchedFiles '+JSON.stringify(event));
+    });
 
     var whenConnected = async function () {
         if (erlangLspConnection.isConnected) {
@@ -187,17 +171,8 @@ connection.onExit(() => {
 const defaultSettings: ErlangSettings = { erlangPath: "", rebarBuildArgs:[],  rebarPath: "", includePaths: [], linting: true, codeLensEnabled: false, verbose: false };
 let globalSettings: ErlangSettings = defaultSettings;
 
-// Cache the settings of all open documents
-let documentSettings: Map<string, Thenable<ErlangSettings>> = new Map();
-
 connection.onDidChangeConfiguration(async change => {
     debugLog("connection.onDidChangeConfiguration");
-    if (hasConfigurationCapability) {
-        // Reset all cached document settings
-        documentSettings.clear();
-    } else {
-        globalSettings = <ErlangSettings>(change.settings.lspMultiRootSample || defaultSettings);
-    }
     setConfigInLSP(function () {
         // Revalidate all open text documents
         documents.all().forEach(document => {
@@ -248,8 +223,7 @@ documents.onDidClose(event => {
     debugLog("onDidSave: " + event.document.uri);
     let diagnostics: Diagnostic[] = [];
     connection.sendDiagnostics({ uri: event.document.uri, diagnostics });
-    documentSettings.delete(event.document.uri);
-        erlangLspConnection.onDocumentClosed(event.document.uri);
+    erlangLspConnection.onDocumentClosed(event.document.uri);
 });
 
 // The content of a text document has changed. This event is emitted
@@ -322,7 +296,7 @@ connection.onDefinition(async (textDocumentPosition: TextDocumentPositionParams)
     return null;
 });
 
-function markdown(str: string): string {
+function markdown(str: string): MarkupContent {
     str = str.trim();
     var reg = /(((< *\/[^>]+>)|(< *([a-zA-Z0-9]+)[^>]*>))|([^<]+))/g;
     var out = '';
@@ -371,7 +345,10 @@ function markdown(str: string): string {
         else if (result[6] && off.length === 0)
             out += result[6];
     }
-    return out;
+    return {
+        value: out,
+        kind: MarkupKind.Markdown
+    };
 }
 
 async function getModuleHelpPage(moduleName: string): Promise<string[]> {
@@ -499,37 +476,44 @@ connection.onCodeLensResolve(async (codeLens : CodeLens) : Promise<CodeLens> => 
     return codeLens;
 });
 
-
-//https://stackoverflow.com/questions/38378410/can-i-add-a-completions-intellisense-file-to-a-language-support-extension
 connection.onCompletion(async (textDocumentPosition: TextDocumentPositionParams):Promise<CompletionItem[]> => {
     let document = documents.get(textDocumentPosition.textDocument.uri);
     if (document == null) {
         debugLog(`unable to get document '${textDocumentPosition.textDocument.uri}'`);
         return [];
     }
-    let textDocument = document.getText();
-    
-    let offset = document.offsetAt(textDocumentPosition.position);
-    let char = textDocument.substr(offset-1, 1);
-
-    if (char == ':') {
-        var items = await erlangLspConnection.GetCompletionItems(textDocumentPosition.textDocument.uri, 
-            textDocumentPosition.position.line, 
-            textDocumentPosition.position.character, char);
-        return <CompletionItem[]>items.map(x => { return {label: x, kind:2}});  
-    }
+    let text = document.getText({
+        start: Position.create(textDocumentPosition.position.line, 0),
+        end: textDocumentPosition.position}
+    );
+    var moduleFunctionMatch = text.match(/[^a-zA-Z0-0_@]([a-z][a-zA-Z0-0_@]*):([a-z][a-zA-Z0-0_@]*)?$/);
+    if (moduleFunctionMatch) {
+        var prefix = moduleFunctionMatch[2] ? moduleFunctionMatch[2] : '';
+        debugLog('onCompletion, module=' + moduleFunctionMatch[1] + ' function='+prefix);
+        return await completeModuleFunction(moduleFunctionMatch[1], prefix);
+    }
     return [];
-    // return [{
-    //  label : "test",
-    //  kind : 2
-    // }];
 });
 
-connection.onCompletionResolve((item: CompletionItem): CompletionItem =>{
-    debugLog("resolve :" +JSON.stringify(item));
-    return item;
-});
-
+async function completeModuleFunction(moduleName: string, prefix: string): Promise<CompletionItem[]> {
+    let items = await erlangLspConnection.completeModuleFunction(moduleName, prefix);
+    let completionItems: CompletionItem[] = items.map(item => {
+        return {
+            label: item,
+            kind: CompletionItemKind.Function
+        };
+    });
+    if (completionItems.length > 0) {
+        let helpPage = await getModuleHelpPage(moduleName);
+        if (helpPage.length > 0) {
+            completionItems = completionItems.map(function (item: CompletionItem): CompletionItem {
+                item.documentation = markdown(extractHelpForFunction(item.label, helpPage));
+                return item;
+            });
+        }
+    }
+    return completionItems;
+}
 
 function debugLog(msg : string) : void {
     if (true /*traceEnabled*/) {
