@@ -57,6 +57,10 @@ handle_info({tcp, Socket, RawData}, State) ->
             lsp_syntax:parse_config_file(file_uri_to_file(FileName), file_uri_to_file(FileName));
         {validate_config_file, FileName, TmpContentsFile} ->
             lsp_syntax:parse_config_file(file_uri_to_file(FileName), TmpContentsFile);
+        {complete_module_function, Module} ->
+            lsp_completion:module_function(list_to_atom(Module), "");
+        {complete_module_function, Module, Prefix} ->
+            lsp_completion:module_function(list_to_atom(Module), Prefix);
         {format_document, FileName} ->
             format_file_uri(FileName);   
         {document_closed, FileName} ->

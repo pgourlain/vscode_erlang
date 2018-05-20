@@ -135,6 +135,21 @@ export class ErlangLspConnection extends ErlangConnection {
         );
     }
 
+    public async completeModuleFunction(moduleName: string, prefix: string): Promise<string[]> {
+        return await this.post("complete_module_function", moduleName + "\r\n" + prefix).then(
+            res => {
+                if (res.error) {
+                    this.debug(`completeModuleFunction error:${res.error}`);
+                    return [];
+                }
+                else {
+                    return res.items;
+                }
+            },
+            err =>  { return []; }
+        );
+    }
+
     public FormatDocument(uri : string) : void {
         this.post("format_document", this.toErlangUri(uri)).then(
             res => {

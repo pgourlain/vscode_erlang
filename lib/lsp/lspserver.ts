@@ -9,8 +9,8 @@ import { EventEmitter } from 'events';
 import {
     createConnection, TextDocuments, TextDocument, Diagnostic, DiagnosticSeverity, WorkspaceFolder,
     ProposedFeatures, InitializeParams, InitializeResult, DidChangeConfigurationNotification, Range, DocumentFormattingParams, CompletionItem,
-    TextDocumentPositionParams, Definition, Hover, Location, MarkedString,
-    ReferenceParams, CodeLensParams, CodeLens, Command, ExecuteCommandParams, Position
+    TextDocumentPositionParams, Definition, Hover, Location, MarkedString, CompletionItemKind,
+    ReferenceParams, CodeLensParams, CodeLens, Command, ExecuteCommandParams, Position, MarkupContent, MarkupKind
 } from 'vscode-languageserver';
 
 import URI from 'vscode-uri';
@@ -24,7 +24,7 @@ import * as http from 'http';
 import * as os from 'os'; 
 import * as path from 'path'; 
 import * as fs from 'fs'; 
-import { workspace } from 'vscode';
+import { workspace, TextEdit } from 'vscode';
 
 class ChannelWrapper implements IErlangShellOutput {
     
@@ -77,6 +77,7 @@ connection.onInitialize(async (params: InitializeParams): Promise<InitializeResu
             hoverProvider: true,
             codeLensProvider :  { resolveProvider : true },
             referencesProvider : true,
+            completionProvider: { triggerCharacters: [':']}
             // executeCommandProvider: {
             //  commands : ["erlang.showReferences"]
             // },
@@ -99,11 +100,8 @@ connection.onInitialized(async () => {
     }
 
     connection.onDidChangeWatchedFiles( event => {
-        debugLog('onDidChangeWatchedFiles');
+        debugLog('onDidChangeWatchedFiles '+JSON.stringify(event));
     });
-    connection.workspace.onDidChangeWorkspaceFolders((_event) => {
-        debugLog('Workspace folder change event received');
-    });
 
     var whenConnected = async function () {
         if (erlangLspConnection.isConnected) {
@@ -298,7 +296,7 @@ connection.onDefinition(async (textDocumentPosition: TextDocumentPositionParams)
     return null;
 });
 
-function markdown(str: string): string {
+function markdown(str: string): MarkupContent {
     str = str.trim();
     var reg = /(((< *\/[^>]+>)|(< *([a-zA-Z0-9]+)[^>]*>))|([^<]+))/g;
     var out = '';
@@ -347,7 +345,10 @@ function markdown(str: string): string {
         else if (result[6] && off.length === 0)
             out += result[6];
     }
-    return out;
+    return {
+        value: out,
+        kind: MarkupKind.Markdown
+    };
 }
 
 async function getModuleHelpPage(moduleName: string): Promise<string[]> {
@@ -475,37 +476,44 @@ connection.onCodeLensResolve(async (codeLens : CodeLens) : Promise<CodeLens> => 
     return codeLens;
 });
 
-
-//https://stackoverflow.com/questions/38378410/can-i-add-a-completions-intellisense-file-to-a-language-support-extension
 connection.onCompletion(async (textDocumentPosition: TextDocumentPositionParams):Promise<CompletionItem[]> => {
     let document = documents.get(textDocumentPosition.textDocument.uri);
     if (document == null) {
         debugLog(`unable to get document '${textDocumentPosition.textDocument.uri}'`);
         return [];
     }
-    let textDocument = document.getText();
-    
-    let offset = document.offsetAt(textDocumentPosition.position);
-    let char = textDocument.substr(offset-1, 1);
-
-    if (char == ':') {
-        var items = await erlangLspConnection.GetCompletionItems(textDocumentPosition.textDocument.uri, 
-            textDocumentPosition.position.line, 
-            textDocumentPosition.position.character, char);
-        return <CompletionItem[]>items.map(x => { return {label: x, kind:2}});  
-    }
+    let text = document.getText({
+        start: Position.create(textDocumentPosition.position.line, 0),
+        end: textDocumentPosition.position}
+    );
+    var moduleFunctionMatch = text.match(/[^a-zA-Z0-0_@]([a-z][a-zA-Z0-0_@]*):([a-z][a-zA-Z0-0_@]*)?$/);
+    if (moduleFunctionMatch) {
+        var prefix = moduleFunctionMatch[2] ? moduleFunctionMatch[2] : '';
+        debugLog('onCompletion, module=' + moduleFunctionMatch[1] + ' function='+prefix);
+        return await completeModuleFunction(moduleFunctionMatch[1], prefix);
+    }
     return [];
-    // return [{
-    //  label : "test",
-    //  kind : 2
-    // }];
 });
 
-connection.onCompletionResolve((item: CompletionItem): CompletionItem =>{
-    debugLog("resolve :" +JSON.stringify(item));
-    return item;
-});
-
+async function completeModuleFunction(moduleName: string, prefix: string): Promise<CompletionItem[]> {
+    let items = await erlangLspConnection.completeModuleFunction(moduleName, prefix);
+    let completionItems: CompletionItem[] = items.map(item => {
+        return {
+            label: item,
+            kind: CompletionItemKind.Function
+        };
+    });
+    if (completionItems.length > 0) {
+        let helpPage = await getModuleHelpPage(moduleName);
+        if (helpPage.length > 0) {
+            completionItems = completionItems.map(function (item: CompletionItem): CompletionItem {
+                item.documentation = markdown(extractHelpForFunction(item.label, helpPage));
+                return item;
+            });
+        }
+    }
+    return completionItems;
+}
 
 function debugLog(msg : string) : void {
     if (true /*traceEnabled*/) {

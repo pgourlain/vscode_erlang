@@ -2,12 +2,12 @@ import * as path from 'path';
 import * as fs from 'fs';
 import {
 	workspace as Workspace, window as Window, ExtensionContext, TextDocument, OutputChannel, WorkspaceFolder,
-	Uri, Disposable, WorkspaceConfiguration, ProviderResult, CodeLens
+	Uri, Disposable, WorkspaceConfiguration, ProviderResult, CodeLens, FileSystemWatcher, workspace
 } from 'vscode';
 
 import {
 	LanguageClient, LanguageClientOptions, TransportKind, ConfigurationParams,
-	CancellationToken, DidChangeConfigurationNotification, ServerOptions, Middleware
+	CancellationToken, DidChangeConfigurationNotification, ServerOptions, Middleware, DidChangeWorkspaceFoldersNotification, DidChangeWatchedFilesNotification, FileChangeType
 } from 'vscode-languageclient';
 
 import * as lspcodelens from './lspcodelens';
@@ -37,7 +37,8 @@ let lspOutputChannel: OutputChannel;
 
 namespace Configuration {
 
-	let configurationListener: Disposable;
+    let configurationListener: Disposable;
+    let fileSystemWatcher: FileSystemWatcher;
 
 	// Convert VS Code specific settings to a format acceptable by the server. Since
 	// both client and server do use JSON the conversion is trivial. 
@@ -80,7 +81,12 @@ namespace Configuration {
 		configurationListener = Workspace.onDidChangeConfiguration(() => {
 			lspcodelens.configurationChanged();
 			client.sendNotification(DidChangeConfigurationNotification.type, { settings: null });
-		});
+        });
+        fileSystemWatcher = workspace.createFileSystemWatcher('**/*.erl');
+        fileSystemWatcher.onDidCreate(uri => {
+            client.sendNotification(DidChangeWatchedFilesNotification.type,
+                {changes: [{uri: uri.fsPath, type: FileChangeType.Created}]});
+        })
 	}
 
 	export function dispose() {
