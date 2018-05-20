@@ -53,9 +53,6 @@ let erlangLspConnection = new ErlangLspConnection(new ChannelWrapper());
 // supports full document sync only
 let documents: TextDocuments = new TextDocuments();
 
-let hasConfigurationCapability = false;
-let hasWorkspaceFolderCapability = false;
-
 let lspServerConfigured = false;
 let documentValidtedEvent = new DocumentValidatedEvent();
 let module2helpPage: Map<string, string[]> = new Map();
@@ -72,14 +69,6 @@ connection.onInitialize(async (params: InitializeParams): Promise<InitializeResu
         connection.console.log(`LspConnection Start failed : ${reason}`);       
     });
 
-    let capabilities = params.capabilities;
-
-    // Does the client support the `workspace/configuration` request? 
-    // If not, we will fall back using global settings
-    hasWorkspaceFolderCapability = capabilities.workspace && !!capabilities.workspace.workspaceFolders;
-    hasConfigurationCapability = capabilities.workspace && !!capabilities.workspace.configuration;
-    debugLog(`capabilities => hasWorkspaceFolderCapability:${hasWorkspaceFolderCapability}, hasConfigurationCapability:${hasConfigurationCapability}`);
-    //return new InitializeResult()
     return <InitializeResult>{
         capabilities: {
             textDocumentSync: documents.syncKind,
@@ -108,16 +97,13 @@ connection.onInitialized(async () => {
             traceEnabled = true;
         }
     }
-    if (hasConfigurationCapability) {
-        connection.client.register(DidChangeConfigurationNotification.type, undefined);
-    }
 
-    //debugLog("connection.onInitialized");
-    if (hasWorkspaceFolderCapability) {
-        connection.workspace.onDidChangeWorkspaceFolders((_event) => {
-            debugLog('Workspace folder change event received');
-        });
-    }
+    connection.onDidChangeWatchedFiles( event => {
+        debugLog('onDidChangeWatchedFiles');
+    });
+    connection.workspace.onDidChangeWorkspaceFolders((_event) => {
+        debugLog('Workspace folder change event received');
+    });
 
     var whenConnected = async function () {
         if (erlangLspConnection.isConnected) {
@@ -187,17 +173,8 @@ connection.onExit(() => {
 const defaultSettings: ErlangSettings = { erlangPath: "", rebarBuildArgs:[],  rebarPath: "", includePaths: [], linting: true, codeLensEnabled: false, verbose: false };
 let globalSettings: ErlangSettings = defaultSettings;
 
-// Cache the settings of all open documents
-let documentSettings: Map<string, Thenable<ErlangSettings>> = new Map();
-
 connection.onDidChangeConfiguration(async change => {
     debugLog("connection.onDidChangeConfiguration");
-    if (hasConfigurationCapability) {
-        // Reset all cached document settings
-        documentSettings.clear();
-    } else {
-        globalSettings = <ErlangSettings>(change.settings.lspMultiRootSample || defaultSettings);
-    }
     setConfigInLSP(function () {
         // Revalidate all open text documents
         documents.all().forEach(document => {
@@ -248,8 +225,7 @@ documents.onDidClose(event => {
     debugLog("onDidSave: " + event.document.uri);
     let diagnostics: Diagnostic[] = [];
     connection.sendDiagnostics({ uri: event.document.uri, diagnostics });
-    documentSettings.delete(event.document.uri);
-        erlangLspConnection.onDocumentClosed(event.document.uri);
+    erlangLspConnection.onDocumentClosed(event.document.uri);
 });
 
 // The content of a text document has changed. This event is emitted
