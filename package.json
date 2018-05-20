@@ -205,7 +205,7 @@
 					"type": "boolean",
 					"description": "Activate technical traces",
 					"title": "Activate technical traces for use in the extension development",
-					"default": "false"
+					"default": false
 				}
 			}
 		},
