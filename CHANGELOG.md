@@ -1,5 +1,15 @@
 # Change log
 
+## Version 0.3.3 (May 20, 2018)
+### Auto complete for exported functions
+* [PR #71](https://github.com/pgourlain/vscode_erlang/pull/71) 
+	- Autocomplete for exported functions	
+	- includePaths may be relative to the project root
+
+Thanks to 
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+---
+
 ## Version 0.3.2 (May 16, 2018)
 ### LSP works without Auto Save and CodeLens fix
 * [PR #66](https://github.com/pgourlain/vscode_erlang/pull/66) 
