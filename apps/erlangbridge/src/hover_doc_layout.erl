@@ -47,7 +47,7 @@ function_description(E, _Opts) ->
     Desc = get_content(description, Content),
     %io:format("description : ~p~n", [Desc]),
     FullDesc = get_text(fullDescription, Desc),
-    %replace all '\n' by '  \n' for markdown rendering
+    %replace all '\n' by '  \n' (two spaces) for markdown rendering
     lists:flatten(add_spaces(FullDesc)).
 
 add_spaces(Str) ->
@@ -55,7 +55,7 @@ add_spaces(Str) ->
 add_spaces("", Acc) ->
     Acc;
 add_spaces([$\n | T], Acc) ->
-    add_spaces(T, [$\n, $  | Acc ]);
+    add_spaces(T, [$\n, $ ,$  | Acc ]);
 add_spaces([H | T], Acc) ->
     add_spaces(T, [H | Acc]).
 

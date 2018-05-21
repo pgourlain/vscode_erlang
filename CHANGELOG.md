@@ -1,5 +1,18 @@
 # Change log
 
+## Version 0.3.4 (May 21, 2018)
+### Autocompletion for records and variables, LSP fixes
+* [PR #73](https://github.com/pgourlain/vscode_erlang/pull/73) 
+	- Project root used instead of rebar.config location
+	- Include paths based on rebar.config location
+	- Records autocompletion
+	- Autocompletion for fields
+	- Variables autocompletion
+
+Thanks to 
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+---
+
 ## Version 0.3.3 (May 20, 2018)
 ### Auto complete for exported functions
 * [PR #71](https://github.com/pgourlain/vscode_erlang/pull/71) 
