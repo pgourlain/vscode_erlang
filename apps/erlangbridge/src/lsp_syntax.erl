@@ -31,7 +31,8 @@ file_syntax_tree(File) ->
             FileSyntaxTree;
         not_found -> 
             case epp_parse_file(File, get_include_path(File)) of
-                {ok, FileSyntaxTree} -> FileSyntaxTree;
+                {ok, FileSyntaxTree} ->
+                    FileSyntaxTree;
                 _ -> undefined
             end
     end.
@@ -40,12 +41,12 @@ module_syntax_tree(Module) ->
     File = find_module_file(Module, maps:get(root, gen_lsp_doc_server:get_config(), "")),
     case File of
         undefined -> undefined;
-        _ -> file_syntax_tree(File)
+        _ -> {file_syntax_tree(File), File}
     end.
 
 find_module_file(Module, RootDir) ->
     Files = filelib:fold_files(RootDir, atom_to_list(Module) ++ ".erl", true, fun (Found, Acc) ->
-        case filename:basename(Found) of
+        case list_to_atom(filename:rootname(filename:basename(Found))) of
             Module -> [Found | Acc];
             _ -> Acc
         end

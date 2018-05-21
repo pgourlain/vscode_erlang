@@ -42,7 +42,7 @@ internal_hover_info(File, Line, Column) ->
             What = element_at_position(Module, FileSyntaxTree, Line, Column),
             case What of
                 {function_use, FunctionModule, Function, Arity} ->
-                    SyntaxTreeFile = get_module_syntax_tree(FunctionModule, FileSyntaxTree, File),                    
+                    SyntaxTreeFile = lsp_syntax:module_syntax_tree(FunctionModule),                    
                     case SyntaxTreeFile of
                         {SyntaxTree, _File} ->
                             case find_function(SyntaxTree, Function, Arity) of
@@ -291,30 +291,14 @@ find_record_field_use(Record, [{record_field, _, {atom, {_, StartColumn}, Field}
         true -> find_record_field_use(Record, Tail, Column)
     end.
 
-get_module_syntax_tree(Module, CurrentFileSyntaxTree, CurrentFile) ->
-    CurrentModule = list_to_atom(filename:basename(CurrentFile)),
-    case Module of
-        CurrentModule ->
-            {CurrentFileSyntaxTree, CurrentFile};
-        _ ->
-            RootDir = maps:get(root, gen_lsp_doc_server:get_config(), ""),
-            ModuleFile = lsp_syntax:find_module_file(Module, RootDir),
-            case ModuleFile of
-                undefined ->
-                    undefined;
-                _ ->
-                    {lsp_syntax:file_syntax_tree(ModuleFile), ModuleFile}
-            end
-    end.
-
-find_element({module_use, Module}, CurrentFileSyntaxTree, CurrentFile) ->
-    {SyntaxTree, File} = get_module_syntax_tree(Module, CurrentFileSyntaxTree, CurrentFile),
+find_element({module_use, Module}, _CurrentFileSyntaxTree, _CurrentFile) ->
+    {SyntaxTree, File} = lsp_syntax:module_syntax_tree(Module),
     case find_module(SyntaxTree, Module) of
         {attribute, {Line, Column}, _} -> {File, Line, Column};
         _ -> undefined
     end;
-find_element({function_use, Module, Function, Arity}, CurrentFileSyntaxTree, CurrentFile) ->
-    {SyntaxTree, File} = get_module_syntax_tree(Module, CurrentFileSyntaxTree, CurrentFile),
+find_element({function_use, Module, Function, Arity}, _CurrentFileSyntaxTree, _CurrentFile) ->
+    {SyntaxTree, File} = lsp_syntax:module_syntax_tree(Module),
     case find_function(SyntaxTree, Function, Arity) of
         {function, {Line, Column}, _Function, _Arity, _Clauses} -> {File, Line, Column};
         _ -> undefined

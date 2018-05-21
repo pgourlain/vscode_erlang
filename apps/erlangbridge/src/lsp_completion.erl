@@ -3,11 +3,11 @@
 -export([module_function/2]).
 
 module_function(Module, Prefix) ->
-    SyntaxTree = lsp_syntax:module_syntax_tree(Module),
-    ExportsResult = case SyntaxTree of
+    SyntaxTreeFile = lsp_syntax:module_syntax_tree(Module),
+    ExportsResult = case SyntaxTreeFile of
         undefined ->
             standard_module_exports(Module);
-        _ ->
+        {SyntaxTree, _File} ->
             syntax_tree_exports(SyntaxTree)
     end,
     case ExportsResult of

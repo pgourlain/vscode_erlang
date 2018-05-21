@@ -42,14 +42,22 @@ are_function_equal(FName, Arity, E) ->
     Result = N == FName andalso length(A) >0 andalso Arity == list_to_integer(A),
     Result.
 
-
 function_description(E, _Opts) ->
     Content = E#xmlElement.content,
     Desc = get_content(description, Content),
     %io:format("description : ~p~n", [Desc]),
     FullDesc = get_text(fullDescription, Desc),
     %replace all '\n' by '  \n' for markdown rendering
-    lists:flatten(string:replace(FullDesc, "\n","  \n", all)).
+    lists:flatten(add_spaces(FullDesc)).
+
+add_spaces(Str) ->
+    lists:reverse(add_spaces(Str, "")).
+add_spaces("", Acc) ->
+    Acc;
+add_spaces([$\n | T], Acc) ->
+    add_spaces(T, [$\n, $  | Acc ]);
+add_spaces([H | T], Acc) ->
+    add_spaces(T, [H | Acc]).
 
 function_name(E, _Opts) ->
     Children = E#xmlElement.content,
