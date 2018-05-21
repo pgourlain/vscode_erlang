@@ -77,7 +77,7 @@ connection.onInitialize(async (params: InitializeParams): Promise<InitializeResu
             hoverProvider: true,
             codeLensProvider :  { resolveProvider : true },
             referencesProvider : true,
-            completionProvider: { triggerCharacters: [':', '#']}
+            completionProvider: { triggerCharacters: [":", "#", "."]}
             // executeCommandProvider: {
             //  commands : ["erlang.showReferences"]
             // },
@@ -495,6 +495,12 @@ connection.onCompletion(async (textDocumentPosition: TextDocumentPositionParams)
         debugLog('onCompletion, record=' + prefix);
         return await completeRecord(document.uri, prefix);
     }
+    var fieldMatch = text.match(/#([a-z][a-zA-Z0-0_@]*)\.([a-z][a-zA-Z0-0_@]*)?$/);
+    if (fieldMatch) {
+        var prefix = fieldMatch[2] ? fieldMatch[2] : '';
+        debugLog('onCompletion, record=' + fieldMatch[1] + ' field=' + prefix);
+        return await completeField(document.uri, fieldMatch[1], prefix);
+    }
     return [];
 });
 
@@ -524,6 +530,16 @@ async function completeRecord(uri: string, prefix: string): Promise<CompletionIt
         return {
             label: item,
             kind: CompletionItemKind.Struct
+        };
+    });
+}
+
+async function completeField(uri: string, record: string, prefix: string): Promise<CompletionItem[]> {
+    let items = await erlangLspConnection.completeField(uri, record, prefix);
+    return items.map(item => {
+        return {
+            label: item,
+            kind: CompletionItemKind.Field
         };
     });
 }

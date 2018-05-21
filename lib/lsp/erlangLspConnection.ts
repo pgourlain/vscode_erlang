@@ -165,6 +165,21 @@ export class ErlangLspConnection extends ErlangConnection {
         );
     }
 
+    public async completeField(uri: string, record: string, prefix: string): Promise<string[]> {
+        return await this.post("complete_field", this.toErlangUri(uri) + "\r\n" + record + "\r\n" + prefix).then(
+            res => {
+                if (res.error) {
+                    this.debug(`completeField error:${res.error}`);
+                    return [];
+                }
+                else {
+                    return res.items;
+                }
+            },
+            err =>  { return []; }
+        );
+    }
+
     public FormatDocument(uri : string) : void {
         this.post("format_document", this.toErlangUri(uri)).then(
             res => {

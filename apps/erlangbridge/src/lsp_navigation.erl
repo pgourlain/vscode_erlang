@@ -1,6 +1,6 @@
 -module(lsp_navigation).
 
--export([goto_definition/3, hover_info/3, references_info/3, codelens_info/1]).
+-export([goto_definition/3, hover_info/3, references_info/3, codelens_info/1, find_record/2]).
 
 goto_definition(File, Line, Column) ->
     try internal_goto_definition(File, Line, Column) of

@@ -1,6 +1,6 @@
 -module(lsp_completion).
 
--export([module_function/2, record/2]).
+-export([module_function/2, record/2, field/3]).
 
 module_function(Module, Prefix) ->
     SyntaxTreeFile = lsp_syntax:module_syntax_tree(Module),
@@ -44,7 +44,6 @@ record(File, Prefix) ->
         undefined ->
             #{error => <<"Cannot find module">>};
         _ ->
-            error_logger:info_msg("record ~p",[SyntaxTree]),
             #{items => lists:filtermap(fun 
                 ({attribute, _, record, {Name, _}}) ->
                     case lists:prefix(Prefix, atom_to_list(Name)) of
@@ -54,4 +53,27 @@ record(File, Prefix) ->
                 (_) ->
                     false
             end, SyntaxTree)}
+    end.
+
+field(File, Record, Prefix) ->
+    SyntaxTree = lsp_syntax:file_syntax_tree(File),
+    case SyntaxTree of
+        undefined ->
+            #{error => <<"Cannot find module">>};
+        _ ->
+            RecordTree = lsp_navigation:find_record(SyntaxTree, Record),
+            case RecordTree of
+                {{attribute, _, record, {Record, Fields}}, _File} ->
+                    #{items => lists:filtermap(fun 
+                        ({record_field, _, {atom, _, Field}}) ->
+                            case lists:prefix(Prefix, atom_to_list(Field)) of
+                                true -> {true, list_to_binary(atom_to_list(Field))};
+                                _ -> false
+                            end;
+                        (_) ->
+                            false
+                    end, Fields)};
+                _ ->
+                    #{error => <<"Cannot find record">>}
+            end
     end.
