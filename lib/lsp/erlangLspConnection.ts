@@ -180,6 +180,21 @@ export class ErlangLspConnection extends ErlangConnection {
         );
     }
 
+    public async completeVariable(uri: string, line: number, prefix: string): Promise<string[]> {
+        return await this.post("complete_variable", this.toErlangUri(uri) + "\r\n" + line.toString() + "\r\n" + prefix).then(
+            res => {
+                if (res.error) {
+                    this.debug(`completeVariable error:${res.error}`);
+                    return [];
+                }
+                else {
+                    return res.items;
+                }
+            },
+            err =>  { return []; }
+        );
+    }
+
     public FormatDocument(uri : string) : void {
         this.post("format_document", this.toErlangUri(uri)).then(
             res => {
@@ -192,21 +207,6 @@ export class ErlangLspConnection extends ErlangConnection {
             },
             err =>  {return false;}
         );        
-    }
-
-    public async GetCompletionItems(uri : string, line : number, character : number, lastEnterChar : string) : Promise<string[]> {
-        return await this.post("completion_items", this.toErlangUri(uri) + "\r\n" + line.toString() +  "\r\n" + (character-1).toString()+"\r\n" + lastEnterChar).then(
-            res => {
-                if (res.error) {
-                    this.debug(`completion_items error:${res.error}`);                    
-                    return [];
-                } else {
-                    this.debug(`completion_items result : ${JSON.stringify(res)}`)
-                }
-                return [];
-            },
-            err =>  {return [];}
-        );     
     }
 
     public GetModuleExports(uri : string) {

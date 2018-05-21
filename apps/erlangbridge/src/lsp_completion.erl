@@ -1,6 +1,6 @@
 -module(lsp_completion).
 
--export([module_function/2, record/2, field/3]).
+-export([module_function/2, record/2, field/3, variable/3]).
 
 module_function(Module, Prefix) ->
     SyntaxTreeFile = lsp_syntax:module_syntax_tree(Module),
@@ -75,5 +75,34 @@ field(File, Record, Prefix) ->
                     end, Fields)};
                 _ ->
                     #{error => <<"Cannot find record">>}
+            end
+    end.
+
+variable(File, Line, Prefix) ->
+    FileSyntaxTree = lsp_syntax:file_syntax_tree(File),
+    case FileSyntaxTree of
+        undefined ->
+            #{error => <<"Cannot find module">>};
+        _ ->
+            Function = lsp_navigation:find_function_with_line(FileSyntaxTree, Line),
+            case Function of
+                undefined ->
+                    #{items => []};
+                _ ->
+                    Names = erl_syntax_lib:fold(fun (SyntaxTree, Acc) ->
+                        case SyntaxTree of
+                            {var, _, Name} ->
+                                [Name | Acc];
+                            _ ->
+                                Acc
+                        end
+                    end, [], Function),
+                    Unique = sets:to_list(sets:from_list(Names)),
+                    #{items => lists:filtermap(fun (Name) ->
+                        case lists:prefix(Prefix, atom_to_list(Name)) of
+                            true -> {true, list_to_binary(atom_to_list(Name))};
+                            _ -> false
+                        end
+                    end, Unique)}
             end
     end.

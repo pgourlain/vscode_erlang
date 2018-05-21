@@ -501,6 +501,12 @@ connection.onCompletion(async (textDocumentPosition: TextDocumentPositionParams)
         debugLog('onCompletion, record=' + fieldMatch[1] + ' field=' + prefix);
         return await completeField(document.uri, fieldMatch[1], prefix);
     }
+    var variableMatch = text.match(/[^a-zA-Z0-0_@]([A-Z][a-zA-Z0-0_@]*)$/);
+    if (variableMatch) {
+        var prefix = variableMatch[1] ? variableMatch[1] : '';
+        debugLog('onCompletion, variable=' + prefix);
+        return await completeVariable(document.uri, textDocumentPosition.position.line, prefix);
+    }
     return [];
 });
 
@@ -540,6 +546,16 @@ async function completeField(uri: string, record: string, prefix: string): Promi
         return {
             label: item,
             kind: CompletionItemKind.Field
+        };
+    });
+}
+
+async function completeVariable(uri: string, line: number, prefix: string): Promise<CompletionItem[]> {
+    let items = await erlangLspConnection.completeVariable(uri, line, prefix);
+    return items.map(item => {
+        return {
+            label: item,
+            kind: CompletionItemKind.Variable
         };
     });
 }
