@@ -1,6 +1,6 @@
 -module(lsp_completion).
 
--export([module_function/2]).
+-export([module_function/2, record/2]).
 
 module_function(Module, Prefix) ->
     SyntaxTreeFile = lsp_syntax:module_syntax_tree(Module),
@@ -37,4 +37,21 @@ syntax_tree_exports(SyntaxTree) ->
         (_, Acc) ->
             Acc
     end, [], SyntaxTree)}.
-    
+
+record(File, Prefix) ->
+    SyntaxTree = lsp_syntax:file_syntax_tree(File),
+    case SyntaxTree of
+        undefined ->
+            #{error => <<"Cannot find module">>};
+        _ ->
+            error_logger:info_msg("record ~p",[SyntaxTree]),
+            #{items => lists:filtermap(fun 
+                ({attribute, _, record, {Name, _}}) ->
+                    case lists:prefix(Prefix, atom_to_list(Name)) of
+                        true -> {true, list_to_binary(atom_to_list(Name))};
+                        _ -> false
+                    end;
+                (_) ->
+                    false
+            end, SyntaxTree)}
+    end.

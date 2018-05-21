@@ -77,7 +77,7 @@ connection.onInitialize(async (params: InitializeParams): Promise<InitializeResu
             hoverProvider: true,
             codeLensProvider :  { resolveProvider : true },
             referencesProvider : true,
-            completionProvider: { triggerCharacters: [':']}
+            completionProvider: { triggerCharacters: [':', '#']}
             // executeCommandProvider: {
             //  commands : ["erlang.showReferences"]
             // },
@@ -486,8 +486,14 @@ connection.onCompletion(async (textDocumentPosition: TextDocumentPositionParams)
     var moduleFunctionMatch = text.match(/[^a-zA-Z0-0_@]([a-z][a-zA-Z0-0_@]*):([a-z][a-zA-Z0-0_@]*)?$/);
     if (moduleFunctionMatch) {
         var prefix = moduleFunctionMatch[2] ? moduleFunctionMatch[2] : '';
-        debugLog('onCompletion, module=' + moduleFunctionMatch[1] + ' function='+prefix);
+        debugLog('onCompletion, module=' + moduleFunctionMatch[1] + ' function=' + prefix);
         return await completeModuleFunction(moduleFunctionMatch[1], prefix);
+    }
+    var recordMatch = text.match(/#([a-z][a-zA-Z0-0_@]*)?$/);
+    if (recordMatch) {
+        var prefix = recordMatch[1] ? recordMatch[1] : '';
+        debugLog('onCompletion, record=' + prefix);
+        return await completeRecord(document.uri, prefix);
     }
     return [];
 });
@@ -510,6 +516,16 @@ async function completeModuleFunction(moduleName: string, prefix: string): Promi
         }
     }
     return completionItems;
+}
+
+async function completeRecord(uri: string, prefix: string): Promise<CompletionItem[]> {
+    let items = await erlangLspConnection.completeRecord(uri, prefix);
+    return items.map(item => {
+        return {
+            label: item,
+            kind: CompletionItemKind.Struct
+        };
+    });
 }
 
 function debugLog(msg : string) : void {
