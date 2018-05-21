@@ -120,11 +120,7 @@ connection.onInitialized(async () => {
 
 async function setConfigInLSP(callback) {
     var entries = new Map<string, string>();
-    var folders = await connection.workspace.getWorkspaceFolders();
-    entries.set("root", findRoot(folders));
-    var rebarConfig = findRebarConfig(folders);
-    if (rebarConfig)
-        entries.set("rebar_config", rebarConfig);
+    entries.set("root", findRoot(await connection.workspace.getWorkspaceFolders()));
     var globalConfig = await connection.workspace.getConfiguration("erlang");
     if (globalConfig && globalConfig.includePaths.length > 0)
         entries.set("include_paths", globalConfig.includePaths.join("|"));
@@ -148,16 +144,6 @@ function findRoot(folders: WorkspaceFolder[]): string {
             root = folderPath;
     });
     return root;
-}
-
-function findRebarConfig(folders: WorkspaceFolder[]): string {
-    var rebarConfig: string = "";
-    folders.forEach(folder => {
-        var rebarConfigCandidate = path.join(uriToFile(folder.uri), "rebar.config");
-        if (fs.existsSync(rebarConfigCandidate))
-            rebarConfig = rebarConfigCandidate;
-    });
-    return rebarConfig;
 }
 
 connection.onExecuteCommand((cmdParams: ExecuteCommandParams): any => {

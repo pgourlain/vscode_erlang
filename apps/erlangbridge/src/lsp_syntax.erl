@@ -69,7 +69,6 @@ find_module_file(Module, RootDir) ->
             end
     end.
 
-%{attribute,1,file, {"C:\\Users\\WOJTEK~1.SUR\\AppData\\Local\\Temp\\3607772",1}}
 update_file_in_forms(File, File, FileSyntaxTree) ->
     FileSyntaxTree;
 update_file_in_forms(File, ContentsFile, FileSyntaxTree) ->
@@ -96,28 +95,38 @@ do_epp_parse_file(File, FIO, IncludePath) ->
     end.
 
 get_include_path(File) ->
-    get_settings_include_paths() ++ [filename:dirname(File), filename:rootname(File) | get_include_path_from_rebar_config()].
+    Candidates = get_standard_include_paths() ++
+                get_settings_include_paths() ++
+                get_file_include_paths(File) ++
+                get_include_paths_from_rebar_config(File),
+    lists:filter(fun filelib:is_dir/1, Candidates).
+
+get_standard_include_paths() ->
+    RootDir = maps:get(root, gen_lsp_doc_server:get_config(), ""),
+    [
+        filename:join([RootDir, "_build", "default", "lib"]),
+        filename:join([RootDir, "apps"]),
+        filename:join([RootDir, "lib"])
+    ].
 
 get_settings_include_paths() ->
     SettingPaths = string:tokens(maps:get(include_paths, gen_lsp_doc_server:get_config(), ""), "|"),
     RootDir = maps:get(root, gen_lsp_doc_server:get_config(), ""),
     lists:map(fun (Path) ->
-        case filename:pathtype(Path) of
-            relative ->
-                filename:absname_join(RootDir, Path);
-            _ ->
-                Path
-        end
+        abspath(RootDir, Path)
     end, SettingPaths).
 
-get_include_path_from_rebar_config() ->
-    RebarConfig = maps:get(rebar_config, gen_lsp_doc_server:get_config(), undefined),
+get_file_include_paths(File) ->
+    [filename:dirname(File), filename:rootname(File)].
+
+get_include_paths_from_rebar_config(File) ->
+    RebarConfig = find_rebar_config(filename:dirname(File)),
     case RebarConfig of
         undefined ->
             [];
         _ ->
             Consult = file:consult(RebarConfig),
-            PathsFromRebarConfig = case Consult of
+            ErlOptsPaths = case Consult of
                 {ok, Terms} ->
                     ErlOpts = proplists:get_value(erl_opts, Terms, []),
                     IncludePaths = proplists:get_all_values(i, ErlOpts),
@@ -127,8 +136,31 @@ get_include_path_from_rebar_config() ->
                 _ ->
                     []
             end,
-            LibDir = filename:join([filename:dirname(RebarConfig), "_build", "default", "lib"]),
-            [LibDir | PathsFromRebarConfig]
+            DefaultPaths = [filename:dirname(RebarConfig), filename:join([filename:dirname(RebarConfig), "include"])],
+            ErlOptsPaths ++ DefaultPaths
+    end.
+
+find_rebar_config(Dir) ->
+    RebarConfig = filename:join(Dir, "rebar.config"),
+    case filelib:is_file(RebarConfig) of
+        true ->
+            RebarConfig;
+        _ ->
+            Elements = filename:split(Dir),
+            case Elements of
+                [_] ->
+                    undefined;
+                _ ->
+                    find_rebar_config(filename:join(lists:droplast(Elements)))
+            end
+    end.
+
+abspath(BaseDir, Path) ->
+    case filename:pathtype(Path) of
+        relative ->
+            filename:absname_join(BaseDir, Path);
+        _ ->
+            Path
     end.
 
 lint(FileSyntaxTree, File) ->
