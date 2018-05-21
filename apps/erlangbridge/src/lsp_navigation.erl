@@ -297,12 +297,7 @@ get_module_syntax_tree(Module, CurrentFileSyntaxTree, CurrentFile) ->
         CurrentModule ->
             {CurrentFileSyntaxTree, CurrentFile};
         _ ->
-            CurrentDir = filename:dirname(CurrentFile),
-            RebarConfig = maps:get(rebar_config, gen_lsp_doc_server:get_config(), undefined),
-            RootDir = case RebarConfig of
-                undefined -> CurrentDir;
-                _ -> filename:dirname(RebarConfig)
-            end,
+            RootDir = maps:get(root, gen_lsp_doc_server:get_config(), ""),
             ModuleFile = lsp_syntax:find_module_file(Module, RootDir),
             case ModuleFile of
                 undefined ->

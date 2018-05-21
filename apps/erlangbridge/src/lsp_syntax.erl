@@ -37,22 +37,20 @@ file_syntax_tree(File) ->
     end.
 
 module_syntax_tree(Module) ->
-    RebarConfig = maps:get(rebar_config, gen_lsp_doc_server:get_config(), undefined),
-    case RebarConfig of
+    File = find_module_file(Module, maps:get(root, gen_lsp_doc_server:get_config(), "")),
+    case File of
         undefined -> undefined;
-        _ ->
-            File = find_module_file(Module, filename:dirname(RebarConfig)),
-            case File of
-                undefined -> undefined;
-                _ -> file_syntax_tree(File)
-            end
+        _ -> file_syntax_tree(File)
     end.
 
 find_module_file(Module, RootDir) ->
-    Found = filelib:fold_files(RootDir, atom_to_list(Module) ++ ".erl", true, fun (Found, Acc) ->
-        [Found | Acc]
+    Files = filelib:fold_files(RootDir, atom_to_list(Module) ++ ".erl", true, fun (Found, Acc) ->
+        case filename:basename(Found) of
+            Module -> [Found | Acc];
+            _ -> Acc
+        end
     end, []),
-    case Found of
+    case Files of
         [] ->
             undefined;
         [OneFile] ->
@@ -61,7 +59,7 @@ find_module_file(Module, RootDir) ->
             BuildElements = filename:split(RootDir) ++ ["_build"],
             NoBuildFiles = lists:filter(fun (Filename) ->
                 not lists:prefix(BuildElements, filename:split(Filename))
-            end, Found),
+            end, Files),
             case NoBuildFiles of
                 [ANoBuioldFile|_] ->
                     ANoBuioldFile;
@@ -101,21 +99,15 @@ get_include_path(File) ->
 
 get_settings_include_paths() ->
     SettingPaths = string:tokens(maps:get(include_paths, gen_lsp_doc_server:get_config(), ""), "|"),
-    RebarConfig = maps:get(rebar_config, gen_lsp_doc_server:get_config(), undefined),
-    case RebarConfig of
-        undefined ->
-            SettingPaths;
-        _ ->
-            RootDir = filename:dirname(RebarConfig),
-            lists:map(fun (Path) ->
-                case filename:pathtype(Path) of
-                    relative ->
-                        filename:absname_join(RootDir, Path);
-                    _ ->
-                        Path
-                end
-            end, SettingPaths)
-    end.
+    RootDir = maps:get(root, gen_lsp_doc_server:get_config(), ""),
+    lists:map(fun (Path) ->
+        case filename:pathtype(Path) of
+            relative ->
+                filename:absname_join(RootDir, Path);
+            _ ->
+                Path
+        end
+    end, SettingPaths).
 
 get_include_path_from_rebar_config() ->
     RebarConfig = maps:get(rebar_config, gen_lsp_doc_server:get_config(), undefined),
