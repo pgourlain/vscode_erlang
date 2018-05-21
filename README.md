@@ -4,6 +4,7 @@ This extension adds support for the Erlang language to Visual Studio Code, inclu
 ## Editing support
 - Syntax highlighting
 - Automatic indentation
+- Erlang IntelliSense
 - Shows errors and warnings dynamically while you type
 - Go To Definition/Peek Definition
 - Hover help for standard functions
