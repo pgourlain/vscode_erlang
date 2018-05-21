@@ -77,7 +77,7 @@ connection.onInitialize(async (params: InitializeParams): Promise<InitializeResu
             hoverProvider: true,
             codeLensProvider :  { resolveProvider : true },
             referencesProvider : true,
-            completionProvider: { triggerCharacters: [':']}
+            completionProvider: { triggerCharacters: [":", "#", "."]}
             // executeCommandProvider: {
             //  commands : ["erlang.showReferences"]
             // },
@@ -120,13 +120,10 @@ connection.onInitialized(async () => {
 
 async function setConfigInLSP(callback) {
     var entries = new Map<string, string>();
-    var rebarConfig = findRebarConfig(await connection.workspace.getWorkspaceFolders());
-    if (rebarConfig)
-        entries.set("rebar_config", rebarConfig);
+    entries.set("root", findRoot(await connection.workspace.getWorkspaceFolders()));
     var globalConfig = await connection.workspace.getConfiguration("erlang");
-    if (globalConfig && globalConfig.includePaths.length > 0) {
+    if (globalConfig && globalConfig.includePaths.length > 0)
         entries.set("include_paths", globalConfig.includePaths.join("|"));
-    }
     erlangLspConnection.setConfig(entries, callback);
 }
 
@@ -139,14 +136,14 @@ function uriToFile(uri: string): string {
         return uri;    
 }
 
-function findRebarConfig(folders: WorkspaceFolder[]): string {
-    var rebarConfig: string = "";
+function findRoot(folders: WorkspaceFolder[]): string {
+    var root: string = "";
     folders.forEach(folder => {
-        var rebarConfigCandidate = path.join(uriToFile(folder.uri), "rebar.config");
-        if (fs.existsSync(rebarConfigCandidate))
-            rebarConfig = rebarConfigCandidate;
+        var folderPath = uriToFile(folder.uri);
+        if (!root || fs.existsSync(path.join(folderPath, "rebar.config")))
+            root = folderPath;
     });
-    return rebarConfig;
+    return root;
 }
 
 connection.onExecuteCommand((cmdParams: ExecuteCommandParams): any => {
@@ -489,8 +486,26 @@ connection.onCompletion(async (textDocumentPosition: TextDocumentPositionParams)
     var moduleFunctionMatch = text.match(/[^a-zA-Z0-0_@]([a-z][a-zA-Z0-0_@]*):([a-z][a-zA-Z0-0_@]*)?$/);
     if (moduleFunctionMatch) {
         var prefix = moduleFunctionMatch[2] ? moduleFunctionMatch[2] : '';
-        debugLog('onCompletion, module=' + moduleFunctionMatch[1] + ' function='+prefix);
+        debugLog('onCompletion, module=' + moduleFunctionMatch[1] + ' function=' + prefix);
         return await completeModuleFunction(moduleFunctionMatch[1], prefix);
+    }
+    var recordMatch = text.match(/#([a-z][a-zA-Z0-0_@]*)?$/);
+    if (recordMatch) {
+        var prefix = recordMatch[1] ? recordMatch[1] : '';
+        debugLog('onCompletion, record=' + prefix);
+        return await completeRecord(document.uri, prefix);
+    }
+    var fieldMatch = text.match(/#([a-z][a-zA-Z0-0_@]*)\.([a-z][a-zA-Z0-0_@]*)?$/);
+    if (fieldMatch) {
+        var prefix = fieldMatch[2] ? fieldMatch[2] : '';
+        debugLog('onCompletion, record=' + fieldMatch[1] + ' field=' + prefix);
+        return await completeField(document.uri, fieldMatch[1], prefix);
+    }
+    var variableMatch = text.match(/[^a-zA-Z0-0_@]([A-Z][a-zA-Z0-0_@]*)$/);
+    if (variableMatch) {
+        var prefix = variableMatch[1] ? variableMatch[1] : '';
+        debugLog('onCompletion, variable=' + prefix);
+        return await completeVariable(document.uri, textDocumentPosition.position.line, prefix);
     }
     return [];
 });
@@ -513,6 +528,36 @@ async function completeModuleFunction(moduleName: string, prefix: string): Promi
         }
     }
     return completionItems;
+}
+
+async function completeRecord(uri: string, prefix: string): Promise<CompletionItem[]> {
+    let items = await erlangLspConnection.completeRecord(uri, prefix);
+    return items.map(item => {
+        return {
+            label: item,
+            kind: CompletionItemKind.Struct
+        };
+    });
+}
+
+async function completeField(uri: string, record: string, prefix: string): Promise<CompletionItem[]> {
+    let items = await erlangLspConnection.completeField(uri, record, prefix);
+    return items.map(item => {
+        return {
+            label: item,
+            kind: CompletionItemKind.Field
+        };
+    });
+}
+
+async function completeVariable(uri: string, line: number, prefix: string): Promise<CompletionItem[]> {
+    let items = await erlangLspConnection.completeVariable(uri, line, prefix);
+    return items.map(item => {
+        return {
+            label: item,
+            kind: CompletionItemKind.Variable
+        };
+    });
 }
 
 function debugLog(msg : string) : void {

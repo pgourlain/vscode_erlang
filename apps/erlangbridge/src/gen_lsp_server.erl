@@ -61,6 +61,18 @@ handle_info({tcp, Socket, RawData}, State) ->
             lsp_completion:module_function(list_to_atom(Module), "");
         {complete_module_function, Module, Prefix} ->
             lsp_completion:module_function(list_to_atom(Module), Prefix);
+        {complete_record, Uri} ->
+            lsp_completion:record(file_uri_to_file(Uri), "");
+        {complete_record, Uri, Prefix} ->
+            lsp_completion:record(file_uri_to_file(Uri), Prefix);
+        {complete_field, Uri, Record} ->
+            lsp_completion:field(file_uri_to_file(Uri), list_to_atom(Record), "");
+        {complete_field, Uri, Record, Prefix} ->
+            lsp_completion:field(file_uri_to_file(Uri), list_to_atom(Record), Prefix);
+        {complete_variable, Uri, Line} ->
+            lsp_completion:variable(file_uri_to_file(Uri), list_to_integer(Line), "");
+        {complete_variable, Uri, Line, Prefix} ->
+            lsp_completion:variable(file_uri_to_file(Uri), list_to_integer(Line), Prefix);
         {format_document, FileName} ->
             format_file_uri(FileName);   
         {document_closed, FileName} ->

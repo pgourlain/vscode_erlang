@@ -1,6 +1,6 @@
 -module(lsp_navigation).
 
--export([goto_definition/3, hover_info/3, references_info/3, codelens_info/1]).
+-export([goto_definition/3, hover_info/3, references_info/3, codelens_info/1, find_function_with_line/2, find_record/2]).
 
 goto_definition(File, Line, Column) ->
     try internal_goto_definition(File, Line, Column) of
@@ -42,7 +42,7 @@ internal_hover_info(File, Line, Column) ->
             What = element_at_position(Module, FileSyntaxTree, Line, Column),
             case What of
                 {function_use, FunctionModule, Function, Arity} ->
-                    SyntaxTreeFile = get_module_syntax_tree(FunctionModule, FileSyntaxTree, File),                    
+                    SyntaxTreeFile = lsp_syntax:module_syntax_tree(FunctionModule),                    
                     case SyntaxTreeFile of
                         {SyntaxTree, _File} ->
                             case find_function(SyntaxTree, Function, Arity) of
@@ -291,35 +291,14 @@ find_record_field_use(Record, [{record_field, _, {atom, {_, StartColumn}, Field}
         true -> find_record_field_use(Record, Tail, Column)
     end.
 
-get_module_syntax_tree(Module, CurrentFileSyntaxTree, CurrentFile) ->
-    CurrentModule = list_to_atom(filename:basename(CurrentFile)),
-    case Module of
-        CurrentModule ->
-            {CurrentFileSyntaxTree, CurrentFile};
-        _ ->
-            CurrentDir = filename:dirname(CurrentFile),
-            RebarConfig = maps:get(rebar_config, gen_lsp_doc_server:get_config(), undefined),
-            RootDir = case RebarConfig of
-                undefined -> CurrentDir;
-                _ -> filename:dirname(RebarConfig)
-            end,
-            ModuleFile = lsp_syntax:find_module_file(Module, RootDir),
-            case ModuleFile of
-                undefined ->
-                    undefined;
-                _ ->
-                    {lsp_syntax:file_syntax_tree(ModuleFile), ModuleFile}
-            end
-    end.
-
-find_element({module_use, Module}, CurrentFileSyntaxTree, CurrentFile) ->
-    {SyntaxTree, File} = get_module_syntax_tree(Module, CurrentFileSyntaxTree, CurrentFile),
+find_element({module_use, Module}, _CurrentFileSyntaxTree, _CurrentFile) ->
+    {SyntaxTree, File} = lsp_syntax:module_syntax_tree(Module),
     case find_module(SyntaxTree, Module) of
         {attribute, {Line, Column}, _} -> {File, Line, Column};
         _ -> undefined
     end;
-find_element({function_use, Module, Function, Arity}, CurrentFileSyntaxTree, CurrentFile) ->
-    {SyntaxTree, File} = get_module_syntax_tree(Module, CurrentFileSyntaxTree, CurrentFile),
+find_element({function_use, Module, Function, Arity}, _CurrentFileSyntaxTree, _CurrentFile) ->
+    {SyntaxTree, File} = lsp_syntax:module_syntax_tree(Module),
     case find_function(SyntaxTree, Function, Arity) of
         {function, {Line, Column}, _Function, _Arity, _Clauses} -> {File, Line, Column};
         _ -> undefined
@@ -335,19 +314,7 @@ find_element({field, Record, Field}, CurrentFileSyntaxTree, _CurrentFile) ->
         undefined -> undefined
     end;
 find_element({variable, Variable, Line, Column}, CurrentFileSyntaxTree, CurrentFile) ->
-    AllFunctionsInReverseOrder = lists:foldl(fun (TopLevelSyntaxTree, Acc) ->
-        erl_syntax_lib:fold(fun (SyntaxTree, SingleAcc) ->
-            case SyntaxTree of
-                {function, {_, _}, _, _, _} ->
-                    [SyntaxTree | SingleAcc];
-                _ ->
-                    SingleAcc
-            end
-        end, Acc, TopLevelSyntaxTree)
-    end, [], CurrentFileSyntaxTree),
-    [FunctionWithVariable | _] = lists:dropwhile(fun ({function, {FunctionStartLine, _}, _, _, _}) ->
-         FunctionStartLine > Line
-    end, AllFunctionsInReverseOrder),
+    FunctionWithVariable = find_function_with_line(CurrentFileSyntaxTree, Line),
     FunClausesShadowingVariable = lists:sort(erl_syntax_lib:fold(fun (SyntaxTree, SingleAcc) ->
         case SyntaxTree of
             {'fun', {_, _}, {clauses, Clauses}} ->
@@ -375,6 +342,25 @@ find_element({variable, Variable, Line, Column}, CurrentFileSyntaxTree, CurrentF
         _ ->
             [{L, C} | _] = find_variable_occurrences(Variable, lists:last(FunClausesShadowingVariable)),
             {CurrentFile, L, C}
+    end.
+
+find_function_with_line(FileSyntaxTree, Line) ->
+    AllFunctionsInReverseOrder = lists:foldl(fun (TopLevelSyntaxTree, Acc) ->
+        erl_syntax_lib:fold(fun (SyntaxTree, SingleAcc) ->
+            case SyntaxTree of
+                {function, {_, _}, _, _, _} ->
+                    [SyntaxTree | SingleAcc];
+                _ ->
+                    SingleAcc
+            end
+        end, Acc, TopLevelSyntaxTree)
+    end, [], FileSyntaxTree),
+    FunctionWithLineList = lists:dropwhile(fun ({function, {FunctionStartLine, _}, _, _, _}) ->
+         FunctionStartLine > Line
+    end, AllFunctionsInReverseOrder),
+    case FunctionWithLineList of
+        [FunctionWithLine | _] -> FunctionWithLine;
+        _ -> undefined
     end.
 
 find_variable_occurrences(Variable, Tree) ->
