@@ -47,8 +47,12 @@ internal_hover_info(File, Line, Column) ->
                         {SyntaxTree, _File} ->
                             case find_function(SyntaxTree, Function, Arity) of
                                 {function, _, _, _, Clauses} ->
-                                    DocAsString = edoc:layout(edoc:get_doc(_File, [{hidden, true}, {private, true}]), 
-                                        [{layout, hover_doc_layout}, {filter, [{function, {Function, Arity}}]} ]),                            
+                                    DocAsString = try edoc:layout(edoc:get_doc(_File, [{hidden, true}, {private, true}]), 
+                                        [{layout, hover_doc_layout}, {filter, [{function, {Function, Arity}}]} ]) of
+                                            _Any -> _Any
+                                        catch
+                                            _Err:Reason -> lists:flatten(io_lib:format("Unable to parse comment of '~p/~p'  \n  \n ~p", [Function, Arity, Reason]))
+                                        end,
                                     %error_logger:info_msg("Documentation : ~p~n", [DocAsString]),                                
                                                                         
                                     FunctionHeaders = join_strings(lists:map(fun ({clause, _Location, Args, _Guard, _Body}) ->
