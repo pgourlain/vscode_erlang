@@ -26,48 +26,25 @@ import * as path from 'path';
 import * as fs from 'fs'; 
 import { workspace, TextEdit } from 'vscode';
 
-class ChannelWrapper implements IErlangShellOutput {
-    
-    show(): void {
-    }
-    appendLine(value: string): void {
-        debugLog(value);
-    }
-}
-
-class DocumentValidatedEvent extends EventEmitter {
-
-    public Fire() {
-        this.emit("documentValidated");
-    }
-}
-
 // Create a connection for the server. The connection uses Node's IPC as a transport
 let connection = createConnection(ProposedFeatures.all);
 // erlang shell to start LSP http server
-let erlangLsp = new ErlangShellLSP(new ChannelWrapper())
+let erlangLsp = null;//new ErlangShellLSP(new ChannelWrapper())
 //local http server to send/receive command to erlang LSP
-let erlangLspConnection = new ErlangLspConnection(new ChannelWrapper());
+let erlangLspConnection = null;//new ErlangLspConnection(new ChannelWrapper());
 
 // Create a simple text document manager. The text document manager
 // supports full document sync only
 let documents: TextDocuments = new TextDocuments();
 
 let lspServerConfigured = false;
-let documentValidtedEvent = new DocumentValidatedEvent();
+let documentValidtedEvent = null;//new DocumentValidatedEvent();
 let module2helpPage: Map<string, string[]> = new Map();
 
 //trace for debugging 
 let traceEnabled = false;
 
 connection.onInitialize(async (params: InitializeParams): Promise<InitializeResult> => {
-
-    //connection.console.log("onInitialize.");
-    await erlangLspConnection.Start(traceEnabled).then(port => {
-        return erlangLsp.Start("", erlangBridgePath+"/..", port, "src", "");
-    }, (reason) => {
-        connection.console.log(`LspConnection Start failed : ${reason}`);       
-    });
 
     return <InitializeResult>{
         capabilities: {
@@ -89,83 +66,13 @@ connection.onInitialize(async (params: InitializeParams): Promise<InitializeResu
     }
 });
 
-connection.onInitialized(async () => {
-    debugLog("onInitialized");
-    var globalConfig = await connection.workspace.getConfiguration("erlang");
-    if (globalConfig) {
-        let erlangConfig = globalConfig;
-        if (erlangConfig && erlangConfig.verbose) {
-            traceEnabled = true;
-        }
-    }
-
-    connection.onDidChangeWatchedFiles( event => {
-        debugLog('onDidChangeWatchedFiles '+JSON.stringify(event));
-    });
-
-    var whenConnected = async function () {
-        if (erlangLspConnection.isConnected) {
-            setConfigInLSP(function () {
-                lspServerConfigured = true;                
-            });
-        }
-        else {
-            setTimeout(function () {
-                whenConnected();
-            }, 100);
-        }
-    };
-    whenConnected();    
-});
-
-async function setConfigInLSP(callback) {
-    var entries = new Map<string, string>();
-//    entries.set("root", findRoot(await connection.workspace.getWorkspaceFolders()));
-    var globalConfig = await connection.workspace.getConfiguration("erlang");
-    if (globalConfig && globalConfig.includePaths.length > 0)
-        entries.set("include_paths", globalConfig.includePaths.join("|"));
-    erlangLspConnection.setConfig(entries, callback);
-}
-
-connection.onShutdown(() => {
-    debugLog("connection.onShutDown");
-    erlangLspConnection.Quit();
-});
-
-connection.onExit(() => {
-    debugLog("connection.onExit");
-    erlangLspConnection.Quit();
-});
-
 // The global settings, used when the `workspace/configuration` request is not supported by the client.
 // Please note that this is not the case when using this server with the client provided in this example
 // but could happen with other clients.
 const defaultSettings: ErlangSettings = { erlangPath: "", rebarBuildArgs:[],  rebarPath: "", includePaths: [], linting: true, codeLensEnabled: false, verbose: false };
 let globalSettings: ErlangSettings = defaultSettings;
 
-connection.onDidChangeConfiguration(async change => {
-    debugLog("connection.onDidChangeConfiguration");
-    setConfigInLSP(function () {
-        // Revalidate all open text documents
-        documents.all().forEach(document => {
-            let diagnostics: Diagnostic[] = [];
-            connection.sendDiagnostics({ uri: document.uri, diagnostics });
-            validateDocument(document);
-        });
-    });
-});
-
 function waitForServerConfigured(fun) {
-    var whenReady = function () {
-        if (lspServerConfigured)
-            fun();
-        else {
-            setTimeout(function () {
-                whenReady();
-            }, 100);
-        }
-    };
-    whenReady();    
 }
 
 async function isAutoSaveEnabled() {
@@ -173,85 +80,6 @@ async function isAutoSaveEnabled() {
     return filesConfig.autoSave === 'afterDelay';
 }
 
-documents.onDidOpen(async event => {
-    debugLog("onDidOpen: " + event.document.uri);
-    if (await isAutoSaveEnabled()) {
-        waitForServerConfigured(function () {
-            validateDocument(event.document);           
-        });
-    }
-});
-
-documents.onDidSave(async event => {
-    debugLog("onDidSave: " + event.document.uri);
-    if (await isAutoSaveEnabled()) {
-        waitForServerConfigured(function () {
-            validateDocument(event.document);           
-        });
-    }
-});
-
-documents.onDidClose(event => {
-    debugLog("onDidSave: " + event.document.uri);
-    let diagnostics: Diagnostic[] = [];
-    connection.sendDiagnostics({ uri: event.document.uri, diagnostics });
-    erlangLspConnection.onDocumentClosed(event.document.uri);
-});
-
-// The content of a text document has changed. This event is emitted
-// when the text document first opened or when its content has changed.
-documents.onDidChangeContent(async event => {
-    if (!await isAutoSaveEnabled()) {
-        waitForServerConfigured(function () {
-            validateDocument(event.document, event.document.version === 1);
-        });
-    }
-});
-
-function saveContentsToTmpFile(document: TextDocument): string {
-    var randomName:string = Math.floor(Math.random() * 10000000).toString();
-    var tmpFileName = path.join(os.tmpdir(), randomName);
-    fs.writeFileSync(tmpFileName, document.getText());
-    return tmpFileName;
-}
-
-async function validateDocument(document: TextDocument, saved: boolean = true): Promise<void> {
-    var erlangConfig = await connection.workspace.getConfiguration("erlang");
-    var linting = erlangConfig && erlangConfig.linting;
-    if (document.uri.endsWith(".erl")) {
-        if (saved) {
-            erlangLspConnection.parseSourceFile(document.uri, "", () => {
-                if (linting)
-                    erlangLspConnection.validateParsedSourceFile(document.uri, 
-                        parsingResult => onValidatedDocument(parsingResult, document));    
-            });
-        }
-        else {
-            var tmpFileName = saveContentsToTmpFile(document);
-            erlangLspConnection.parseSourceFile(document.uri, tmpFileName, () => {
-                fs.unlinkSync(tmpFileName);
-                if (linting)
-                    erlangLspConnection.validateParsedSourceFile(document.uri, 
-                        parsingResult => onValidatedDocument(parsingResult, document));    
-            });
-        }
-    }
-    else if (linting && (document.uri.endsWith(".src") || document.uri.endsWith(".config"))) {
-        if (saved) {
-            erlangLspConnection.validateConfigFile(document.uri, "",
-                parsingResult => onValidatedDocument(parsingResult, document));        
-        }
-        else {
-            var tmpFileName = saveContentsToTmpFile(document);
-            erlangLspConnection.validateConfigFile(document.uri, tmpFileName, parsingResult => {
-                fs.unlinkSync(tmpFileName);
-                onValidatedDocument(parsingResult, document);
-            });
-        }
-    }
-    // fire that document is validated
-    documentValidtedEvent.Fire();
-}
 
 connection.onDocumentFormatting(async (params : DocumentFormattingParams) => {
     erlangLspConnection.FormatDocument(params.textDocument.uri);
@@ -530,41 +358,3 @@ function debugLog(msg : string) : void {
         connection.console.log(msg);
     }
 }
-
-function onValidatedDocument(parsingResult : ParsingResult, textDocument : TextDocument) : void {
-            debugLog("onValidatedDocument: " + textDocument.uri);
-    if (parsingResult.parse_result) {   
-        let diagnostics: Diagnostic[] = [];
-        if (parsingResult.errors_warnings) {
-            for (var i = 0; i < parsingResult.errors_warnings.length; i++) {
-                let error = parsingResult.errors_warnings[i];
-                var severity:DiagnosticSeverity = DiagnosticSeverity.Error;
-                switch(error.type) {
-                    case "warning" :
-                        severity = DiagnosticSeverity.Warning;
-                    break;
-                    case "info" :
-                        severity = DiagnosticSeverity.Information;
-                    break;
-                    default :
-                        severity = DiagnosticSeverity.Error;
-                    break;
-                }
-                diagnostics.push({
-                    severity: severity,                 
-                    range: Range.create(error.info.line-1, error.info.character-1, error.info.line-1, 255),
-                    message: error.info.message,
-                    source: 'erl'
-                });         
-            }
-        }
-        connection.sendDiagnostics({ uri: textDocument.uri, diagnostics });
-    }
-}
-
-// Make the text document manager listen on the connection
-// for open, change and close text document events
-documents.listen(connection);
-
-// Listen on the connection
-connection.listen();

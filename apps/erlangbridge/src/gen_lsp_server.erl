@@ -56,14 +56,13 @@ do_contents(Socket, #{id := Id} = Input) ->
     Handler = list_to_atom(binary_to_list(binary:replace(Id, <<"/">>, <<"_">>))),
     case lists:keyfind(Handler, 1, lsp_handlers:module_info(exports)) of
         false ->
-            error_logger:error_msg("Notification not handled: ~p", [Id]),
+            error_logger:error_msg("Notification not handled: ~p ~p", [Id, Input]),
             ok;
         {Function, 2} ->
             apply(lsp_handlers, Function, [Socket, maps:get(result, Input, undefined)])
     end.
 
-handle_info({tcp, Socket, Contents}, State) ->
-    inet:setopts(Socket, [{active, once}]),
+handle_tcp_data(Socket, Contents, State) ->
     StateWithContents = State#state{contents = <<(State#state.contents)/binary, Contents/binary>>},
     StateWithLength = case StateWithContents#state.content_length of
         undefined ->
@@ -85,7 +84,7 @@ handle_info({tcp, Socket, Contents}, State) ->
         _ ->
             StateWithContents
     end,
-    {noreply, case StateWithLength#state.content_length of
+    case StateWithLength#state.content_length of
         undefined ->
             StateWithLength;
         ContentLength when ContentLength > byte_size(StateWithLength#state.contents) ->
@@ -93,8 +92,20 @@ handle_info({tcp, Socket, Contents}, State) ->
         ContentLength when ContentLength =:= byte_size(StateWithLength#state.contents) ->
             {ok, Input, _} = vscode_jsone_decode:decode(StateWithLength#state.contents, [{keys, atom}]),
             do_contents(Socket, Input),
-            StateWithLength#state{contents = <<"">>, content_length = undefined}
-    end};
+            StateWithLength#state{contents = <<"">>, content_length = undefined};
+        ContentLength when ContentLength < byte_size(StateWithLength#state.contents) ->
+            ShorterContents = binary:part(StateWithLength#state.contents, 0, ContentLength),
+            {ok, Input, _} = vscode_jsone_decode:decode(ShorterContents, [{keys, atom}]),
+            do_contents(Socket, Input),
+            handle_tcp_data(
+                Socket,
+                binary:part(StateWithLength#state.contents, ContentLength, byte_size(StateWithLength#state.contents) - ContentLength),
+                StateWithLength#state{contents = <<"">>, content_length = undefined})
+    end.
+
+handle_info({tcp, Socket, Contents}, State) ->
+    inet:setopts(Socket, [{active, once}]),
+    {noreply, handle_tcp_data(Socket, Contents, State)};
 handle_info(timeout, #state{socket = Socket} = State) ->
     {ok, _} = gen_tcp:accept(Socket), 
     {noreply, State};
