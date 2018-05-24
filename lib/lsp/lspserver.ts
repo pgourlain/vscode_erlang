@@ -48,38 +48,14 @@ connection.onInitialize(async (params: InitializeParams): Promise<InitializeResu
 
     return <InitializeResult>{
         capabilities: {
-            textDocumentSync: documents.syncKind,
             documentFormattingProvider : true,
-            definitionProvider: true,
             hoverProvider: true,
             codeLensProvider :  { resolveProvider : true },
             referencesProvider : true,
             completionProvider: { triggerCharacters: [":", "#", "."]}
-            // executeCommandProvider: {
-            //  commands : ["erlang.showReferences"]
-            // },
-            // completionProvider : {
-            //  resolveProvider: true,
-            //  triggerCharacters: [ ':' ]
-            // }
         }
     }
 });
-
-// The global settings, used when the `workspace/configuration` request is not supported by the client.
-// Please note that this is not the case when using this server with the client provided in this example
-// but could happen with other clients.
-const defaultSettings: ErlangSettings = { erlangPath: "", rebarBuildArgs:[],  rebarPath: "", includePaths: [], linting: true, codeLensEnabled: false, verbose: false };
-let globalSettings: ErlangSettings = defaultSettings;
-
-function waitForServerConfigured(fun) {
-}
-
-async function isAutoSaveEnabled() {
-    var filesConfig = await connection.workspace.getConfiguration("files");
-    return filesConfig.autoSave === 'afterDelay';
-}
-
 
 connection.onDocumentFormatting(async (params : DocumentFormattingParams) => {
     erlangLspConnection.FormatDocument(params.textDocument.uri);
