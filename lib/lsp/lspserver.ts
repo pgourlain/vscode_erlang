@@ -50,7 +50,6 @@ connection.onInitialize(async (params: InitializeParams): Promise<InitializeResu
         capabilities: {
             hoverProvider: true,
             codeLensProvider :  { resolveProvider : true },
-            referencesProvider : true,
             completionProvider: { triggerCharacters: [":", "#", "."]}
         }
     }
@@ -167,19 +166,6 @@ connection.onHover(async (textDocumentPosition: TextDocumentPositionParams): Pro
             var htmlLines = await getModuleHelpPage(res.moduleName);
             return {contents: markdown(extractHelpForFunction(res.functionName, htmlLines))};
         }
-    }
-    return null;
-});
-
-connection.onReferences(async (reference : ReferenceParams) : Promise<Location[]> => {
-    var uri = reference.textDocument.uri;
-    let res = await erlangLspConnection.getReferencesInfo(uri, reference.position.line, reference.position.character);
-    if (res) {
-        var Result = new Array<Location>();
-        res.forEach(ref => {
-            Result.push(Location.create(ref.uri, Range.create(ref.line, ref.character, ref.line, ref.character)));
-        });
-        return Result;
     }
     return null;
 });
