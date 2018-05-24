@@ -48,7 +48,6 @@ connection.onInitialize(async (params: InitializeParams): Promise<InitializeResu
 
     return <InitializeResult>{
         capabilities: {
-            hoverProvider: true,
             codeLensProvider :  { resolveProvider : true },
             completionProvider: { triggerCharacters: [":", "#", "."]}
         }

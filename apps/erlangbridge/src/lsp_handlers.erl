@@ -2,7 +2,7 @@
 
 -export([initialize/2, initialized/2, shutdown/2, exit/2, configuration/2, workspace_didChangeConfiguration/2,
     textDocument_didOpen/2, textDocument_didClose/2, textDocument_didSave/2, textDocument_didChange/2,
-    textDocument_definition/2, textDocument_references/2, textDocument_formatting/2]).
+    textDocument_definition/2, textDocument_references/2, textDocument_hover/2, textDocument_formatting/2]).
 
 initialize(_Socket, Params) ->
     gen_lsp_doc_server:set_config(#{
@@ -15,7 +15,8 @@ initialize(_Socket, Params) ->
         textDocumentSync => 1, % Full
         definitionProvider => true,
         documentFormattingProvider => true,
-        referencesProvider => true
+        referencesProvider => true,
+        hoverProvider => true
     }}.
 
 initialized(Socket, _Params) ->
@@ -117,6 +118,18 @@ textDocument_references(Socket, Params) ->
                     }
                 }
             end, References);
+        _ ->
+            #{}
+    end.
+
+textDocument_hover(_Socket, Params) ->
+    Uri = mapmapget(textDocument, uri, Params),
+    Line = mapmapget(position, line, Params),
+    Character = mapmapget(position, character, Params),
+    Result = lsp_navigation:hover_info(file_uri_to_file(Uri), Line + 1, Character + 1),
+    case Result of
+        #{text := Text} = _ ->
+            #{contents => Text};
         _ ->
             #{}
     end.
