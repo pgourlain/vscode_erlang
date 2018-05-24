@@ -48,18 +48,12 @@ connection.onInitialize(async (params: InitializeParams): Promise<InitializeResu
 
     return <InitializeResult>{
         capabilities: {
-            documentFormattingProvider : true,
             hoverProvider: true,
             codeLensProvider :  { resolveProvider : true },
             referencesProvider : true,
             completionProvider: { triggerCharacters: [":", "#", "."]}
         }
     }
-});
-
-connection.onDocumentFormatting(async (params : DocumentFormattingParams) => {
-    erlangLspConnection.FormatDocument(params.textDocument.uri);
-    return [];
 });
 
 function markdown(str: string): MarkupContent {
