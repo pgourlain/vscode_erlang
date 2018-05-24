@@ -16,6 +16,7 @@ start(_Args) ->
 
 
 init_lsp() ->
+    error_logger:error_msg("application start!!!"),     
     case  compile_needed_modules() of
     ok ->
         case application:start(vscode_lsp, permanent) of
@@ -33,9 +34,9 @@ init_lsp() ->
 compile_needed_modules() ->
     CompileOptions = [verbose, binary, report],
     do_compile(["src/vscode_lsp_app", "src/gen_lsp_server", 
-        "src/gen_lsp_sup", "src/gen_lsp_doc_sup","src/gen_lsp_doc_server",
+        "src/gen_lsp_sup", "src/gen_lsp_doc_sup","src/gen_lsp_doc_server", "src/lsp_handlers",
         "src/vscode_lsp_app_sup", "src/lsp_navigation", "src/lsp_syntax", "src/lsp_completion",
-        "src/gen_connection", "src/vscode_jsone","src/hover_doc_layout"], CompileOptions)
+        "src/gen_connection", "src/vscode_jsone","src/vscode_jsone_decode","src/hover_doc_layout"], CompileOptions)
     .
 
 do_compile([H|T], CompileOptions) ->

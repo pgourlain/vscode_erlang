@@ -120,37 +120,12 @@ connection.onInitialized(async () => {
 
 async function setConfigInLSP(callback) {
     var entries = new Map<string, string>();
-    entries.set("root", findRoot(await connection.workspace.getWorkspaceFolders()));
+//    entries.set("root", findRoot(await connection.workspace.getWorkspaceFolders()));
     var globalConfig = await connection.workspace.getConfiguration("erlang");
     if (globalConfig && globalConfig.includePaths.length > 0)
         entries.set("include_paths", globalConfig.includePaths.join("|"));
     erlangLspConnection.setConfig(entries, callback);
 }
-
-function uriToFile(uri: string): string {
-    if (process.platform == 'win32')
-        uri = uri.replace(/file:\/\/\/([A-Za-z])%3A\//, 'file://$1:/');
-    if (uri.startsWith("file://"))
-        return uri.substr(7);
-    else
-        return uri;    
-}
-
-function findRoot(folders: WorkspaceFolder[]): string {
-    var root: string = "";
-    folders.forEach(folder => {
-        var folderPath = uriToFile(folder.uri);
-        if (!root || fs.existsSync(path.join(folderPath, "rebar.config")))
-            root = folderPath;
-    });
-    return root;
-}
-
-connection.onExecuteCommand((cmdParams: ExecuteCommandParams): any => {
-    debugLog(`onExecuteCommand : ${JSON.stringify(cmdParams)}`);
-    //connection.sendRequest(CommandReques)
-    return null;
-});
 
 connection.onShutdown(() => {
     debugLog("connection.onShutDown");
@@ -281,16 +256,6 @@ async function validateDocument(document: TextDocument, saved: boolean = true): 
 connection.onDocumentFormatting(async (params : DocumentFormattingParams) => {
     erlangLspConnection.FormatDocument(params.textDocument.uri);
     return [];
-});
-
-connection.onDefinition(async (textDocumentPosition: TextDocumentPositionParams):Promise<Definition> => {
-    let fileName = textDocumentPosition.textDocument.uri;
-    let res = await erlangLspConnection.getDefinitionLocation(fileName, textDocumentPosition.position.line, 
-        textDocumentPosition.position.character);
-    if (res) {
-        return Location.create(res.uri, Range.create(res.line, res.character, res.line, res.character));
-    }
-    return null;
 });
 
 function markdown(str: string): MarkupContent {

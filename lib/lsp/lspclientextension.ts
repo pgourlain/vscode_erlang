@@ -1,14 +1,18 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import {
-	workspace as Workspace, window as Window, ExtensionContext, TextDocument, OutputChannel, WorkspaceFolder,
-	Uri, Disposable, WorkspaceConfiguration, ProviderResult, CodeLens, FileSystemWatcher, workspace
+    workspace as Workspace, window as Window, ExtensionContext, TextDocument, OutputChannel, WorkspaceFolder,
+    Uri, Disposable, WorkspaceConfiguration, ProviderResult, CodeLens, FileSystemWatcher, workspace
 } from 'vscode';
 
 import {
-	LanguageClient, LanguageClientOptions, TransportKind, ConfigurationParams,
-	CancellationToken, DidChangeConfigurationNotification, ServerOptions, Middleware, DidChangeWorkspaceFoldersNotification, DidChangeWatchedFilesNotification, FileChangeType
+    LanguageClient, LanguageClientOptions, TransportKind, ConfigurationParams, StreamInfo,
+    CancellationToken, DidChangeConfigurationNotification, ServerOptions, Middleware, DidChangeWorkspaceFoldersNotification, DidChangeWatchedFilesNotification, FileChangeType
 } from 'vscode-languageclient';
+
+import { ErlangShellLSP } from './ErlangShellLSP';
+import { erlangBridgePath } from '../erlangConnection';
+import * as Net from 'net';
 
 import * as lspcodelens from './lspcodelens';
 
@@ -40,161 +44,261 @@ namespace Configuration {
     let configurationListener: Disposable;
     let fileSystemWatcher: FileSystemWatcher;
 
-	// Convert VS Code specific settings to a format acceptable by the server. Since
-	// both client and server do use JSON the conversion is trivial. 
-	export function computeConfiguration(params: ConfigurationParams, _token: CancellationToken, _next: Function): any[] {
+    // Convert VS Code specific settings to a format acceptable by the server. Since
+    // both client and server do use JSON the conversion is trivial. 
+      export function computeConfiguration(params: ConfigurationParams, _token: CancellationToken, _next: Function): any[] {
 
-		//lspOutputChannel.appendLine("computeConfiguration :"+ JSON.stringify(params));
+        //lspOutputChannel.appendLine("computeConfiguration :"+ JSON.stringify(params));
 
-		if (!params.items) {
-			return null;
-		}
-		let result: (ErlangSettings | null)[] = [];
-		for (let item of params.items) {
-			// The server asks the client for configuration settings without a section
-			// If a section is present we return null to indicate that the configuration
-			// is not supported.
-			if (item.section) {
-				let erlSectionConfig = JSON.parse(JSON.stringify(Workspace.getConfiguration(item.section)));
-				result.push(erlSectionConfig);
-				result.push(null);
-				continue;
-			}
-			let config: WorkspaceConfiguration;
-			if (item.scopeUri) {
-				config = Workspace.getConfiguration('erlang', client.protocol2CodeConverter.asUri(item.scopeUri));
-			} else {
-				config = Workspace.getConfiguration('erlang');
-			}
+        if (!params.items) {
+            return null;
+        }
+        let result: (ErlangSettings | null)[] = [];
+        for (let item of params.items) {
+            // The server asks the client for configuration settings without a section
+            // If a section is present we return null to indicate that the configuration
+            // is not supported.
+            if (item.section) {
+                let erlSectionConfig = JSON.parse(JSON.stringify(Workspace.getConfiguration(item.section)));
+                result.push(erlSectionConfig);
+                result.push(null);
+                continue;
+            }
+            let config: WorkspaceConfiguration;
+            if (item.scopeUri) {
+                config = Workspace.getConfiguration('erlang', client.protocol2CodeConverter.asUri(item.scopeUri));
+            } else {
+                config = Workspace.getConfiguration('erlang');
+            }
 
-			let erlConfig = JSON.parse(JSON.stringify(config));
-			result.push(erlConfig);
-		}
-		return result;
-	}
+            let erlConfig = JSON.parse(JSON.stringify(config));
+            result.push(erlConfig);
+        }
+        return result;
+    }
 
-	export function initialize() {
-		//force to read configuration
-		lspcodelens.configurationChanged();
-		// VS Code currently doesn't sent fine grained configuration changes. So we 
-		// listen to any change. However this will change in the near future.
-		configurationListener = Workspace.onDidChangeConfiguration(() => {
-			lspcodelens.configurationChanged();
-			client.sendNotification(DidChangeConfigurationNotification.type, { settings: null });
+    export function initialize() {
+        //force to read configuration
+        lspcodelens.configurationChanged();
+        // VS Code currently doesn't sent fine grained configuration changes. So we 
+        // listen to any change. However this will change in the near future.
+        configurationListener = Workspace.onDidChangeConfiguration(() => {
+            lspcodelens.configurationChanged();
+            client.sendNotification(DidChangeConfigurationNotification.type, { settings: null });
         });
         fileSystemWatcher = workspace.createFileSystemWatcher('**/*.erl');
         fileSystemWatcher.onDidCreate(uri => {
             client.sendNotification(DidChangeWatchedFilesNotification.type,
                 {changes: [{uri: uri.fsPath, type: FileChangeType.Created}]});
         })
-	}
+    }
 
-	export function dispose() {
-		if (configurationListener) {
-			configurationListener.dispose();
-		}
-	}
+    export function dispose() {
+        if (configurationListener) {
+            configurationListener.dispose();
+        }
+    }
 }
 
 let _sortedWorkspaceFolders: string[];
 function sortedWorkspaceFolders(): string[] {
-	if (_sortedWorkspaceFolders === void 0) {
-		_sortedWorkspaceFolders = Workspace.workspaceFolders.map(folder => {
-			let result = folder.uri.toString();
-			if (result.charAt(result.length - 1) !== '/') {
-				result = result + '/';
-			}
-			return result;
-		}).sort(
-			(a, b) => {
-				return a.length - b.length;
-			}
-			);
-	}
-	return _sortedWorkspaceFolders;
+    if (_sortedWorkspaceFolders === void 0) {
+        _sortedWorkspaceFolders = Workspace.workspaceFolders.map(folder => {
+            let result = folder.uri.toString();
+            if (result.charAt(result.length - 1) !== '/') {
+                result = result + '/';
+            }
+            return result;
+        }).sort(
+            (a, b) => {
+                return a.length - b.length;
+            }
+            );
+    }
+    return _sortedWorkspaceFolders;
 }
 Workspace.onDidChangeWorkspaceFolders(() => _sortedWorkspaceFolders = undefined);
 
 function getOuterMostWorkspaceFolder(folder: WorkspaceFolder): WorkspaceFolder {
-	let sorted = sortedWorkspaceFolders();
-	for (let element of sorted) {
-		let uri = folder.uri.toString();
-		if (uri.charAt(uri.length - 1) !== '/') {
-			uri = uri + '/';
-		}
-		if (uri.startsWith(element)) {
-			return Workspace.getWorkspaceFolder(Uri.parse(element));
-		}
-	}
-	return folder;
+    let sorted = sortedWorkspaceFolders();
+    for (let element of sorted) {
+        let uri = folder.uri.toString();
+        if (uri.charAt(uri.length - 1) !== '/') {
+            uri = uri + '/';
+        }
+        if (uri.startsWith(element)) {
+            return Workspace.getWorkspaceFolder(Uri.parse(element));
+        }
+    }
+    return folder;
 }
 
+
+
+var MAX_TRIES = 10;
+var WAIT_BETWEEN_TRIES_MS = 250;
+
+/**
+ * Tries to connect to a given socket location.
+ * Time between retires grows in relation to attempts (attempt * RETRY_TIMER).
+ *
+ *  waitForSocket({ port: 2828, maxTries: 10 }, function(err, socket) {
+ *  });
+ *
+ * Note- there is a third argument used to recursion that should
+ * never be used publicly.
+ *
+ * Options:
+ *  - (Number) port: to connect to.
+ *  - (String) host: to connect to.
+ *  - (Number) tries: number of times to attempt the connect.
+ *
+ * @param {Object} options for connection.
+ * @param {Function} callback [err, socket].
+ */
+function waitForSocket(options:any, callback:any, _tries:any) {
+  if (!options.port)
+    throw new Error('.port is a required option');
+
+  var maxTries = options.tries || MAX_TRIES;
+  var host = options.host || 'localhost';
+  var port = options.port;
+
+
+  _tries = _tries || 0;
+  if (_tries >= maxTries)
+    return callback(new Error('cannot open socket'));
+
+  function handleError() {
+    // retry connection
+    setTimeout(
+      waitForSocket,
+      // wait at least WAIT_BETWEEN_TRIES_MS or a multiplier
+      // of the attempts.
+      (WAIT_BETWEEN_TRIES_MS * _tries) || WAIT_BETWEEN_TRIES_MS,
+      options,
+      callback,
+      ++_tries
+    );
+  }
+
+  var socket = Net.connect(port, host, function(one:any, two:any) {
+    socket.removeListener('error', handleError);
+    callback(null, socket);
+  });
+  socket.once('error', handleError);
+}
+
+    function compile_erlang_connection(): Promise < number > {
+    return new Promise<number>((a, r) => {
+        //TODO: #if DEBUG
+        var compiler = new ErlangShellForDebugging(lspOutputChannel);
+        var erlFiles = ["vscode_lsp_entry.erl"];
+        //create dir if not exists
+        let ebinDir = path.normalize(path.join(erlangBridgePath, "..", "ebin"));
+        if (!fs.existsSync(ebinDir)) {
+            fs.mkdirSync(ebinDir);
+        }
+
+        let args = ["-o", "../ebin"].concat(erlFiles);
+        return compiler.Compile(erlangBridgePath, args).then(res => {
+            //this.debug("Compilation of erlang bridge...ok");
+            a(res);
+        }, exitCode => {
+            console.log("Compilation of erlang bridge...ko");
+            r(exitCode);
+        });
+    });
+}
+
+function getPort(callback) {
+  var server = Net.createServer(function (sock) {
+    sock.end('OK\n');
+  });
+  server.listen(0, function () {
+    var port = server.address().port;
+    server.close(function () {
+      callback(port);
+    });
+  });
+}
 
 export function activate(context: ExtensionContext) {
 
-	lspOutputChannel = Window.createOutputChannel('Erlang Language Server');
-	let serverModule = context.asAbsolutePath(path.join('lib', 'lsp', 'lspserver.js'));
-	if (!fs.existsSync(serverModule)) {
-		serverModule = context.asAbsolutePath(path.join('out', 'lib', 'lsp', 'lspserver.js'));
-	}
-	let erlLSPPath = erlConnection.erlangBridgePath;
-	//	let erlangCmd = "erl "
-	// The debug options for the server
-	let debugOptions = { execArgv: ["--nolazy", "--inspect=6009"] };
+    lspOutputChannel = Window.createOutputChannel('Erlang Language Server');
+    let serverModule = context.asAbsolutePath(path.join('lib', 'lsp', 'lspserver.js'));
+    if (!fs.existsSync(serverModule)) {
+        serverModule = context.asAbsolutePath(path.join('out', 'lib', 'lsp', 'lspserver.js'));
+    }
+    let erlLSPPath = erlConnection.erlangBridgePath;
+    //  let erlangCmd = "erl "
+    // The debug options for the server
+    let debugOptions = { execArgv: ["--nolazy", "--inspect=6009"] };
 
-	// If the extension is launched in debug mode then the debug server options are used
-	// Otherwise the run options are used
-	let serverOptions: ServerOptions = {
-		run: { module: serverModule, transport: TransportKind.ipc },
-		debug: { module: serverModule, transport: TransportKind.ipc, options: debugOptions }
-	}
+    // If the extension is launched in debug mode then the debug server options are used
+    // Otherwise the run options are used
+    let serverOptions: ServerOptions = {
+        run: { module: serverModule, transport: TransportKind.ipc },
+        debug: { module: serverModule, transport: TransportKind.ipc, options: debugOptions }
+    }
 
-	let middleware: Middleware = {
-		workspace: {
-			configuration: Configuration.computeConfiguration
-		},
-		provideCodeLenses: (document, token) =>{
-			return Promise.resolve(lspcodelens.onProvideCodeLenses(document, token)).then(x => x);
-		},
-		resolveCodeLens: (codeLens) => {
-			return Promise.resolve(lspcodelens.onResolveCodeLenses(codeLens)).then(x => x);
-		}
-	};
+    let middleware: Middleware = {
+        workspace: {
+            configuration: Configuration.computeConfiguration
+        },
+        provideCodeLenses: (document, token) =>{
+            return Promise.resolve(lspcodelens.onProvideCodeLenses(document, token)).then(x => x);
+        },
+        resolveCodeLens: (codeLens) => {
+            return Promise.resolve(lspcodelens.onResolveCodeLenses(codeLens)).then(x => x);
+        }
+    };
 
-	// Options to control the language client
-	let clientOptions: LanguageClientOptions = {
-		// Register the server for plain text documents
-		documentSelector: [{ scheme: 'file', language: 'erlang' }],
-		synchronize: {
-			// Notify the server about file changes to '.clientrc files contain in the workspace
-			fileEvents: Workspace.createFileSystemWatcher('**/.clientrc'),
-			// In the past this told the client to actively synchronize settings. Since the
-			// client now supports 'getConfiguration' requests this active synchronization is not
-			// necessary anymore. 
-			// configurationSection: [ 'lspMultiRootSample' ]
-		},
-		middleware: middleware,
-		diagnosticCollectionName: 'Erlang Language Server',
-		outputChannel: lspOutputChannel
-	}
+    // Options to control the language client
+    let clientOptions: LanguageClientOptions = {
+        // Register the server for plain text documents
+        documentSelector: [{ scheme: 'file', language: 'erlang' }],
+        synchronize: {
+            // Notify the server about file changes to '.clientrc files contain in the workspace
+            fileEvents: Workspace.createFileSystemWatcher('**/.clientrc'),
+            // In the past this told the client to actively synchronize settings. Since the
+            // client now supports 'getConfiguration' requests this active synchronization is not
+            // necessary anymore. 
+            // configurationSection: [ 'lspMultiRootSample' ]
+        },
+        middleware: middleware,
+        diagnosticCollectionName: 'Erlang Language Server',
+        outputChannel: lspOutputChannel
+    }
 
-	client = new LanguageClient('Erlang Language Server', 'Erlang Language Server', serverOptions, clientOptions);
-	Configuration.initialize();
-	// Start the client. This will also launch the server
-	client.start();
+    client = new LanguageClient('Erlang Language Server', 'Erlang Language Server',  async () => {
+        return new Promise<StreamInfo>(async (resolve, reject) => {
+            await compile_erlang_connection();
+            let erlangLsp = new ErlangShellLSP(lspOutputChannel);
+            getPort(async function (port) {
+                erlangLsp.Start("", erlangBridgePath + "/..", port, "src", "");
+                let socket = await waitForSocket({ port: port }, function (error, socket) {
+                    resolve({ reader: socket, writer: socket });
+                }, undefined);
+            });
+        });
+    }, clientOptions, true);
+    Configuration.initialize();
+    // Start the client. This will also launch the server
+    client.start();
 }
 
 export function debugLog(msg: string): void {
-	if (lspOutputChannel) {
-		lspOutputChannel.appendLine(msg);
-	}
+    if (lspOutputChannel) {
+        lspOutputChannel.appendLine(msg);
+    }
 }
 
 export function deactivate(): Thenable<void> {
-	if (!client) {
-		return undefined;
-	}
-	Configuration.dispose();
-	return client.stop();
+    if (!client) {
+        return undefined;
+    }
+    Configuration.dispose();
+    return client.stop();
 }
 
