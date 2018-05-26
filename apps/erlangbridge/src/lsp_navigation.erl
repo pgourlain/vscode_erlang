@@ -68,7 +68,7 @@ internal_hover_info(File, Line, Column) ->
                                     end
                             end;                                
                         _ ->
-                            #{result => <<"ok">>, moduleName => list_to_binary(atom_to_list(FunctionModule)), functionName => list_to_binary(atom_to_list(Function))}
+                            #{result => <<"ok">>, moduleName => FunctionModule, functionName => Function}
                     end;
                 _ ->
                     #{result => <<"ko">>}
@@ -123,32 +123,31 @@ codelens_info(File) ->
     try internal_codelens_info(File) of
         _Any -> _Any
     catch
-        _Err:_Reason -> error_logger:info_msg("codelens_info error ~p:~p", [_Err, _Reason])
+        _Err:_Reason -> error_logger:info_msg("codelens_info error ~p:~p", [_Err, _Reason]), []
     end.
 
 internal_codelens_info(File) ->
     case lsp_syntax:file_syntax_tree(File) of
-        undefined -> #{result => <<"ko">>};
+        undefined -> [];
         FileSyntaxTree ->
             %io:format("~p~n", [FileSyntaxTree]),
             %filter only defined functions
             MapResult = maps:filter(fun (_K,V) -> maps:is_key(func_name, V) end,
                 fold_in_file_syntax_tree(FileSyntaxTree, #{}, fun codelens_analyze/2)),
-            Result = lists:map(fun (V) ->
+            lists:map(fun (V) ->
                 {Line, Column} = maps:get(location, V),
                 Count = maps:get(count, V),
                 FName = list_to_binary(atom_to_list(maps:get(func_name, V))),
                 #{
-                    line => Line, character => Column,                    
+                    line => Line,
+                    character => Column,
                     data => #{
                         count => Count,
                         func_name => FName,
                         exported => maps:get(exported, V, false)
                     }
                 }
-            end, maps:values(MapResult)),
-            %io:format("MapResult : ~p~n", [Result]),
-            #{result => <<"ok">>, codelens => Result, uri => list_to_binary("file://" ++ File)}
+            end, maps:values(MapResult))
     end.
 
 codelens_analyze(SyntaxTree, Map) ->

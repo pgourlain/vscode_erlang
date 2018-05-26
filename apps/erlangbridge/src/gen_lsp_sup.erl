@@ -23,11 +23,11 @@ to_int(V) when is_list(V) ->
     erlang:list_to_integer(V).
 
 init(VsCodePort) ->
-    {ok, LSock} = gen_tcp:listen(0, ?TCP_OPTIONS),
-    {ok, Port} = inet:port(LSock),
-    gen_connection:send_message_to_vscode(to_int(VsCodePort), "listen", #{port => Port}),
-    UserSpec = {gen_lsp_server, {gen_lsp_server, start_link, [VsCodePort, LSock]},
+    {ok, LSock} = gen_tcp:listen(list_to_integer(VsCodePort), ?TCP_OPTIONS),
+    %gen_connection:send_message_to_vscode(to_int(VsCodePort), "listen", #{port => list_to_integer(VsCodePort)}),
+    UserSpec = {gen_lsp_server, {gen_lsp_server, start_link, [list_to_integer(VsCodePort), LSock]},
                             temporary, infinity, worker, [gen_lsp_server]},
     StartSpecs = {{simple_one_for_one, 60, 3600}, [UserSpec]},
+    gen_tcp:send(LSock, <<"{}">>),    
+    error_logger:error_msg("init ~p",[LSock]),
     {ok, StartSpecs}.
- 

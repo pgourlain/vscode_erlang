@@ -10,6 +10,7 @@ import {
 } from 'vscode-languageclient';
 
 import { debugLog, client } from './lspclientextension';
+import URI from 'vscode-uri';
 
 let codeLensEnabled = false;
 
@@ -43,17 +44,22 @@ function delay(ms: number) {
 
 
 async function codeLensToVSCodeLens(codelenses: CodeLens[]): Promise<VSCodeLens[]> {
-	//debugLog(`convert codelens : ${JSON.stringify(codelenses)}`);
+    //debugLog(`convert codelens : ${JSON.stringify(codelenses)}`);
 	return Promise.resolve(codelenses.map(V => asCodeLens(V)));
 }
 
 function asCommand(item: Command): VSCommand {
 	let result: VSCommand = {
 		title: item.title,
-		command: item.command
+        command: item.command
 	}
 
-	if (item.arguments) { result.arguments = item.arguments; }
+	if (item.arguments) { result.arguments = item.arguments.map(function (arg:any): any {
+        if (arg.indexOf && arg.indexOf("file:") === 0)
+            return URI.parse(arg);
+        else
+            return arg;
+    }); }
 	return result;
 }
 

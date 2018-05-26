@@ -5,14 +5,16 @@
 parse_source_file(File, ContentsFile) ->
     case epp_parse_file(ContentsFile, get_include_path(File)) of
         {ok, FileSyntaxTree} ->
-            gen_lsp_doc_server:add_or_update_document(File, update_file_in_forms(File, ContentsFile, FileSyntaxTree)),
+            UpdatedSyntaxTree = update_file_in_forms(File, ContentsFile, FileSyntaxTree),
+            {_Result, Contents} = file:read_file(ContentsFile),
+            gen_lsp_doc_server:add_or_update_document(File, {UpdatedSyntaxTree, Contents}),
             #{parse_result => true};
         _ ->
             #{parse_result => false, error_message => <<"Cannot open file">>}
     end.
 
 validate_parsed_source_file(File) ->
-    {ok, FileSyntaxTree} = gen_lsp_doc_server:get_document(File),
+    {ok, {FileSyntaxTree, _Contents}} = gen_lsp_doc_server:get_document(File),
     lint(FileSyntaxTree, File).
 
 parse_config_file(File, ContentsFile) ->
@@ -27,7 +29,7 @@ parse_config_file(File, ContentsFile) ->
 
 file_syntax_tree(File) ->
     case gen_lsp_doc_server:get_document(File) of
-        {ok, FileSyntaxTree} ->
+        {ok, {FileSyntaxTree, _Contents}} ->
             FileSyntaxTree;
         not_found -> 
             case epp_parse_file(File, get_include_path(File)) of
@@ -99,7 +101,9 @@ get_include_path(File) ->
                 get_settings_include_paths() ++
                 get_file_include_paths(File) ++
                 get_include_paths_from_rebar_config(File),
-    lists:filter(fun filelib:is_dir/1, Candidates).
+    Paths = lists:filter(fun filelib:is_dir/1, Candidates),
+    error_logger:error_msg("get_include_path: ~p", [Paths]),
+    Paths.
 
 get_standard_include_paths() ->
     RootDir = maps:get(root, gen_lsp_doc_server:get_config(), ""),
@@ -110,7 +114,7 @@ get_standard_include_paths() ->
     ].
 
 get_settings_include_paths() ->
-    SettingPaths = string:tokens(maps:get(include_paths, gen_lsp_doc_server:get_config(), ""), "|"),
+    SettingPaths = maps:get(includePaths, gen_lsp_doc_server:get_config(), []),
     RootDir = maps:get(root, gen_lsp_doc_server:get_config(), ""),
     lists:map(fun (Path) ->
         abspath(RootDir, Path)

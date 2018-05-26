@@ -14,14 +14,33 @@ module_function(Module, Prefix) ->
         {ok, Exports} ->
             NamesOnly = [atom_to_list(element(1, Export)) || Export <- Exports],
             Unique = sets:to_list(sets:from_list(NamesOnly)),
-            #{items => lists:filtermap(fun (Name) ->
+            lists:filtermap(fun (Name) ->
                 case lists:prefix(Prefix, Name) of
-                    true -> {true, list_to_binary(Name)};
+                    true -> {true, module_function_item(Module, Name)};
                     _ -> false
                 end
-            end, Unique)};
-        {error, Error} ->
-            #{error => list_to_binary(Error)}
+            end, Unique);
+        {error, _Error} ->
+            []
+    end.
+
+module_function_item(Module, Name) ->
+    Help = gen_lsp_help_server:get_help(Module, list_to_atom(Name)),
+    case Help of
+        undefined ->
+            #{
+                label => list_to_binary(Name),
+                kind => 3 % Function
+            };
+        _ ->
+            #{
+                label => list_to_binary(Name),
+                kind => 3, % Function
+                documentation => #{
+                    value => Help,
+                    kind => <<"markdown">>
+                }
+            }
     end.
 
 standard_module_exports(Module) ->
@@ -42,17 +61,20 @@ record(File, Prefix) ->
     SyntaxTree = lsp_syntax:file_syntax_tree(File),
     case SyntaxTree of
         undefined ->
-            #{error => <<"Cannot find module">>};
+            [];
         _ ->
-            #{items => lists:filtermap(fun 
+            lists:filtermap(fun 
                 ({attribute, _, record, {Name, _}}) ->
                     case lists:prefix(Prefix, atom_to_list(Name)) of
-                        true -> {true, list_to_binary(atom_to_list(Name))};
+                        true -> {true, #{
+                            label => list_to_binary(atom_to_list(Name)),
+                            kind => 22 % Struct 
+                        }};
                         _ -> false
                     end;
                 (_) ->
                     false
-            end, SyntaxTree)}
+            end, SyntaxTree)
     end.
 
 field(File, Record, Prefix) ->
@@ -64,17 +86,20 @@ field(File, Record, Prefix) ->
             RecordTree = lsp_navigation:find_record(SyntaxTree, Record),
             case RecordTree of
                 {{attribute, _, record, {Record, Fields}}, _File} ->
-                    #{items => lists:filtermap(fun 
+                    lists:filtermap(fun 
                         ({record_field, _, {atom, _, Field}}) ->
                             case lists:prefix(Prefix, atom_to_list(Field)) of
-                                true -> {true, list_to_binary(atom_to_list(Field))};
+                                true -> {true, #{
+                                    label => list_to_binary(atom_to_list(Field)),
+                                    kind => 5 % Field
+                                }};
                                 _ -> false
                             end;
                         (_) ->
                             false
-                    end, Fields)};
+                    end, Fields);
                 _ ->
-                    #{error => <<"Cannot find record">>}
+                    []
             end
     end.
 
@@ -82,12 +107,12 @@ variable(File, Line, Prefix) ->
     FileSyntaxTree = lsp_syntax:file_syntax_tree(File),
     case FileSyntaxTree of
         undefined ->
-            #{error => <<"Cannot find module">>};
+            [];
         _ ->
             Function = lsp_navigation:find_function_with_line(FileSyntaxTree, Line),
             case Function of
                 undefined ->
-                    #{items => []};
+                    [];
                 _ ->
                     Names = erl_syntax_lib:fold(fun (SyntaxTree, Acc) ->
                         case SyntaxTree of
@@ -98,11 +123,14 @@ variable(File, Line, Prefix) ->
                         end
                     end, [], Function),
                     Unique = sets:to_list(sets:from_list(Names)),
-                    #{items => lists:filtermap(fun (Name) ->
+                    lists:filtermap(fun (Name) ->
                         case lists:prefix(Prefix, atom_to_list(Name)) of
-                            true -> {true, list_to_binary(atom_to_list(Name))};
+                            true -> {true, #{
+                                label => list_to_binary(atom_to_list(Name)),
+                                kind => 6 % Variable
+                            }};
                             _ -> false
                         end
-                    end, Unique)}
+                    end, Unique)
             end
     end.
