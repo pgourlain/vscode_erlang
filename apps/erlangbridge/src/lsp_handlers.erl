@@ -2,7 +2,8 @@
 
 -export([initialize/2, initialized/2, shutdown/2, exit/2, configuration/2, workspace_didChangeConfiguration/2,
     textDocument_didOpen/2, textDocument_didClose/2, textDocument_didSave/2, textDocument_didChange/2,
-    textDocument_definition/2, textDocument_references/2, textDocument_hover/2, textDocument_formatting/2]).
+    textDocument_definition/2, textDocument_references/2, textDocument_hover/2, textDocument_completion/2,
+    textDocument_formatting/2]).
 
 initialize(_Socket, Params) ->
     gen_lsp_doc_server:set_config(#{
@@ -16,7 +17,10 @@ initialize(_Socket, Params) ->
         definitionProvider => true,
         documentFormattingProvider => true,
         referencesProvider => true,
-        hoverProvider => true
+        hoverProvider => true,
+        completionProvider => #{triggerCharacters => lists:map(fun (Char) ->
+            <<Char>>
+        end, ":#.abcdefghijklmnopqrstuvwxyzABCDEFGHIJAKLMNOPQRSTUVWXYZ_@0123456789")}
     }}.
 
 initialized(Socket, _Params) ->
@@ -72,12 +76,13 @@ textDocument_didChange(Socket, Params) ->
     case maps:get(autosave, gen_lsp_doc_server:get_config(), true) of
         false ->
             Version = mapmapget(textDocument, version, Params),
+            error_logger:error_msg("Version ~p", [Version]),
             Contents = if
                 Version =:= 1 ->
-                    [ContentChange] = maps:get(contentChanges, Params),
-                    maps:get(text, ContentChange);
+                    undefined;
                 true ->
-                    undefined
+                    [ContentChange] = maps:get(contentChanges, Params),
+                    maps:get(text, ContentChange)
             end,
             file_contents_update(Socket, File, Contents);
         _ ->
@@ -102,7 +107,7 @@ textDocument_definition(_Socket, Params) ->
             #{error => <<"Definition not found">>}
     end.
 
-textDocument_references(Socket, Params) ->
+textDocument_references(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),
     Line = mapmapget(position, line, Params),
     Character = mapmapget(position, character, Params),
@@ -130,6 +135,29 @@ textDocument_hover(_Socket, Params) ->
     case Result of
         #{text := Text} = _ ->
             #{contents => Text};
+        #{moduleName := Module, functionName := Function} = _ ->
+            Help = gen_lsp_help_server:get_help(Module, Function),
+            case Help of
+                undefined -> #{};
+                _ -> #{contents => Help}
+            end;
+        _ ->
+            #{}
+    end.
+
+textDocument_completion(_Socket, Params) ->
+    case mapmapget(context, triggerKind, Params) of
+        2 -> % TriggerCharacter
+            Uri = mapmapget(textDocument, uri, Params),
+            Line = mapmapget(position, line, Params),
+            Character = mapmapget(position, character, Params),
+            TriggerCharacter = mapmapget(context, triggerCharacter, Params),
+            File = file_uri_to_file(Uri),
+            {ok, {_FileSyntaxTree, Contents}} = gen_lsp_doc_server:get_document(File),
+            LineText = lists:nth(Line + 1, binary:split(Contents, <<"\n">>, [global])),
+            TextBefore = binary:part(LineText, 0, min(Character - 1, byte_size(LineText))),
+            Text = <<TextBefore/binary, TriggerCharacter/binary>>,
+            auto_complete(File, Line + 1, Text);
         _ ->
             #{}
     end.
@@ -159,55 +187,89 @@ file_contents_update(Socket, File, Contents) ->
 
 validate_parsed_source_file(Socket, File) ->
     ErrorsWarnings = lsp_syntax:validate_parsed_source_file(File),
-    send_diagnostics(Socket, File, maps:get(errors_warnings, ErrorsWarnings)).
+    send_diagnostics(Socket, File, maps:get(errors_warnings, ErrorsWarnings, [])).
 
 validate_config_file(Socket, File, ContentsFile) ->
     ErrorsWarnings = lsp_syntax:parse_config_file(File, ContentsFile),
-    send_diagnostics(Socket, File, maps:get(errors_warnings, ErrorsWarnings)).
+    send_diagnostics(Socket, File, maps:get(errors_warnings, ErrorsWarnings, [])).
 
 mktemp(Contents) ->
     Rand = integer_to_list(binary:decode_unsigned(crypto:strong_rand_bytes(8)), 36),
     TempPath = filename:basedir(user_cache, "ERL"),
     TempFile = filename:join(TempPath, Rand),
-    Result1 = file:ensure_dir(TempFile),
-    Result2 = file:write_file(TempFile, Contents),
+    filelib:ensure_dir(TempFile),
     file:write_file(TempFile, Contents),
     TempFile.
 
 request_configuration(Socket) ->
-    send_request_to_client(Socket, <<"configuration">>, <<"workspace/configuration">>,
-        #{items => [#{section => <<"erlang">>}, #{section => <<"files">>}]}).
+    gen_lsp_server:send_to_client(Socket, #{
+        id => <<"configuration">>,
+        method => <<"workspace/configuration">>,
+        params => #{items => [#{section => <<"erlang">>}, #{section => <<"files">>}]}
+    }).
 
 send_diagnostics(Socket, File, Diagnostics) ->
     BinFile = list_to_binary(File),
-    send_request_to_client(Socket, undefined, <<"textDocument/publishDiagnostics">>, #{
-        uri => file_uri_to_vscode_uri(<<"file://", BinFile/binary>>),
-        diagnostics => lists:map(fun (Diagnostic) ->
-            Info = maps:get(info, Diagnostic),
-            #{
-                severity => severity(maps:get(type, Diagnostic)),
-                range => #{
-                    start => #{line => maps:get(line, Info) - 1, character => maps:get(character, Info) - 1},
-                    <<"end">> => #{line => maps:get(line, Info) - 1, character => 255}
-                },
-                message => maps:get(message, Info),
-                source => <<"erl">>
-            }
-        end, Diagnostics)
+    gen_lsp_server:send_to_client(Socket, #{
+        method => <<"textDocument/publishDiagnostics">>,
+        params => #{
+            uri => file_uri_to_vscode_uri(<<"file://", BinFile/binary>>),
+            diagnostics => lists:map(fun (Diagnostic) ->
+                Info = maps:get(info, Diagnostic),
+                #{
+                    severity => severity(maps:get(type, Diagnostic)),
+                    range => #{
+                        start => #{line => maps:get(line, Info) - 1, character => maps:get(character, Info) - 1},
+                        <<"end">> => #{line => maps:get(line, Info) - 1, character => 255}
+                    },
+                    message => maps:get(message, Info),
+                    source => <<"erl">>
+                }
+            end, Diagnostics)
+        }
     }).
 
 severity(<<"info">>) -> 3;
 severity(<<"warning">>) -> 2;
 severity(_) -> 1.
 
-send_request_to_client(Socket, Id, Method, Params) ->
-    ParamsMap = case Id of
-        undefined -> #{method => Method, params => Params};
-        _ -> #{id => Id, method => Method, params => Params}
-    end,
-    {ok, Json} = vscode_jsone:encode(ParamsMap),
-    Header = iolist_to_binary(io_lib:fwrite("Content-Length: ~p", [byte_size(Json)])),
-    gen_tcp:send(Socket, <<Header/binary, "\r\n\r\n", Json/binary>>).
+auto_complete(File, Line, Text) ->
+    RegexList = [
+        {"[^a-zA-Z0-0_@]([a-z][a-zA-Z0-0_@]*):((?:[a-z][a-zA-Z0-0_@]*)?)$", module_function},
+        {"#((?:[a-z][a-zA-Z0-0_@]*)?)$", record},
+        {"#([a-z][a-zA-Z0-0_@]*)\.((?:[a-z][a-zA-Z0-0_@]*)?)$", field},
+        {"[^a-zA-Z0-0_@]([A-Z][a-zA-Z0-0_@]*)$", variable}
+    ],
+    case match_regex(Text, RegexList) of
+        {module_function, [Module, Function]} ->
+            lsp_completion:module_function(list_to_atom(binary_to_list(Module)), binary_to_list(Function));
+        {record, [Record]} ->
+            lsp_completion:record(File, binary_to_list(Record));
+        {field, [Record, Field]} ->
+            lsp_completion:field(File, list_to_atom(binary_to_list(Record)), binary_to_list(Field));
+        {variable, [Variable]} ->
+            lsp_completion:variable(File, Line, binary_to_list(Variable));
+        {nomatch, _}
+            -> []
+    end.
+  
+ match_regex(Str, [{Pattern, Result} | T]) ->
+    case re:run(Str, Pattern) of
+        {match, MatchList} ->
+            {Result, lists:map(fun (Part) ->
+                binary:part(Str, Part)
+            end, lists:nthtail(1, MatchList))};
+        nomatch ->
+            match_regex(Str, T)
+    end;
+ match_regex(_, []) ->
+    {nomatch, []}.
+  
+ regex_capture_get(Text, CaptureIndex, CaptureList) when length(CaptureList) =< CaptureIndex ->
+     {Start, Length} = lists:nth(CaptureIndex, CaptureList),
+  string:substr(Text, Start, Length);
+ regex_capture_get(_, _, _) ->
+     "".
 
 mapmapget(Key1, Key2, Map) ->
     maps:get(Key2, maps:get(Key1, Map)).

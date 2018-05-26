@@ -68,7 +68,7 @@ internal_hover_info(File, Line, Column) ->
                                     end
                             end;                                
                         _ ->
-                            #{result => <<"ok">>, moduleName => list_to_binary(atom_to_list(FunctionModule)), functionName => list_to_binary(atom_to_list(Function))}
+                            #{result => <<"ok">>, moduleName => FunctionModule, functionName => Function}
                     end;
                 _ ->
                     #{result => <<"ko">>}

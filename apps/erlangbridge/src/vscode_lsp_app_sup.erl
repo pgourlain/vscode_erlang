@@ -1,6 +1,6 @@
 -module(vscode_lsp_app_sup).
 
--export([init/1, start_link/1, start_sup_socket/1, start_sup_doc/0, start_child/1]).
+-export([init/1, start_link/1, start_sup_socket/1, start_sup_doc/0, start_sup_help/0, start_child/1]).
 
 start_link(VsCodePort) ->
     error_logger:info_msg("vscode_lsp_app_sup:start_link()"),
@@ -10,7 +10,8 @@ init(VsCodePort) ->
     error_logger:info_msg("vscode_lsp_app_sup:init/1"),
     SocketSpec = socket_spec(VsCodePort),
     DocSpec = doc_spec(),
-    StartSpecs = {{one_for_one, 60, 3600}, [SocketSpec, DocSpec]},
+    HelpSpec = help_spec(),
+    StartSpecs = {{one_for_one, 60, 3600}, [SocketSpec, DocSpec, HelpSpec]},
     {ok, StartSpecs}.
 
 socket_spec(VsCodePort) ->
@@ -25,7 +26,6 @@ start_sup_socket(VsCodePort) ->
     error_logger:info_report([{start_sup_socket, R}]),
     R.
 
-
 doc_spec() ->
     #{id => gen_lsp_doc_sup,
     start => {gen_lsp_doc_sup, start_link, []},
@@ -35,11 +35,19 @@ doc_spec() ->
 %        {gen_lsp_doc_sup, {gen_lsp_doc_sup, start_link, []},
 %                        permanent, infinity, supervisor, [gen_lsp_doc_sup]}.
 
+help_spec() ->
+    #{id => gen_lsp_help_sup,
+    start => {gen_lsp_help_sup, start_link, []},
+    restart => permanent,
+    modules => [gen_lsp_help_sup],
+    type => supervisor}.
+
 start_sup_doc() ->
     supervisor:start_child(?MODULE, doc_spec()).
+
+start_sup_help() ->
+    supervisor:start_child(?MODULE, help_spec()).
 
 start_child(Arg) ->
     error_logger:info_msg([{vscode_lsp_app_sup, start_child}, {arg, Arg}]),
     error.
-
-
