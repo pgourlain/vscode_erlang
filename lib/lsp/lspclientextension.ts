@@ -224,23 +224,7 @@ function getPort(callback) {
 }
 
 export function activate(context: ExtensionContext) {
-
     lspOutputChannel = Window.createOutputChannel('Erlang Language Server');
-    let serverModule = context.asAbsolutePath(path.join('lib', 'lsp', 'lspserver.js'));
-    if (!fs.existsSync(serverModule)) {
-        serverModule = context.asAbsolutePath(path.join('out', 'lib', 'lsp', 'lspserver.js'));
-    }
-    let erlLSPPath = erlConnection.erlangBridgePath;
-    //  let erlangCmd = "erl "
-    // The debug options for the server
-    let debugOptions = { execArgv: ["--nolazy", "--inspect=6009"] };
-
-    // If the extension is launched in debug mode then the debug server options are used
-    // Otherwise the run options are used
-    let serverOptions: ServerOptions = {
-        run: { module: serverModule, transport: TransportKind.ipc },
-        debug: { module: serverModule, transport: TransportKind.ipc, options: debugOptions }
-    }
 
     let middleware: Middleware = {
         workspace: {
