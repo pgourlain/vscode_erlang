@@ -7,7 +7,8 @@ import {
 
 import {
     LanguageClient, LanguageClientOptions, TransportKind, ConfigurationParams, StreamInfo,
-    CancellationToken, DidChangeConfigurationNotification, ServerOptions, Middleware, DidChangeWorkspaceFoldersNotification, DidChangeWatchedFilesNotification, FileChangeType
+    CancellationToken, DidChangeConfigurationNotification, ServerOptions, Middleware, DidChangeWorkspaceFoldersNotification, 
+    DidChangeWatchedFilesNotification, FileChangeType, DidSaveTextDocumentNotification,DidSaveTextDocumentParams, TextDocumentSaveRegistrationOptions
 } from 'vscode-languageclient';
 
 import { ErlangShellLSP } from './ErlangShellLSP';
@@ -235,9 +236,12 @@ export function activate(context: ExtensionContext) {
         },
         resolveCodeLens: (codeLens) => {
             return Promise.resolve(lspcodelens.onResolveCodeLenses(codeLens)).then(x => x);
-        }
+        },
+        didSave: (data : TextDocument, next : (data : TextDocument) => void) => {
+          next(data);//call LSP
+          lspcodelens.onDocumentDidSave();
+        }
     };
-
     // Options to control the language client
     let clientOptions: LanguageClientOptions = {
         // Register the server for plain text documents

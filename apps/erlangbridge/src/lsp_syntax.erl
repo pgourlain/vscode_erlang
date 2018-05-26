@@ -134,7 +134,7 @@ get_define_from_rebar_config(File) ->
                 {ok, Terms} ->
                     ErlOpts = proplists:get_value(erl_opts, Terms, []),
                     Defines = rebar_define_to_epp_define(proplists:lookup_all(d, ErlOpts)),
-                    io:format("defines : ~p~n", [Defines]),
+                    error_logger:info_msg("get_defines: ~p", [Defines]),
                     Defines;
                 _ ->
                     []
