@@ -220,6 +220,8 @@ file_contents_update(Socket, File, Contents) ->
         ".erl" ->
             lsp_syntax:parse_source_file(File, ContentsFile),
             Linting andalso validate_parsed_source_file(Socket, File);
+        ".hrl" ->
+            ok;
         ".src" ->
             Linting andalso validate_config_file(Socket, File, ContentsFile);
         ".config" ->
