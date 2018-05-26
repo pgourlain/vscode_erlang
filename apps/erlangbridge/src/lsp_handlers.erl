@@ -3,13 +3,14 @@
 -export([initialize/2, initialized/2, shutdown/2, exit/2, configuration/2, workspace_didChangeConfiguration/2,
     textDocument_didOpen/2, textDocument_didClose/2, textDocument_didSave/2, textDocument_didChange/2,
     textDocument_definition/2, textDocument_references/2, textDocument_hover/2, textDocument_completion/2,
-    textDocument_formatting/2]).
+    textDocument_formatting/2, textDocument_codeLens/2]).
 
 initialize(_Socket, Params) ->
     gen_lsp_doc_server:set_config(#{
         root => binary_to_list(maps:get(rootPath, Params)),
         linting => true,
         includePaths => [],
+        codeLensEnabled => false,
         autosave => true
     }),
     #{capabilities => #{
@@ -20,7 +21,8 @@ initialize(_Socket, Params) ->
         hoverProvider => true,
         completionProvider => #{triggerCharacters => lists:map(fun (Char) ->
             <<Char>>
-        end, ":#.abcdefghijklmnopqrstuvwxyzABCDEFGHIJAKLMNOPQRSTUVWXYZ_@0123456789")}
+        end, ":#.abcdefghijklmnopqrstuvwxyzABCDEFGHIJAKLMNOPQRSTUVWXYZ_@0123456789")},
+        codeLensProvider => true
     }}.
 
 initialized(Socket, _Params) ->
@@ -37,6 +39,7 @@ configuration(Socket, [ErlangSection, _, FilesSecton, _]) ->
     gen_lsp_doc_server:set_config((gen_lsp_doc_server:get_config())#{
         linting => maps:get(linting, ErlangSection, true),
         includePaths => maps:get(includePaths, ErlangSection, []),
+        codeLensEnabled => maps:get(codeLensEnabled, ErlangSection, false),
         autosave => maps:get(autoSave, FilesSecton, <<"afterDelay">>) =:= <<"afterDelay">>
     }),
     lists:foreach(fun (File) ->
@@ -98,10 +101,7 @@ textDocument_definition(_Socket, Params) ->
         #{uri := DefUri, line := DefLine, character := DefCharacter} = _ ->
             #{
                 uri => file_uri_to_vscode_uri(DefUri),
-                range => #{
-                    start => #{line => DefLine - 1, character => DefCharacter - 1},
-                    <<"end">> => #{line => DefLine - 1, character => DefCharacter - 1}
-                }
+                range => client_range(DefLine, DefCharacter, DefCharacter)
             };
         _ ->
             #{error => <<"Definition not found">>}
@@ -117,10 +117,7 @@ textDocument_references(_Socket, Params) ->
             lists:map(fun (#{uri := RefUri, line := RefLine, character := RefCharacter} = _) ->
                 #{
                     uri => file_uri_to_vscode_uri(RefUri),
-                    range => #{
-                        start => #{line => RefLine - 1, character => RefCharacter - 1},
-                        <<"end">> => #{line => RefLine - 1, character => RefCharacter - 1}
-                    }
+                    range => client_range(RefLine, RefCharacter, RefCharacter)
                 }
             end, References);
         _ ->
@@ -164,6 +161,51 @@ textDocument_completion(_Socket, Params) ->
 
 textDocument_formatting(_Socket, Params) ->
     erl_tidy:file(file_uri_to_file(mapmapget(textDocument, uri, Params)), [{backups, false}]).
+
+textDocument_codeLens(_Socket, Params) ->
+    Uri = mapmapget(textDocument, uri, Params),
+    case maps:get(codeLensEnabled, gen_lsp_doc_server:get_config(), false) of
+        false -> [];
+        _ ->
+            lists:foldl(fun (#{data := Data} = Item, Acc) ->
+                case maps:get(exported, Data) of
+                    true ->
+                        AccWithExported = [exported_code_lens(Item) | Acc],
+                        case maps:get(count, Data) > 0 of
+                            true -> [references_code_lens(Uri, Item) | AccWithExported];
+                            _ -> AccWithExported
+                        end;
+                    _ ->
+                        [references_code_lens(Uri, Item) | Acc]
+                end
+            end, [], lsp_navigation:codelens_info(file_uri_to_file(Uri)))
+    end.
+
+exported_code_lens(#{data := Data} = Item) ->
+    StartChar = maps:get(character, Item),
+    #{
+        range => client_range(maps:get(line, Item), StartChar, StartChar + byte_size(maps:get(func_name, Data))),
+        data => Data,
+        command => #{title => <<"exported">>, command => <<>>}
+    }.
+
+references_code_lens(Uri, #{data := Data} = Item) ->
+    StartChar = maps:get(character, Item),
+    #{
+        range => client_range(maps:get(line, Item), StartChar, StartChar + byte_size(maps:get(func_name, Data))),
+        data => Data,
+        command => case maps:get(count, Data) of
+            0 -> #{title => <<"unused">>, command => <<>>};
+            _ -> #{
+                title => list_to_binary(integer_to_list(maps:get(count, Data)) ++ " private references"),
+                command => <<"editor.action.findReferences">>,
+                arguments => [
+                    file_uri_to_vscode_uri(Uri),
+                    #{lineNumber => maps:get(line, Item), column => maps:get(character, Item)}
+                ]
+            }
+        end
+    }.
 
 file_contents_update(Socket, File, Contents) ->
     Linting = maps:get(linting, gen_lsp_doc_server:get_config(), true),
@@ -218,10 +260,7 @@ send_diagnostics(Socket, File, Diagnostics) ->
                 Info = maps:get(info, Diagnostic),
                 #{
                     severity => severity(maps:get(type, Diagnostic)),
-                    range => #{
-                        start => #{line => maps:get(line, Info) - 1, character => maps:get(character, Info) - 1},
-                        <<"end">> => #{line => maps:get(line, Info) - 1, character => 255}
-                    },
+                    range => client_range(maps:get(line, Info), maps:get(character, Info), 256),
                     message => maps:get(message, Info),
                     source => <<"erl">>
                 }
@@ -232,6 +271,12 @@ send_diagnostics(Socket, File, Diagnostics) ->
 severity(<<"info">>) -> 3;
 severity(<<"warning">>) -> 2;
 severity(_) -> 1.
+
+client_range(Line, StartChar, EndChar) ->
+    #{
+        <<"start">> => #{line => Line - 1, character => StartChar - 1},
+        <<"end">> => #{line => Line - 1, character => EndChar - 1}
+    }.
 
 auto_complete(File, Line, Text) ->
     RegexList = [
@@ -264,12 +309,6 @@ auto_complete(File, Line, Text) ->
     end;
  match_regex(_, []) ->
     {nomatch, []}.
-  
- regex_capture_get(Text, CaptureIndex, CaptureList) when length(CaptureList) =< CaptureIndex ->
-     {Start, Length} = lists:nth(CaptureIndex, CaptureList),
-  string:substr(Text, Start, Length);
- regex_capture_get(_, _, _) ->
-     "".
 
 mapmapget(Key1, Key2, Map) ->
     maps:get(Key2, maps:get(Key1, Map)).

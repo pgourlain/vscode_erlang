@@ -128,27 +128,26 @@ codelens_info(File) ->
 
 internal_codelens_info(File) ->
     case lsp_syntax:file_syntax_tree(File) of
-        undefined -> #{result => <<"ko">>};
+        undefined -> [];
         FileSyntaxTree ->
             %io:format("~p~n", [FileSyntaxTree]),
             %filter only defined functions
             MapResult = maps:filter(fun (_K,V) -> maps:is_key(func_name, V) end,
                 fold_in_file_syntax_tree(FileSyntaxTree, #{}, fun codelens_analyze/2)),
-            Result = lists:map(fun (V) ->
+            lists:map(fun (V) ->
                 {Line, Column} = maps:get(location, V),
                 Count = maps:get(count, V),
                 FName = list_to_binary(atom_to_list(maps:get(func_name, V))),
                 #{
-                    line => Line, character => Column,                    
+                    line => Line,
+                    character => Column,
                     data => #{
                         count => Count,
                         func_name => FName,
                         exported => maps:get(exported, V, false)
                     }
                 }
-            end, maps:values(MapResult)),
-            %io:format("MapResult : ~p~n", [Result]),
-            #{result => <<"ok">>, codelens => Result, uri => list_to_binary("file://" ++ File)}
+            end, maps:values(MapResult))
     end.
 
 codelens_analyze(SyntaxTree, Map) ->
