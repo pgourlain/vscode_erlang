@@ -61,7 +61,7 @@ remove_text_for_logging(Input) ->
     Input.
 
 do_contents(Socket, #{method := Method} = Input) ->
-    error_logger:error_msg("LSP received ~p", [remove_text_for_logging(Input)]),
+    error_logger:info_msg("LSP received ~p", [remove_text_for_logging(Input)]),
     Handler = list_to_atom(binary_to_list(binary:replace(Method, <<"/">>, <<"_">>))),
     case lists:keyfind(Handler, 1, lsp_handlers:module_info(exports)) of
         false ->
@@ -77,7 +77,7 @@ do_contents(Socket, #{method := Method} = Input) ->
             end
     end;
 do_contents(Socket, #{id := Id} = Input) ->
-    error_logger:error_msg("LSP received ~p", [Input]),
+    error_logger:info_msg("LSP received ~p", [Input]),
     Handler = list_to_atom(binary_to_list(binary:replace(Id, <<"/">>, <<"_">>))),
     case lists:keyfind(Handler, 1, lsp_handlers:module_info(exports)) of
         false ->
@@ -88,7 +88,7 @@ do_contents(Socket, #{id := Id} = Input) ->
     end.
 
 send_to_client(Socket, Body) ->
-    error_logger:error_msg("LSP sends ~p", [Body]),
+    error_logger:info_msg("LSP sends ~p", [Body]),
     {ok, Json} = vscode_jsone:encode(Body),
     Header = iolist_to_binary(io_lib:fwrite("Content-Length: ~p", [byte_size(Json)])),
     gen_tcp:send(Socket, <<Header/binary, "\r\n\r\n", Json/binary>>).

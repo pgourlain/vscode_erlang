@@ -35,7 +35,7 @@ exit(_Socket, _) ->
     init:stop().
 
 configuration(Socket, [ErlangSection, _, FilesSecton, _]) ->
-    error_logger:error_msg("configuration ~p", [gen_lsp_doc_server:get_documents()]),
+    error_logger:info_msg("configuration ~p", [gen_lsp_doc_server:get_documents()]),
     gen_lsp_doc_server:set_config((gen_lsp_doc_server:get_config())#{
         linting => maps:get(linting, ErlangSection, true),
         includePaths => maps:get(includePaths, ErlangSection, []),
@@ -43,7 +43,7 @@ configuration(Socket, [ErlangSection, _, FilesSecton, _]) ->
         autosave => maps:get(autoSave, FilesSecton, <<"afterDelay">>) =:= <<"afterDelay">>
     }),
     lists:foreach(fun (File) ->
-        error_logger:error_msg("File = ~p",[File]),
+        error_logger:info_msg("File = ~p",[File]),
         send_diagnostics(Socket, File, []),
         file_contents_update(Socket, File, undefined)
     end, gen_lsp_doc_server:get_documents()).
@@ -79,7 +79,7 @@ textDocument_didChange(Socket, Params) ->
     case maps:get(autosave, gen_lsp_doc_server:get_config(), true) of
         false ->
             Version = mapmapget(textDocument, version, Params),
-            error_logger:error_msg("Version ~p", [Version]),
+            error_logger:info_msg("Document version : ~p", [Version]),
             Contents = if
                 Version =:= 1 ->
                     undefined;

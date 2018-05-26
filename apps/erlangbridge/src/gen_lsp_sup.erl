@@ -29,5 +29,5 @@ init(VsCodePort) ->
                             temporary, infinity, worker, [gen_lsp_server]},
     StartSpecs = {{simple_one_for_one, 60, 3600}, [UserSpec]},
     gen_tcp:send(LSock, <<"{}">>),    
-    error_logger:error_msg("init ~p",[LSock]),
+    error_logger:info_msg("init ~p",[LSock]),
     {ok, StartSpecs}.

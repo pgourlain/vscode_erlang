@@ -102,7 +102,7 @@ get_include_path(File) ->
                 get_file_include_paths(File) ++
                 get_include_paths_from_rebar_config(File),
     Paths = lists:filter(fun filelib:is_dir/1, Candidates),
-    error_logger:error_msg("get_include_path: ~p", [Paths]),
+    error_logger:info_msg("get_include_path: ~p", [Paths]),
     Paths.
 
 get_standard_include_paths() ->

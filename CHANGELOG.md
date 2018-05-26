@@ -1,5 +1,15 @@
 # Change log
 
+## Version 0.4.0 (May 26, 2018)
+### LSP purely in Erlang
+* [PR #77](https://github.com/pgourlain/vscode_erlang/pull/77) 
+	- Now Visual Studio Code communicate directly with Erlang over JSON-RPC
+![lspmigration](images/vscode-lsp-migration.png) 
+
+Thanks to 
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+---
+
 ## Version 0.3.4 (May 21, 2018)
 ### Autocompletion for records and variables, LSP fixes
 * [PR #73](https://github.com/pgourlain/vscode_erlang/pull/73) 
