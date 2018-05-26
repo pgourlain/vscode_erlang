@@ -11,20 +11,44 @@ import {
 
 import { debugLog, client } from './lspclientextension';
 import URI from 'vscode-uri';
+import { EventEmitter } from 'events';
+
+class DocumentValidatedEvent extends EventEmitter {
+
+    public Fire() {
+        this.emit("documentValidated");
+    }
+}
 
 let codeLensEnabled = false;
+let autosave = Workspace.getConfiguration("files").get<string>("autoSave")=="afterDelay";
+let documentValidatedEvent = new DocumentValidatedEvent();
 
 export function configurationChanged() : void {
 	codeLensEnabled = Workspace.getConfiguration("erlang").get<boolean>("codeLensEnabled");
+	autosave = Workspace.getConfiguration("files").get<string>("autoSave")=="afterDelay";
 }
 export async function onProvideCodeLenses(document: TextDocument, token: CancellationToken): Promise<ProviderResult<VSCodeLens[]>> {
 	if (!codeLensEnabled) {
 		return Promise.resolve([]);
 	}
+	if (autosave && document.isDirty) {
+		//codeLens event is fire after didChange and before DidSave
+		//So, when autoSave is on, Erlang document is validated on didSaved		
+		return await new Promise<ProviderResult<VSCodeLens[]>>(a => {
+			let fn = () =>
+			{
+				documentValidatedEvent.removeListener("documentValidated", fn);        
+				a(internalProvideCodeLenses(document, token));        
+			};
+			documentValidatedEvent.addListener("documentValidated", fn);
+		});
+	}
 	return await internalProvideCodeLenses(document, token);
 }
 
 async function internalProvideCodeLenses(document: TextDocument, token: CancellationToken): Promise<ProviderResult<VSCodeLens[]>> {
+    //Send request for codeLens
 	return await client.sendRequest<CodeLensParams, CodeLens[], void, CodeLensRegistrationOptions>(CodeLensRequest.type,
 		<CodeLensParams>{
 			textDocument: <TextDocumentIdentifier>{ uri: document.uri.toString() }
@@ -35,6 +59,10 @@ async function internalProvideCodeLenses(document: TextDocument, token: Cancella
 export function onResolveCodeLenses(codeLens: VSCodeLens): ProviderResult<VSCodeLens> {
 	debugLog("onResolveCodeLenses");
 	return codeLens;
+}
+
+export function onDocumentDidSave() : void {
+	documentValidatedEvent.Fire();
 }
 
 function delay(ms: number) {
