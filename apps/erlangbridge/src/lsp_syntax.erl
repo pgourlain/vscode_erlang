@@ -101,7 +101,9 @@ get_include_path(File) ->
                 get_settings_include_paths() ++
                 get_file_include_paths(File) ++
                 get_include_paths_from_rebar_config(File),
-    lists:filter(fun filelib:is_dir/1, Candidates).
+    Paths = lists:filter(fun filelib:is_dir/1, Candidates),
+    error_logger:error_msg("get_include_path: ~p", [Paths]),
+    Paths.
 
 get_standard_include_paths() ->
     RootDir = maps:get(root, gen_lsp_doc_server:get_config(), ""),
@@ -112,7 +114,7 @@ get_standard_include_paths() ->
     ].
 
 get_settings_include_paths() ->
-    SettingPaths = string:tokens(maps:get(include_paths, gen_lsp_doc_server:get_config(), ""), "|"),
+    SettingPaths = maps:get(includePaths, gen_lsp_doc_server:get_config(), []),
     RootDir = maps:get(root, gen_lsp_doc_server:get_config(), ""),
     lists:map(fun (Path) ->
         abspath(RootDir, Path)

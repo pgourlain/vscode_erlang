@@ -14,9 +14,7 @@ start(_Args) ->
     error_logger:info_msg("vscode_lsp_entry started/1(~p)", [_Args]),
     init_lsp().
 
-
 init_lsp() ->
-    error_logger:error_msg("application start!!!"),     
     case  compile_needed_modules() of
     ok ->
         case application:start(vscode_lsp, permanent) of
