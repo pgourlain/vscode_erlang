@@ -3,7 +3,7 @@
 -export([parse_source_file/2, validate_parsed_source_file/1, parse_config_file/2, file_syntax_tree/1, module_syntax_tree/1, find_module_file/2]).
 
 parse_source_file(File, ContentsFile) ->
-    case epp_parse_file(ContentsFile, get_include_path(File)) of
+    case epp_parse_file(ContentsFile, get_include_path(File), get_define_from_rebar_config(File)) of
         {ok, FileSyntaxTree} ->
             UpdatedSyntaxTree = update_file_in_forms(File, ContentsFile, FileSyntaxTree),
             {_Result, Contents} = file:read_file(ContentsFile),
@@ -32,7 +32,7 @@ file_syntax_tree(File) ->
         {ok, {FileSyntaxTree, _Contents}} ->
             FileSyntaxTree;
         not_found -> 
-            case epp_parse_file(File, get_include_path(File)) of
+            case epp_parse_file(File, get_include_path(File), get_define_from_rebar_config(File)) of
                 {ok, FileSyntaxTree} ->
                     FileSyntaxTree;
                 _ -> undefined
@@ -81,17 +81,17 @@ update_file_in_forms(File, ContentsFile, FileSyntaxTree) ->
             Form
     end, FileSyntaxTree).
 
-epp_parse_file(File, IncludePath) ->
+epp_parse_file(File, IncludePath, Defines) ->
     case file:open(File, [read]) of
     {ok, FIO} -> 
-        Ret = do_epp_parse_file(File, FIO, IncludePath),
+        Ret = do_epp_parse_file(File, FIO, IncludePath, Defines),
         file:close(FIO), 
         Ret;
     _ -> {error, file_could_not_opened}
     end.
 
-do_epp_parse_file(File, FIO, IncludePath) ->
-    case epp:open(File, FIO, {1,1}, IncludePath, []) of
+do_epp_parse_file(File, FIO, IncludePath, Defines) ->
+    case epp:open(File, FIO, {1,1}, IncludePath, Defines) of
         {ok, Epp} -> {ok, epp:parse_file(Epp)};
         {error, _Err} -> {error, _Err} 
     end.
@@ -122,6 +122,38 @@ get_settings_include_paths() ->
 
 get_file_include_paths(File) ->
     [filename:dirname(File), filename:rootname(File)].
+
+get_define_from_rebar_config(File) ->
+    RebarConfig = find_rebar_config(filename:dirname(File)),
+    case RebarConfig of
+        undefined ->
+            [];
+        _ ->
+            Consult = file:consult(RebarConfig),
+            ErlOptsDefines = case Consult of
+                {ok, Terms} ->
+                    ErlOpts = proplists:get_value(erl_opts, Terms, []),
+                    Defines = rebar_define_to_epp_define(proplists:lookup_all(d, ErlOpts)),
+                    io:format("defines : ~p~n", [Defines]),
+                    Defines;
+                _ ->
+                    []
+            end,
+            DefaultDefines = [],
+            ErlOptsDefines ++ DefaultDefines
+    end.
+
+rebar_define_to_epp_define([]) ->
+    [];
+rebar_define_to_epp_define([none]) ->
+    [];
+rebar_define_to_epp_define([H|T]) ->
+    case H of 
+    {d, Atom, Value} -> [{Atom, Value}] ++ rebar_define_to_epp_define(T);
+    {d, Atom} -> [Atom] ++ rebar_define_to_epp_define(T);
+    _ -> rebar_define_to_epp_define(T)
+    end.
+
 
 get_include_paths_from_rebar_config(File) ->
     RebarConfig = find_rebar_config(filename:dirname(File)),
