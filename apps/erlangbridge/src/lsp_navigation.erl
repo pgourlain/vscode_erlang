@@ -123,7 +123,7 @@ codelens_info(File) ->
     try internal_codelens_info(File) of
         _Any -> _Any
     catch
-        _Err:_Reason -> error_logger:info_msg("codelens_info error ~p:~p", [_Err, _Reason])
+        _Err:_Reason -> error_logger:info_msg("codelens_info error ~p:~p", [_Err, _Reason]), []
     end.
 
 internal_codelens_info(File) ->

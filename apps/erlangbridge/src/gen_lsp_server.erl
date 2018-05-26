@@ -35,6 +35,17 @@ handle_call(_Request, _From, State) ->
 handle_cast(_Request, State) ->
     {stop, normal, State}.
 
+handle_info({tcp, Socket, Contents}, State) ->
+    inet:setopts(Socket, [{active, once}]),
+    {noreply, handle_tcp_data(Socket, Contents, State)};
+handle_info(timeout, #state{socket = Socket} = State) ->
+    {ok, _} = gen_tcp:accept(Socket), 
+    {noreply, State};
+handle_info({tcp_closed, _Socket}, State) ->
+    {stop, normal, State};
+handle_info(Data, State) ->
+    {noreply, State}.
+
 remove_text_for_logging(#{params := #{contentChanges := ChangesList} = Params} = Input) ->
     Input#{params := Params#{contentChanges := lists:map(fun 
         (#{text := <<Text/binary>>} = Change) when byte_size(Text) > 20 ->
@@ -123,139 +134,5 @@ handle_tcp_data(Socket, Contents, State) ->
                 StateWithLength#state{contents = <<"">>, content_length = undefined})
     end.
 
-handle_info({tcp, Socket, Contents}, State) ->
-    inet:setopts(Socket, [{active, once}]),
-    {noreply, handle_tcp_data(Socket, Contents, State)};
-handle_info(timeout, #state{socket = Socket} = State) ->
-    {ok, _} = gen_tcp:accept(Socket), 
-    {noreply, State};
-handle_info(Data, State) ->
-    error_logger:error_msg("Data = ~p",[Data]),
-    send(State#state.socket, <<"ok">>),
-    {noreply, State}.    
-
-to_int(X)->X.
-handle_info1({tcp, Socket, RawData}, State) ->
-    error_logger:error_msg("RawData = ~p",[RawData]),
-    %entry point for each feature
-    inet:setopts(Socket, [{active, once}]),
-    Result = case parse_request(RawData) of
-        {set_config, Entries} ->
-            gen_lsp_doc_server:set_config(get_entries_map(Entries));
-        {parse_source_file, FileName} ->
-            lsp_syntax:parse_source_file(file_uri_to_file(FileName), file_uri_to_file(FileName));
-        {parse_source_file, FileName, TmpContentsFile} ->
-            lsp_syntax:parse_source_file(file_uri_to_file(FileName), TmpContentsFile);
-        {validate_parsed_source_file, FileName} ->
-            lsp_syntax:validate_parsed_source_file(file_uri_to_file(FileName));
-        {validate_config_file, FileName} ->
-            lsp_syntax:parse_config_file(file_uri_to_file(FileName), file_uri_to_file(FileName));
-        {validate_config_file, FileName, TmpContentsFile} ->
-            lsp_syntax:parse_config_file(file_uri_to_file(FileName), TmpContentsFile);
-        {complete_module_function, Module} ->
-            lsp_completion:module_function(list_to_atom(Module), "");
-        {complete_module_function, Module, Prefix} ->
-            lsp_completion:module_function(list_to_atom(Module), Prefix);
-        {complete_record, Uri} ->
-            lsp_completion:record(file_uri_to_file(Uri), "");
-        {complete_record, Uri, Prefix} ->
-            lsp_completion:record(file_uri_to_file(Uri), Prefix);
-        {complete_field, Uri, Record} ->
-            lsp_completion:field(file_uri_to_file(Uri), list_to_atom(Record), "");
-        {complete_field, Uri, Record, Prefix} ->
-            lsp_completion:field(file_uri_to_file(Uri), list_to_atom(Record), Prefix);
-        {complete_variable, Uri, Line} ->
-            lsp_completion:variable(file_uri_to_file(Uri), list_to_integer(Line), "");
-        {complete_variable, Uri, Line, Prefix} ->
-            lsp_completion:variable(file_uri_to_file(Uri), list_to_integer(Line), Prefix);
-        {format_document, FileName} ->
-            format_file_uri(FileName);   
-        {document_closed, FileName} ->
-            gen_lsp_doc_server:remove_document(file_uri_to_file(FileName)), #{result => true};
-        {goto_definition, FileName, Line, Column} -> 
-            lsp_navigation:goto_definition(file_uri_to_file(FileName), to_int(Line), to_int(Column));
-        {hover_info, FileName, Line, Column} -> 
-            lsp_navigation:hover_info(file_uri_to_file(FileName), to_int(Line), to_int(Column));
-        {references_info, FileName, Line, Column} ->
-            lsp_navigation:references_info(file_uri_to_file(FileName), to_int(Line), to_int(Column));
-        {codelens_info, FileName} ->
-            lsp_navigation:codelens_info(file_uri_to_file(FileName));
-        {stop_server} ->
-            init:stop();
-        _ ->
-            #{parse_result => false,
-            error_message => <<"unknown command">>}
-    end,
-    send(Socket, Result),
-    {noreply, State};
-
-handle_info1(timeout, #state{socket = Socket} = State) ->
-    {ok, ClientSocket} = gen_tcp:accept(Socket), 
-    {noreply, State};
-
-handle_info1({tcp_closed, _Socket}, State) ->
-    {stop, normal, State};
-
-handle_info1(_Info, StateData) ->
-    {noreply, StateData}.
-
 code_change(_OldVersion, State, _Extra) ->
     {ok, State}.
-
-
-%% Features functions 
-%% TODO: move each feature in separate file
-
-parse_http(Packet) ->
-    {ok, {http_request,'POST', Verb, _}, Rest} = erlang:decode_packet(http, Packet, []),
-    {HeadersMap, Body} = parse_http_headers(Rest, #{}),
-    {Verb, HeadersMap, Body}.
-
-parse_http_headers(Packet, HeadersMap) ->
-    case erlang:decode_packet(httph, Packet, []) of
-        {ok, {http_header, _, Header, _, Value}, Rest} ->
-            parse_http_headers(Rest, HeadersMap#{Header => Value});
-        {ok, http_eoh, Body} ->
-            {HeadersMap, Body}
-    end.
-
-parse_request(Data) ->
-    {Verb, HeadersMap, Body} = parse_http(Data),
-    case maps:get("X-Multiline-Body", HeadersMap, "false") of
-        "false" ->
-            list_to_tuple([list_to_atom(Verb) | string:tokens(binary_to_list(Body), "\r\n")]);
-        "true" ->
-            {list_to_atom(Verb), binary_to_list(Body)}
-    end.
-
-get_entries_map(Entries) ->
-    lists:foldl(fun (Line, Acc) ->
-        case string:tokens(Line, "=") of
-            [Key, Value] -> Acc#{list_to_atom(Key) => Value};
-            _ -> Acc
-        end
-    end, #{}, string:tokens(Entries, "\r\n")).
-
-send(Socket, Data) ->
-    Answer = response_json(Data),
-    gen_tcp:send(Socket, list_to_binary(Answer)),
-    inet:setopts(Socket, [{active,once}]).
-
-response_json(M) ->
-    {ok, B} = vscode_jsone:encode(M),
-    binary_to_list(iolist_to_binary(io_lib:fwrite("HTTP/1.0 200 OK\nContent-Type: application/js"
-                          "on\nContent-Length: ~p\n\n~s",
-                          [byte_size(B), B]))).
-
-file_uri_to_file(FileName) ->
-    case string:left(FileName, 7) of
-      "file://" -> string:sub_string(FileName, 8);
-      _ -> FileName
-    end.
-
-format_file_uri(FileName) ->
-    format_file(file_uri_to_file(FileName)).
-
-format_file(FileName) ->
-    erl_tidy:file(FileName, [{backups, false}]),
-    #{format_result => true}.
