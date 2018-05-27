@@ -14,7 +14,7 @@
 
 %export for gen_server
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, code_change/3]).
--export([send_to_client/2]).
+-export([lsp_log/2, send_to_client/2]).
 
 -define(SERVER, ?MODULE).
 %state
@@ -43,8 +43,14 @@ handle_info(timeout, #state{socket = Socket} = State) ->
     {noreply, State};
 handle_info({tcp_closed, _Socket}, State) ->
     {stop, normal, State};
-handle_info(Data, State) ->
+handle_info(_Data, State) ->
     {noreply, State}.
+
+lsp_log(Msg, Args) ->
+    case maps:get(verbose, gen_lsp_doc_server:get_config(), false) of
+        true -> error_logger:info_msg(Msg, Args);
+        _ -> ok
+    end.
 
 remove_text_for_logging(#{params := #{contentChanges := ChangesList} = Params} = Input) ->
     Input#{params := Params#{contentChanges := lists:map(fun 
@@ -61,34 +67,47 @@ remove_text_for_logging(Input) ->
     Input.
 
 do_contents(Socket, #{method := Method} = Input) ->
-    error_logger:info_msg("LSP received ~p", [remove_text_for_logging(Input)]),
-    Handler = list_to_atom(binary_to_list(binary:replace(Method, <<"/">>, <<"_">>))),
-    case lists:keyfind(Handler, 1, lsp_handlers:module_info(exports)) of
-        false ->
-            error_logger:error_msg("Method not handled: ~p", [Method]),
-            ok;
-        {Function, 2} ->
-            Result = apply(lsp_handlers, Function, [Socket, maps:get(params, Input, undefined)]),
+    lsp_log("LSP received ~p", [remove_text_for_logging(Input)]),
+    case call_handler(Socket, Method, maps:get(params, Input, undefined)) of
+        {ok, Result} ->
             case maps:get(id, Input, undefined) of
                 undefined ->
                     ok;
                 Id ->
                     send_to_client(Socket, #{id => Id, result => Result})
-            end
+            end;
+        handler_not_found ->
+            error_logger:error_msg("Method not handled: ~p", [Method]);
+        handler_error ->
+            error
     end;
 do_contents(Socket, #{id := Id} = Input) ->
-    error_logger:info_msg("LSP received ~p", [Input]),
-    Handler = list_to_atom(binary_to_list(binary:replace(Id, <<"/">>, <<"_">>))),
+    lsp_log("LSP received ~p", [Input]),
+    case call_handler(Socket, Id, maps:get(result, Input, undefined)) of
+        {ok, _Result} ->
+            ok;
+        handler_not_found ->
+            error_logger:error_msg("Notification not handled: ~p ~p", [Id, Input]);
+        handler_error ->
+            error
+    end.
+
+call_handler(Socket, Name, ArgsMap) ->
+    Handler = list_to_atom(binary_to_list(binary:replace(Name, <<"/">>, <<"_">>))),
     case lists:keyfind(Handler, 1, lsp_handlers:module_info(exports)) of
         false ->
-            error_logger:error_msg("Notification not handled: ~p ~p", [Id, Input]),
-            ok;
+            handler_not_found;
         {Function, 2} ->
-            apply(lsp_handlers, Function, [Socket, maps:get(result, Input, undefined)])
+            try apply(lsp_handlers, Function, [Socket, ArgsMap]) of
+                Result -> {ok, Result}
+            catch
+                Error:Exception -> error_logger:error_msg("LSP handler error ~p:~p", [Error, Exception]),
+                handler_error
+            end
     end.
 
 send_to_client(Socket, Body) ->
-    error_logger:info_msg("LSP sends ~p", [Body]),
+    lsp_log("LSP sends ~p", [Body]),
     {ok, Json} = vscode_jsone:encode(Body),
     Header = iolist_to_binary(io_lib:fwrite("Content-Length: ~p", [byte_size(Json)])),
     gen_tcp:send(Socket, <<Header/binary, "\r\n\r\n", Json/binary>>).

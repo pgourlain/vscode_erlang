@@ -11,14 +11,12 @@
 -record(state, {modules}).
 
 start_link() ->
-    error_logger:info_msg("~p:start_link()", [?MODULE]),
     gen_server:start_link({local, ?SERVER}, ?MODULE, [],[]).
 
 get_help(Module, Function) -> 
     gen_server:call(?SERVER, {get_help, Module, Function}).
 
 init(_Args) ->
-    error_logger:info_msg("~p:init()", [?MODULE]),
     {ok, #state{modules=#{}}}.
 
 handle_call({get_help, Module, Function}, _From, State) ->

@@ -3,13 +3,6 @@
 -export([goto_definition/3, hover_info/3, references_info/3, codelens_info/1, find_function_with_line/2, find_record/2]).
 
 goto_definition(File, Line, Column) ->
-    try internal_goto_definition(File, Line, Column) of
-        _Any -> _Any
-    catch
-        _Err:_Reason -> error_logger:info_msg("goto_definition error ~p:~p", [_Err, _Reason])
-    end.
-
-internal_goto_definition(File, Line, Column) ->
     FileSyntaxTree = lsp_syntax:file_syntax_tree(File),
     case FileSyntaxTree of
         undefined ->
@@ -26,13 +19,6 @@ internal_goto_definition(File, Line, Column) ->
     end.
 
 hover_info(File, Line, Column) ->
-    try internal_hover_info(File, Line, Column) of
-        _Any -> _Any
-    catch
-        _Err:_Reason -> error_logger:info_msg("hover_info error ~p:~p", [_Err, _Reason])
-    end.
-
-internal_hover_info(File, Line, Column) ->
     FileSyntaxTree = lsp_syntax:file_syntax_tree(File),
     case FileSyntaxTree of
         undefined ->
@@ -52,9 +38,7 @@ internal_hover_info(File, Line, Column) ->
                                             _Any -> _Any
                                         catch
                                             _Err:Reason -> lists:flatten(io_lib:format("Unable to parse comment of '~p/~p'  \n  \n ~p", [Function, Arity, Reason]))
-                                        end,
-                                    %error_logger:info_msg("Documentation : ~p~n", [DocAsString]),                                
-                                                                        
+                                        end,                                                                        
                                     FunctionHeaders = join_strings(lists:map(fun ({clause, _Location, Args, _Guard, _Body}) ->
                                         function_header(Function, Args)
                                     end, Clauses), "  \n") ++ "  \n" ++ DocAsString,
@@ -76,13 +60,6 @@ internal_hover_info(File, Line, Column) ->
     end.
 
 references_info(File, Line, Column) ->
-    try internal_references_info(File, Line, Column) of
-        _Any -> _Any
-    catch
-        _Err:_Reason -> error_logger:info_msg("references_info error ~p:~p", [_Err, _Reason])
-    end.
-
-internal_references_info(File, Line, Column) ->
     case lsp_syntax:file_syntax_tree(File) of
         undefined -> #{result => <<"ko">>};
         FileSyntaxTree ->
@@ -120,13 +97,6 @@ references_analyze(SyntaxTree, Map) ->
     end.
 
 codelens_info(File) ->
-    try internal_codelens_info(File) of
-        _Any -> _Any
-    catch
-        _Err:_Reason -> error_logger:info_msg("codelens_info error ~p:~p", [_Err, _Reason]), []
-    end.
-
-internal_codelens_info(File) ->
     case lsp_syntax:file_syntax_tree(File) of
         undefined -> [];
         FileSyntaxTree ->
