@@ -52,9 +52,7 @@ internal_hover_info(File, Line, Column) ->
                                             _Any -> _Any
                                         catch
                                             _Err:Reason -> lists:flatten(io_lib:format("Unable to parse comment of '~p/~p'  \n  \n ~p", [Function, Arity, Reason]))
-                                        end,
-                                    %error_logger:info_msg("Documentation : ~p~n", [DocAsString]),                                
-                                                                        
+                                        end,                                                                        
                                     FunctionHeaders = join_strings(lists:map(fun ({clause, _Location, Args, _Guard, _Body}) ->
                                         function_header(Function, Args)
                                     end, Clauses), "  \n") ++ "  \n" ++ DocAsString,

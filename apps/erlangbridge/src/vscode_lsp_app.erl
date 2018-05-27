@@ -19,7 +19,6 @@ start(_Type, _Args) ->
     Port = get_port(),
     case vscode_lsp_app_sup:start_link(Port) of
     {ok, Pid} ->
-        error_logger:info_msg("vscode_lsp_app_sup:started"),
         {ok, Pid};
     _Any -> _Any        
     end.

@@ -102,7 +102,7 @@ get_include_path(File) ->
                 get_file_include_paths(File) ++
                 get_include_paths_from_rebar_config(File),
     Paths = lists:filter(fun filelib:is_dir/1, Candidates),
-    error_logger:info_msg("get_include_path: ~p", [Paths]),
+    gen_lsp_server:lsp_log("get_include_path: ~p", [Paths]),
     Paths.
 
 get_standard_include_paths() ->
@@ -134,7 +134,7 @@ get_define_from_rebar_config(File) ->
                 {ok, Terms} ->
                     ErlOpts = proplists:get_value(erl_opts, Terms, []),
                     Defines = rebar_define_to_epp_define(proplists:lookup_all(d, ErlOpts)),
-                    error_logger:info_msg("get_defines: ~p", [Defines]),
+                    gen_lsp_server:lsp_log("get_defines: ~p", [Defines]),
                     Defines;
                 _ ->
                     []
@@ -201,7 +201,6 @@ abspath(BaseDir, Path) ->
 
 lint(FileSyntaxTree, File) ->
     LintResult = erl_lint:module(FileSyntaxTree, File,[ {strong_validation}]),
-    %error_logger:info_msg("lint result '~p'",[LintResult]),
     case LintResult of
     % nothing wrong
     {ok, []} -> #{parse_result => true};

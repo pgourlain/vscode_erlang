@@ -11,7 +11,6 @@
 -record(state, {dict, config}).
 
 start_link() ->
-    error_logger:info_msg("~p:start_link()", [?MODULE]),
     gen_server:start_link({local, ?SERVER}, ?MODULE, [],[]).
 
 add_or_update_document(Uri, Document) -> 
@@ -33,7 +32,6 @@ get_config() ->
     gen_server:call(?SERVER, get_config).
 
 init(_Args) ->
-    error_logger:info_msg("~p:init()", [?MODULE]),
     {ok, #state{dict=dict:new(), config=#{}}}.
 
 handle_call({get_document, Uri}, _From, #state{dict=Dict}=State) ->
@@ -43,7 +41,6 @@ handle_call({get_document, Uri}, _From, #state{dict=Dict}=State) ->
     end;
 
 handle_call({add_or_update, Uri, Document},_From, #state{dict=Dict}=State) ->
-    %error_logger:info_msg("add_or_update for ~p", [Uri]),
     NewDict = dict:store(Uri, Document, Dict),
     {reply, ok, State#state{dict=NewDict}};
 
@@ -60,7 +57,6 @@ handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
 handle_cast({remove, Uri}, #state{dict=Dict}=State) ->
-    %error_logger:info_msg("remove for ~p", [Uri]),
     NewDict = dict:erase(Uri, Dict),
     {noreply, State#state{dict=NewDict}};
 

@@ -14,7 +14,7 @@
 
 %export for gen_server
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, code_change/3]).
--export([send_to_client/2]).
+-export([lsp_log/2, send_to_client/2]).
 
 -define(SERVER, ?MODULE).
 %state
@@ -43,8 +43,14 @@ handle_info(timeout, #state{socket = Socket} = State) ->
     {noreply, State};
 handle_info({tcp_closed, _Socket}, State) ->
     {stop, normal, State};
-handle_info(Data, State) ->
+handle_info(_Data, State) ->
     {noreply, State}.
+
+lsp_log(Msg, Args) ->
+    case maps:get(verbose, gen_lsp_doc_server:get_config(), false) of
+        true -> error_logger:info_msg(Msg, Args);
+        _ -> ok
+    end.
 
 remove_text_for_logging(#{params := #{contentChanges := ChangesList} = Params} = Input) ->
     Input#{params := Params#{contentChanges := lists:map(fun 
@@ -61,7 +67,7 @@ remove_text_for_logging(Input) ->
     Input.
 
 do_contents(Socket, #{method := Method} = Input) ->
-    error_logger:info_msg("LSP received ~p", [remove_text_for_logging(Input)]),
+    lsp_log("LSP received ~p", [remove_text_for_logging(Input)]),
     Handler = list_to_atom(binary_to_list(binary:replace(Method, <<"/">>, <<"_">>))),
     case lists:keyfind(Handler, 1, lsp_handlers:module_info(exports)) of
         false ->
@@ -77,7 +83,7 @@ do_contents(Socket, #{method := Method} = Input) ->
             end
     end;
 do_contents(Socket, #{id := Id} = Input) ->
-    error_logger:info_msg("LSP received ~p", [Input]),
+    lsp_log("LSP received ~p", [Input]),
     Handler = list_to_atom(binary_to_list(binary:replace(Id, <<"/">>, <<"_">>))),
     case lists:keyfind(Handler, 1, lsp_handlers:module_info(exports)) of
         false ->
@@ -88,7 +94,7 @@ do_contents(Socket, #{id := Id} = Input) ->
     end.
 
 send_to_client(Socket, Body) ->
-    error_logger:info_msg("LSP sends ~p", [Body]),
+    lsp_log("LSP sends ~p", [Body]),
     {ok, Json} = vscode_jsone:encode(Body),
     Header = iolist_to_binary(io_lib:fwrite("Content-Length: ~p", [byte_size(Json)])),
     gen_tcp:send(Socket, <<Header/binary, "\r\n\r\n", Json/binary>>).

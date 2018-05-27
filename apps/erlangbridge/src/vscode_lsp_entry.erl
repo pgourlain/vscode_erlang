@@ -5,13 +5,9 @@
 
 
 start() ->
-    error_logger:info_msg("vscode_lsp_entry started/0"),
     init_lsp().
 
 start(_Args) ->
-    %%TODO activate or not report depends on command line 
-    %%error_logger:tty(false),    
-    error_logger:info_msg("vscode_lsp_entry started/1(~p)", [_Args]),
     init_lsp().
 
 init_lsp() ->
