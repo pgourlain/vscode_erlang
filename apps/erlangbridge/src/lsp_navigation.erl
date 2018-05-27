@@ -14,7 +14,7 @@ goto_definition(File, Line, Column) ->
                 {FoundFile, FoundLine, FoundColumn} ->
                     #{result => <<"ok">>, uri => list_to_binary("file://" ++ FoundFile), line => FoundLine, character => FoundColumn};
                 _ ->
-                    #{result => <<"ko">>}
+                    throw(<<"Definition not found">>)
             end
     end.
 
@@ -315,7 +315,9 @@ find_element({variable, Variable, Line, Column}, CurrentFileSyntaxTree, CurrentF
         _ ->
             [{L, C} | _] = find_variable_occurrences(Variable, lists:last(FunClausesShadowingVariable)),
             {CurrentFile, L, C}
-    end.
+    end;
+find_element(_, _CurrentFileSyntaxTree, _CurrentFile) ->
+    undefined.
 
 find_function_with_line(FileSyntaxTree, Line) ->
     AllFunctionsInReverseOrder = lists:foldl(fun (TopLevelSyntaxTree, Acc) ->
