@@ -70,16 +70,12 @@ do_contents(Socket, #{method := Method} = Input) ->
     lsp_log("LSP received ~p", [remove_text_for_logging(Input)]),
     case call_handler(Socket, Method, maps:get(params, Input, undefined)) of
         {ok, Result} ->
-            case maps:get(id, Input, undefined) of
-                undefined ->
-                    ok;
-                Id ->
-                    send_to_client(Socket, #{id => Id, result => Result})
-            end;
+            send_response_with_id(Socket, Input, #{result => Result});
         handler_not_found ->
-            error_logger:error_msg("Method not handled: ~p", [Method]);
+            error_logger:error_msg("Method not handled: ~p", [Method]),
+            send_response_with_id(Socket, Input, #{error => <<"Method not handled">>});
         handler_error ->
-            error
+            send_response_with_id(Socket, Input, #{error => <<"Handler error">>})
     end;
 do_contents(Socket, #{id := Id} = Input) ->
     lsp_log("LSP received ~p", [Input]),
@@ -104,6 +100,14 @@ call_handler(Socket, Name, ArgsMap) ->
                 Error:Exception -> error_logger:error_msg("LSP handler error ~p:~p", [Error, Exception]),
                 handler_error
             end
+    end.
+
+send_response_with_id(Socket, Input, Response) ->
+    case maps:get(id, Input, undefined) of
+        undefined ->
+            ok;
+        Id ->
+            send_to_client(Socket, Response#{id => Id})
     end.
 
 send_to_client(Socket, Body) ->
