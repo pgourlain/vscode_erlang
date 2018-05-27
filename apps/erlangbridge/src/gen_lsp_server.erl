@@ -68,29 +68,42 @@ remove_text_for_logging(Input) ->
 
 do_contents(Socket, #{method := Method} = Input) ->
     lsp_log("LSP received ~p", [remove_text_for_logging(Input)]),
-    Handler = list_to_atom(binary_to_list(binary:replace(Method, <<"/">>, <<"_">>))),
-    case lists:keyfind(Handler, 1, lsp_handlers:module_info(exports)) of
-        false ->
-            error_logger:error_msg("Method not handled: ~p", [Method]),
-            ok;
-        {Function, 2} ->
-            Result = apply(lsp_handlers, Function, [Socket, maps:get(params, Input, undefined)]),
+    case call_handler(Socket, Method, maps:get(params, Input, undefined)) of
+        {ok, Result} ->
             case maps:get(id, Input, undefined) of
                 undefined ->
                     ok;
                 Id ->
                     send_to_client(Socket, #{id => Id, result => Result})
-            end
+            end;
+        handler_not_found ->
+            error_logger:error_msg("Method not handled: ~p", [Method]);
+        handler_error ->
+            error
     end;
 do_contents(Socket, #{id := Id} = Input) ->
     lsp_log("LSP received ~p", [Input]),
-    Handler = list_to_atom(binary_to_list(binary:replace(Id, <<"/">>, <<"_">>))),
+    case call_handler(Socket, Id, maps:get(result, Input, undefined)) of
+        {ok, _Result} ->
+            ok;
+        handler_not_found ->
+            error_logger:error_msg("Notification not handled: ~p ~p", [Id, Input]);
+        handler_error ->
+            error
+    end.
+
+call_handler(Socket, Name, ArgsMap) ->
+    Handler = list_to_atom(binary_to_list(binary:replace(Name, <<"/">>, <<"_">>))),
     case lists:keyfind(Handler, 1, lsp_handlers:module_info(exports)) of
         false ->
-            error_logger:error_msg("Notification not handled: ~p ~p", [Id, Input]),
-            ok;
+            handler_not_found;
         {Function, 2} ->
-            apply(lsp_handlers, Function, [Socket, maps:get(result, Input, undefined)])
+            try apply(lsp_handlers, Function, [Socket, ArgsMap]) of
+                Result -> {ok, Result}
+            catch
+                Error:Exception -> error_logger:error_msg("LSP handler error ~p:~p", [Error, Exception]),
+                handler_error
+            end
     end.
 
 send_to_client(Socket, Body) ->
