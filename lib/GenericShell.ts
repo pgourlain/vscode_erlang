@@ -150,10 +150,4 @@ export class ErlGenericShell extends EventEmitter {
         this.erlangShell.stdin.write(what);
         this.erlangShell.stdin.write("\r\n");
     }
-
-    public Kill() {
-        if (this.erlangShell) {
-            this.erlangShell.kill();
-        }
-    }
 }
