@@ -35,7 +35,7 @@ file_syntax_tree(File) ->
             case epp_parse_file(File, get_include_path(File), get_define_from_rebar_config(File)) of
                 {ok, FileSyntaxTree} ->
                     FileSyntaxTree;
-                _ -> undefined
+                _ -> throw("Cannot parse file " ++ File)
             end
     end.
 

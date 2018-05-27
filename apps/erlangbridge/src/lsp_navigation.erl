@@ -4,77 +4,63 @@
 
 goto_definition(File, Line, Column) ->
     FileSyntaxTree = lsp_syntax:file_syntax_tree(File),
-    case FileSyntaxTree of
-        undefined ->
-            #{result => <<"ko">>};
+    Module = list_to_atom(filename:rootname(filename:basename(File))),
+    What = element_at_position(Module, FileSyntaxTree, Line, Column),
+    case find_element(What, FileSyntaxTree, File) of
+        {FoundFile, FoundLine, FoundColumn} ->
+            #{result => <<"ok">>, uri => list_to_binary("file://" ++ FoundFile), line => FoundLine, character => FoundColumn};
         _ ->
-            Module = list_to_atom(filename:rootname(filename:basename(File))),
-            What = element_at_position(Module, FileSyntaxTree, Line, Column),
-            case find_element(What, FileSyntaxTree, File) of
-                {FoundFile, FoundLine, FoundColumn} ->
-                    #{result => <<"ok">>, uri => list_to_binary("file://" ++ FoundFile), line => FoundLine, character => FoundColumn};
-                _ ->
-                    throw(<<"Definition not found">>)
-            end
+            throw(<<"Definition not found">>)
     end.
 
 hover_info(File, Line, Column) ->
-    FileSyntaxTree = lsp_syntax:file_syntax_tree(File),
-    case FileSyntaxTree of
-        undefined ->
-            #{result => <<"ko">>};
-        _ ->
-            Module = list_to_atom(filename:rootname(filename:basename(File))),
-            What = element_at_position(Module, FileSyntaxTree, Line, Column),
-            case What of
-                {function_use, FunctionModule, Function, Arity} ->
-                    SyntaxTreeFile = lsp_syntax:module_syntax_tree(FunctionModule),                    
-                    case SyntaxTreeFile of
-                        {SyntaxTree, _File} ->
-                            case find_function(SyntaxTree, Function, Arity) of
-                                {function, _, _, _, Clauses} ->
-                                    DocAsString = try edoc:layout(edoc:get_doc(_File, [{hidden, true}, {private, true}]), 
-                                        [{layout, hover_doc_layout}, {filter, [{function, {Function, Arity}}]} ]) of
-                                            _Any -> _Any
-                                        catch
-                                            _Err:Reason -> lists:flatten(io_lib:format("Unable to parse comment of '~p/~p'  \n  \n ~p", [Function, Arity, Reason]))
-                                        end,                                                                        
-                                    FunctionHeaders = join_strings(lists:map(fun ({clause, _Location, Args, _Guard, _Body}) ->
-                                        function_header(Function, Args)
-                                    end, Clauses), "  \n") ++ "  \n" ++ DocAsString,
-                                    #{result => <<"ok">>, text => list_to_binary(FunctionHeaders)};
-                                _ ->
-                                    %check if a BIF
-                                    case lists:keyfind(Function,1, erlang:module_info(exports)) of
-                                    {Function, _} -> 
-                                        #{result => <<"ok">>, moduleName => list_to_binary("erlang"), functionName => list_to_binary(atom_to_list(Function))};
-                                    _  -> #{result => <<"ko">>}
-                                    end
-                            end;                                
+    Module = list_to_atom(filename:rootname(filename:basename(File))),
+    What = element_at_position(Module, lsp_syntax:file_syntax_tree(File), Line, Column),
+    case What of
+        {function_use, FunctionModule, Function, Arity} ->
+            SyntaxTreeFile = lsp_syntax:module_syntax_tree(FunctionModule),                    
+            case SyntaxTreeFile of
+                {SyntaxTree, _File} ->
+                    case find_function(SyntaxTree, Function, Arity) of
+                        {function, _, _, _, Clauses} ->
+                            DocAsString = try edoc:layout(edoc:get_doc(_File, [{hidden, true}, {private, true}]), 
+                                [{layout, hover_doc_layout}, {filter, [{function, {Function, Arity}}]} ]) of
+                                    _Any -> _Any
+                                catch
+                                    _Err:Reason -> lists:flatten(io_lib:format("Unable to parse comment of '~p/~p'  \n  \n ~p", [Function, Arity, Reason]))
+                                end,                                                                        
+                            FunctionHeaders = join_strings(lists:map(fun ({clause, _Location, Args, _Guard, _Body}) ->
+                                function_header(Function, Args)
+                            end, Clauses), "  \n") ++ "  \n" ++ DocAsString,
+                            #{result => <<"ok">>, text => list_to_binary(FunctionHeaders)};
                         _ ->
-                            #{result => <<"ok">>, moduleName => FunctionModule, functionName => Function}
-                    end;
+                            %check if a BIF
+                            case lists:keyfind(Function,1, erlang:module_info(exports)) of
+                            {Function, _} -> 
+                                #{result => <<"ok">>, moduleName => list_to_binary("erlang"), functionName => list_to_binary(atom_to_list(Function))};
+                            _  -> #{result => <<"ko">>}
+                            end
+                    end;                                
                 _ ->
-                    #{result => <<"ko">>}
-            end
+                    #{result => <<"ok">>, moduleName => FunctionModule, functionName => Function}
+            end;
+        _ ->
+            #{result => <<"ko">>}
     end.
 
 references_info(File, Line, Column) ->
-    case lsp_syntax:file_syntax_tree(File) of
+    MapResult = fold_in_file_syntax_tree(
+        lsp_syntax:file_syntax_tree(File), 
+        #{location => {Line, Column}, references => []}, 
+        fun references_analyze/2),
+    References = maps:get(references, MapResult),
+    case maps:get(ref, MapResult, undefined) of
         undefined -> #{result => <<"ko">>};
-        FileSyntaxTree ->
-            MapResult = fold_in_file_syntax_tree(FileSyntaxTree, 
-                #{location => {Line, Column}, references => []}, 
-                fun references_analyze/2),
-            References = maps:get(references, MapResult),
-            case maps:get(ref, MapResult, undefined) of
-                undefined -> #{result => <<"ko">>};
-                RefKey -> 
-                    Result = lists:map(fun ({_, {L,C}}) -> 
-                        #{uri => list_to_binary("file://" ++ File), line => L, character => C}
-                    end, lists:filter(fun ({K,_L}) -> K =:= RefKey end, References)),
-                    #{result => <<"ok">>, references => Result}
-            end
+        RefKey -> 
+            Result = lists:map(fun ({_, {L,C}}) -> 
+                #{uri => list_to_binary("file://" ++ File), line => L, character => C}
+            end, lists:filter(fun ({K,_L}) -> K =:= RefKey end, References)),
+            #{result => <<"ok">>, references => Result}
     end.
 
 references_analyze(SyntaxTree, Map) ->
@@ -97,28 +83,23 @@ references_analyze(SyntaxTree, Map) ->
     end.
 
 codelens_info(File) ->
-    case lsp_syntax:file_syntax_tree(File) of
-        undefined -> [];
-        FileSyntaxTree ->
-            %io:format("~p~n", [FileSyntaxTree]),
-            %filter only defined functions
-            MapResult = maps:filter(fun (_K,V) -> maps:is_key(func_name, V) end,
-                fold_in_file_syntax_tree(FileSyntaxTree, #{}, fun codelens_analyze/2)),
-            lists:map(fun (V) ->
-                {Line, Column} = maps:get(location, V),
-                Count = maps:get(count, V),
-                FName = list_to_binary(atom_to_list(maps:get(func_name, V))),
-                #{
-                    line => Line,
-                    character => Column,
-                    data => #{
-                        count => Count,
-                        func_name => FName,
-                        exported => maps:get(exported, V, false)
-                    }
-                }
-            end, maps:values(MapResult))
-    end.
+    %filter only defined functions
+    MapResult = maps:filter(fun (_K,V) -> maps:is_key(func_name, V) end,
+        fold_in_file_syntax_tree(lsp_syntax:file_syntax_tree(File), #{}, fun codelens_analyze/2)),
+    lists:map(fun (V) ->
+        {Line, Column} = maps:get(location, V),
+        Count = maps:get(count, V),
+        FName = list_to_binary(atom_to_list(maps:get(func_name, V))),
+        #{
+            line => Line,
+            character => Column,
+            data => #{
+                count => Count,
+                func_name => FName,
+                exported => maps:get(exported, V, false)
+            }
+        }
+    end, maps:values(MapResult)).
 
 codelens_analyze(SyntaxTree, Map) ->
     case SyntaxTree of

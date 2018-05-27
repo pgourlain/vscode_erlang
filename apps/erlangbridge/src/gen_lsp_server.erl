@@ -100,6 +100,9 @@ call_handler(Socket, Name, ArgsMap) ->
                 throw:Reason when is_binary(Reason) ->
                     lsp_log("LSP handler returned '~p'", [Reason]),
                     {handler_error, Reason};                    
+                throw:Reason when is_list(Reason) ->
+                    lsp_log("LSP handler returned '~p'", [Reason]),
+                    {handler_error, list_to_binary(Reason)};
                 Error:Exception ->
                     error_logger:error_msg("LSP handler error ~p:~p", [Error, Exception]),
                     {handler_error, <<"Handler error">>}
