@@ -97,16 +97,7 @@ textDocument_definition(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),
     Line = mapmapget(position, line, Params),
     Character = mapmapget(position, character, Params),
-    Result = lsp_navigation:goto_definition(lsp_utils:file_uri_to_file(Uri), Line + 1, Character + 1),
-    case Result of
-        #{uri := DefUri, line := DefLine, character := DefCharacter} = _ ->
-            #{
-                uri => lsp_utils:file_uri_to_vscode_uri(DefUri),
-                range => lsp_utils:client_range(DefLine, DefCharacter, DefCharacter)
-            };
-        _ ->
-            #{error => <<"Definition not found">>}
-    end.
+    lsp_navigation:goto_definition(lsp_utils:file_uri_to_file(Uri), Line + 1, Character + 1).
 
 textDocument_references(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),
@@ -129,19 +120,7 @@ textDocument_hover(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),
     Line = mapmapget(position, line, Params),
     Character = mapmapget(position, character, Params),
-    Result = lsp_navigation:hover_info(lsp_utils:file_uri_to_file(Uri), Line + 1, Character + 1),
-    case Result of
-        #{text := Text} = _ ->
-            #{contents => Text};
-        #{moduleName := Module, functionName := Function} = _ ->
-            Help = gen_lsp_help_server:get_help(Module, Function),
-            case Help of
-                undefined -> #{};
-                _ -> #{contents => Help}
-            end;
-        _ ->
-            #{}
-    end.
+    lsp_navigation:hover_info(lsp_utils:file_uri_to_file(Uri), Line + 1, Character + 1).
 
 textDocument_completion(_Socket, Params) ->
     case mapmapget(context, triggerKind, Params) of

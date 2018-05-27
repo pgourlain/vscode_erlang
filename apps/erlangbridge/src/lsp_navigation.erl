@@ -8,7 +8,10 @@ goto_definition(File, Line, Column) ->
     What = element_at_position(Module, FileSyntaxTree, Line, Column),
     case find_element(What, FileSyntaxTree, File) of
         {FoundFile, FoundLine, FoundColumn} ->
-            #{result => <<"ok">>, uri => list_to_binary("file://" ++ FoundFile), line => FoundLine, character => FoundColumn};
+            #{
+                uri => lsp_utils:file_uri_to_vscode_uri(list_to_binary("file://" ++ FoundFile)),
+                range => lsp_utils:client_range(FoundLine, FoundColumn, FoundColumn)
+            };
         _ ->
             throw(<<"Definition not found">>)
     end.
@@ -32,20 +35,26 @@ hover_info(File, Line, Column) ->
                             FunctionHeaders = join_strings(lists:map(fun ({clause, _Location, Args, _Guard, _Body}) ->
                                 function_header(Function, Args)
                             end, Clauses), "  \n") ++ "  \n" ++ DocAsString,
-                            #{result => <<"ok">>, text => list_to_binary(FunctionHeaders)};
+                            #{contents => list_to_binary(FunctionHeaders)};
                         _ ->
                             %check if a BIF
                             case lists:keyfind(Function,1, erlang:module_info(exports)) of
-                            {Function, _} -> 
-                                #{result => <<"ok">>, moduleName => list_to_binary("erlang"), functionName => list_to_binary(atom_to_list(Function))};
-                            _  -> #{result => <<"ko">>}
+                                {Function, _} -> module_function_hover(erlang, Function);
+                                _  -> throw("No help found for " ++ atom_to_list(Function))
                             end
                     end;                                
                 _ ->
-                    #{result => <<"ok">>, moduleName => FunctionModule, functionName => Function}
+                    module_function_hover(FunctionModule, Function)
             end;
         _ ->
-            #{result => <<"ko">>}
+            throw("No hover info found")
+    end.
+
+module_function_hover(Module, Function) ->
+    Help = gen_lsp_help_server:get_help(Module, Function),
+    case Help of
+        undefined -> throw("No help found for " ++ Module ++ ":" ++ atom_to_list(Function));
+        _ -> #{contents => Help}
     end.
 
 references_info(File, Line, Column) ->
