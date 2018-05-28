@@ -1,6 +1,6 @@
 -module(lsp_navigation).
 
--export([goto_definition/3, hover_info/3, references_info/3, codelens_info/1, find_function_with_line/2, find_record/2]).
+-export([goto_definition/3, hover_info/3, function_description/3, references_info/3, codelens_info/1, find_function_with_line/2, find_record/2]).
 
 goto_definition(File, Line, Column) ->
     FileSyntaxTree = lsp_syntax:file_syntax_tree(File),
@@ -21,40 +21,40 @@ hover_info(File, Line, Column) ->
     What = element_at_position(Module, lsp_syntax:file_syntax_tree(File), Line, Column),
     case What of
         {function_use, FunctionModule, Function, Arity} ->
-            SyntaxTreeFile = lsp_syntax:module_syntax_tree(FunctionModule),                    
-            case SyntaxTreeFile of
-                {SyntaxTree, _File} ->
-                    case find_function(SyntaxTree, Function, Arity) of
-                        {function, _, _, _, Clauses} ->
-                            DocAsString = try edoc:layout(edoc:get_doc(_File, [{hidden, true}, {private, true}]), 
-                                [{layout, hover_doc_layout}, {filter, [{function, {Function, Arity}}]} ]) of
-                                    _Any -> _Any
-                                catch
-                                    _Err:Reason -> lists:flatten(io_lib:format("Unable to parse comment of '~p/~p'  \n  \n ~p", [Function, Arity, Reason]))
-                                end,                                                                        
-                            FunctionHeaders = join_strings(lists:map(fun ({clause, _Location, Args, _Guard, _Body}) ->
-                                function_header(Function, Args)
-                            end, Clauses), "  \n") ++ "  \n" ++ DocAsString,
-                            #{contents => list_to_binary(FunctionHeaders)};
-                        _ ->
-                            %check if a BIF
-                            case lists:keyfind(Function,1, erlang:module_info(exports)) of
-                                {Function, _} -> module_function_hover(erlang, Function);
-                                _  -> throw("No help found for " ++ atom_to_list(Function))
-                            end
-                    end;                                
-                _ ->
-                    module_function_hover(FunctionModule, Function)
+            Description = function_description(Module, Function, Arity),
+            case Description of
+                undefined -> throw("No help found for " ++ Module ++ ":" ++ atom_to_list(Function));
+                _ -> #{contents => Description}
             end;
         _ ->
             throw("No hover info found")
     end.
 
-module_function_hover(Module, Function) ->
-    Help = gen_lsp_help_server:get_help(Module, Function),
-    case Help of
-        undefined -> throw("No help found for " ++ Module ++ ":" ++ atom_to_list(Function));
-        _ -> #{contents => Help}
+function_description(Module, Function, Arity) ->
+    SyntaxTreeFile = lsp_syntax:module_syntax_tree(Module),                    
+    case SyntaxTreeFile of
+        {SyntaxTree, File} ->
+            case find_function(SyntaxTree, Function, Arity) of
+                {function, _, _, _, Clauses} ->
+                    DocAsString = try edoc:layout(edoc:get_doc(File, [{hidden, true}, {private, true}]), 
+                        [{layout, hover_doc_layout}, {filter, [{function, {Function, Arity}}]} ]) of
+                            _Any -> _Any
+                        catch
+                            _Err:Reason -> lists:flatten(io_lib:format("Unable to parse comment of '~p/~p'  \n  \n ~p", [Function, Arity, Reason]))
+                        end,                                                                        
+                    FunctionHeaders = join_strings(lists:map(fun ({clause, _Location, Args, _Guard, _Body}) ->
+                        function_header(Function, Args)
+                    end, Clauses), "  \n") ++ "  \n" ++ DocAsString,
+                    list_to_binary(FunctionHeaders);
+                _ ->
+                    %check if a BIF
+                    case lists:keyfind(Function,1, erlang:module_info(exports)) of
+                        {Function, _} -> gen_lsp_help_server:get_help(erlang, Function);
+                        _  -> undefined
+                    end
+            end;                                
+        _ ->
+            gen_lsp_help_server:get_help(Module, Function)
     end.
 
 references_info(File, Line, Column) ->
@@ -155,7 +155,7 @@ codelens_add_or_update_refcount(Map, Key, Count) ->
     end.
 
 function_header(Function, Args) ->
-    atom_to_list(Function) ++ "(" ++ join_strings(lists:map(fun erl_prettypr:format/1, Args), ", ") ++ ")".
+    "**" ++ atom_to_list(Function) ++ "**(" ++ join_strings(lists:map(fun erl_prettypr:format/1, Args), ", ") ++ ")".
 
 join_strings([], _) ->
     [];

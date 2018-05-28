@@ -136,7 +136,7 @@ textDocument_completion(_Socket, Params) ->
             Text = <<TextBefore/binary, TriggerCharacter/binary>>,
             auto_complete(File, Line + 1, Text);
         _ ->
-            #{}
+            throw("Unexpected triggerKind")
     end.
 
 textDocument_formatting(_Socket, Params) ->
