@@ -54,7 +54,7 @@ workspace_didChangeConfiguration(Socket, _Params) ->
     request_configuration(Socket).
 
 textDocument_didOpen(Socket, Params) ->
-    File = file_uri_to_file(mapmapget(textDocument, uri, Params)),
+    File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
     case maps:get(autosave, gen_lsp_doc_server:get_config(), true) of
         true ->
             file_contents_update(Socket, File, undefined);
@@ -63,12 +63,12 @@ textDocument_didOpen(Socket, Params) ->
     end.
 
 textDocument_didClose(Socket, Params) ->
-    File = file_uri_to_file(mapmapget(textDocument, uri, Params)),
+    File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
     send_diagnostics(Socket, File, []),
     gen_lsp_doc_server:remove_document(File).
 
 textDocument_didSave(Socket, Params) ->
-    File = file_uri_to_file(mapmapget(textDocument, uri, Params)),
+    File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
     case maps:get(autosave, gen_lsp_doc_server:get_config(), false) of
         true ->
             file_contents_update(Socket, File, undefined);
@@ -77,7 +77,7 @@ textDocument_didSave(Socket, Params) ->
     end.
 
 textDocument_didChange(Socket, Params) ->
-    File = file_uri_to_file(mapmapget(textDocument, uri, Params)),
+    File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
     case maps:get(autosave, gen_lsp_doc_server:get_config(), true) of
         false ->
             Version = mapmapget(textDocument, version, Params),
@@ -97,28 +97,19 @@ textDocument_definition(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),
     Line = mapmapget(position, line, Params),
     Character = mapmapget(position, character, Params),
-    Result = lsp_navigation:goto_definition(file_uri_to_file(Uri), Line + 1, Character + 1),
-    case Result of
-        #{uri := DefUri, line := DefLine, character := DefCharacter} = _ ->
-            #{
-                uri => file_uri_to_vscode_uri(DefUri),
-                range => client_range(DefLine, DefCharacter, DefCharacter)
-            };
-        _ ->
-            #{error => <<"Definition not found">>}
-    end.
+    lsp_navigation:goto_definition(lsp_utils:file_uri_to_file(Uri), Line + 1, Character + 1).
 
 textDocument_references(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),
     Line = mapmapget(position, line, Params),
     Character = mapmapget(position, character, Params),
-    Result = lsp_navigation:references_info(file_uri_to_file(Uri), Line + 1, Character + 1),
+    Result = lsp_navigation:references_info(lsp_utils:file_uri_to_file(Uri), Line + 1, Character + 1),
     case Result of
         #{references := References} = _ ->
             lists:map(fun (#{uri := RefUri, line := RefLine, character := RefCharacter} = _) ->
                 #{
-                    uri => file_uri_to_vscode_uri(RefUri),
-                    range => client_range(RefLine, RefCharacter, RefCharacter)
+                    uri => lsp_utils:file_uri_to_vscode_uri(RefUri),
+                    range => lsp_utils:client_range(RefLine, RefCharacter, RefCharacter)
                 }
             end, References);
         _ ->
@@ -129,19 +120,7 @@ textDocument_hover(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),
     Line = mapmapget(position, line, Params),
     Character = mapmapget(position, character, Params),
-    Result = lsp_navigation:hover_info(file_uri_to_file(Uri), Line + 1, Character + 1),
-    case Result of
-        #{text := Text} = _ ->
-            #{contents => Text};
-        #{moduleName := Module, functionName := Function} = _ ->
-            Help = gen_lsp_help_server:get_help(Module, Function),
-            case Help of
-                undefined -> #{};
-                _ -> #{contents => Help}
-            end;
-        _ ->
-            #{}
-    end.
+    lsp_navigation:hover_info(lsp_utils:file_uri_to_file(Uri), Line + 1, Character + 1).
 
 textDocument_completion(_Socket, Params) ->
     case mapmapget(context, triggerKind, Params) of
@@ -150,18 +129,18 @@ textDocument_completion(_Socket, Params) ->
             Line = mapmapget(position, line, Params),
             Character = mapmapget(position, character, Params),
             TriggerCharacter = mapmapget(context, triggerCharacter, Params),
-            File = file_uri_to_file(Uri),
+            File = lsp_utils:file_uri_to_file(Uri),
             {ok, {_FileSyntaxTree, Contents}} = gen_lsp_doc_server:get_document(File),
             LineText = lists:nth(Line + 1, binary:split(Contents, <<"\n">>, [global])),
             TextBefore = binary:part(LineText, 0, min(Character - 1, byte_size(LineText))),
             Text = <<TextBefore/binary, TriggerCharacter/binary>>,
             auto_complete(File, Line + 1, Text);
         _ ->
-            #{}
+            throw("Unexpected triggerKind")
     end.
 
 textDocument_formatting(_Socket, Params) ->
-    erl_tidy:file(file_uri_to_file(mapmapget(textDocument, uri, Params)), [{backups, false}]).
+    erl_tidy:file(lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)), [{backups, false}]).
 
 textDocument_codeLens(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),
@@ -179,13 +158,13 @@ textDocument_codeLens(_Socket, Params) ->
                     _ ->
                         [references_code_lens(Uri, Item) | Acc]
                 end
-            end, [], lsp_navigation:codelens_info(file_uri_to_file(Uri)))
+            end, [], lsp_navigation:codelens_info(lsp_utils:file_uri_to_file(Uri)))
     end.
 
 exported_code_lens(#{data := Data} = Item) ->
     StartChar = maps:get(character, Item),
     #{
-        range => client_range(maps:get(line, Item), StartChar, StartChar + byte_size(maps:get(func_name, Data))),
+        range => lsp_utils:client_range(maps:get(line, Item), StartChar, StartChar + byte_size(maps:get(func_name, Data))),
         data => Data,
         command => #{title => <<"exported">>, command => <<>>}
     }.
@@ -193,7 +172,7 @@ exported_code_lens(#{data := Data} = Item) ->
 references_code_lens(Uri, #{data := Data} = Item) ->
     StartChar = maps:get(character, Item),
     #{
-        range => client_range(maps:get(line, Item), StartChar, StartChar + byte_size(maps:get(func_name, Data))),
+        range => lsp_utils:client_range(maps:get(line, Item), StartChar, StartChar + byte_size(maps:get(func_name, Data))),
         data => Data,
         command => case maps:get(count, Data) of
             0 -> #{title => <<"unused">>, command => <<>>};
@@ -201,7 +180,7 @@ references_code_lens(Uri, #{data := Data} = Item) ->
                 title => list_to_binary(integer_to_list(maps:get(count, Data)) ++ " private references"),
                 command => <<"editor.action.findReferences">>,
                 arguments => [
-                    file_uri_to_vscode_uri(Uri),
+                    lsp_utils:file_uri_to_vscode_uri(Uri),
                     #{lineNumber => maps:get(line, Item), column => maps:get(character, Item)}
                 ]
             }
@@ -258,12 +237,12 @@ send_diagnostics(Socket, File, Diagnostics) ->
     gen_lsp_server:send_to_client(Socket, #{
         method => <<"textDocument/publishDiagnostics">>,
         params => #{
-            uri => file_uri_to_vscode_uri(<<"file://", BinFile/binary>>),
+            uri => lsp_utils:file_uri_to_vscode_uri(<<"file://", BinFile/binary>>),
             diagnostics => lists:map(fun (Diagnostic) ->
                 Info = maps:get(info, Diagnostic),
                 #{
                     severity => severity(maps:get(type, Diagnostic)),
-                    range => client_range(maps:get(line, Info), maps:get(character, Info), 256),
+                    range => lsp_utils:client_range(maps:get(line, Info), maps:get(character, Info), 256),
                     message => maps:get(message, Info),
                     source => <<"erl">>
                 }
@@ -274,12 +253,6 @@ send_diagnostics(Socket, File, Diagnostics) ->
 severity(<<"info">>) -> 3;
 severity(<<"warning">>) -> 2;
 severity(_) -> 1.
-
-client_range(Line, StartChar, EndChar) ->
-    #{
-        <<"start">> => #{line => Line - 1, character => StartChar - 1},
-        <<"end">> => #{line => Line - 1, character => EndChar - 1}
-    }.
 
 auto_complete(File, Line, Text) ->
     RegexList = [
@@ -315,16 +288,3 @@ auto_complete(File, Line, Text) ->
 
 mapmapget(Key1, Key2, Map) ->
     maps:get(Key2, maps:get(Key1, Map)).
-
-file_uri_to_file(Uri) ->
-    binary_to_list(case Uri of
-        <<"file:///", Drive, "%3A", Rest/binary>> -> <<Drive, ":", Rest/binary>>;
-        <<"file://", Rest/binary>> -> Rest;
-      _ -> Uri
-    end).
-
-file_uri_to_vscode_uri(Uri) ->
-    case Uri of 
-        <<"file://", Drive, ":/", Rest/binary>> -> <<"file:///", Drive, "%3A/", Rest/binary>>;
-      _ -> Uri
-    end.
