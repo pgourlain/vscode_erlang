@@ -1,5 +1,22 @@
 # Change log
 
+## Version 0.4.1 (May 29, 2018)
+### LSP fixes and improvements
+* [PR #78](https://github.com/pgourlain/vscode_erlang/pull/78) 
+	- Linter use defines from rebar.config
+* [PR #79](https://github.com/pgourlain/vscode_erlang/pull/79) 
+	- Fix Codelens when AutoSave is on
+* [PR #80](https://github.com/pgourlain/vscode_erlang/pull/80) 
+* [PR #81](https://github.com/pgourlain/vscode_erlang/pull/81) 
+	- Improvement : LSP Error handling
+* [PR #83](https://github.com/pgourlain/vscode_erlang/pull/83)
+	- Issue #82 : filename:basedir() is not exist in OTP 18.0
+
+Thanks to 
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+---
+
+
 ## Version 0.4.0 (May 26, 2018)
 ### LSP purely in Erlang
 * [PR #77](https://github.com/pgourlain/vscode_erlang/pull/77) 
