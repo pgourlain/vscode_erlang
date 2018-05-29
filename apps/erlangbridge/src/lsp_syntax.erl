@@ -40,7 +40,7 @@ file_syntax_tree(File) ->
     end.
 
 module_syntax_tree(Module) ->
-    File = find_module_file(Module, maps:get(root, gen_lsp_doc_server:get_config(), "")),
+    File = find_module_file(Module, gen_lsp_config_server:root()),
     case File of
         undefined -> undefined;
         _ -> {file_syntax_tree(File), File}
@@ -106,7 +106,7 @@ get_include_path(File) ->
     Paths.
 
 get_standard_include_paths() ->
-    RootDir = maps:get(root, gen_lsp_doc_server:get_config(), ""),
+    RootDir = gen_lsp_config_server:root(),
     [
         filename:join([RootDir, "_build", "default", "lib"]),
         filename:join([RootDir, "apps"]),
@@ -114,8 +114,8 @@ get_standard_include_paths() ->
     ].
 
 get_settings_include_paths() ->
-    SettingPaths = maps:get(includePaths, gen_lsp_doc_server:get_config(), []),
-    RootDir = maps:get(root, gen_lsp_doc_server:get_config(), ""),
+    SettingPaths = gen_lsp_config_server:includePaths(),
+    RootDir = gen_lsp_config_server:root(),
     lists:map(fun (Path) ->
         abspath(RootDir, Path)
     end, SettingPaths).

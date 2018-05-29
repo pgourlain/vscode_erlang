@@ -21,9 +21,9 @@ hover_info(File, Line, Column) ->
     What = element_at_position(Module, lsp_syntax:file_syntax_tree(File), Line, Column),
     case What of
         {function_use, FunctionModule, Function, Arity} ->
-            Description = function_description(Module, Function, Arity),
+            Description = function_description(FunctionModule, Function, Arity),
             case Description of
-                undefined -> throw("No help found for " ++ Module ++ ":" ++ atom_to_list(Function));
+                undefined -> throw("No help found for " ++ FunctionModule ++ ":" ++ atom_to_list(Function));
                 _ -> #{contents => Description}
             end;
         _ ->
