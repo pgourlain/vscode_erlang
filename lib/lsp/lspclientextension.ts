@@ -222,7 +222,8 @@ function getPort(callback) {
 }
 
 export function activate(context: ExtensionContext) {
-    lspOutputChannel = Window.createOutputChannel('Erlang Language Server');
+    if (Workspace.getConfiguration("erlang").get("verbose", false))
+        lspOutputChannel = Window.createOutputChannel('Erlang Language Server');
 
     let middleware: Middleware = {
         workspace: {
