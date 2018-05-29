@@ -23,11 +23,11 @@ hover_info(File, Line, Column) ->
         {function_use, FunctionModule, Function, Arity} ->
             Description = function_description(FunctionModule, Function, Arity),
             case Description of
-                undefined -> throw("No help found for " ++ FunctionModule ++ ":" ++ atom_to_list(Function));
+                undefined -> #{contents => <<>>};
                 _ -> #{contents => Description}
             end;
         _ ->
-            throw("No hover info found")
+            #{contents => <<>>}
     end.
 
 function_description(Module, Function, Arity) ->
