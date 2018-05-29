@@ -6,14 +6,7 @@
     textDocument_formatting/2, textDocument_codeLens/2]).
 
 initialize(_Socket, Params) ->
-    gen_lsp_doc_server:set_config(#{
-        root => binary_to_list(maps:get(rootPath, Params)),
-        linting => true,
-        includePaths => [],
-        codeLensEnabled => false,
-        autosave => true,
-        verbose => false
-    }),
+    gen_lsp_config_server:update_config(root, binary_to_list(maps:get(rootPath, Params))),
     #{capabilities => #{
         textDocumentSync => 1, % Full
         definitionProvider => true,
@@ -35,15 +28,10 @@ shutdown(_Socket, _) ->
 exit(_Socket, _) ->
     init:stop().
 
-configuration(Socket, [ErlangSection, _, FilesSecton, _]) ->
+configuration(Socket, [ErlangSection, ComputedSecton]) ->
     gen_lsp_server:lsp_log("configuration ~p", [gen_lsp_doc_server:get_documents()]),
-    gen_lsp_doc_server:set_config((gen_lsp_doc_server:get_config())#{
-        linting => maps:get(linting, ErlangSection, true),
-        includePaths => maps:get(includePaths, ErlangSection, []),
-        codeLensEnabled => maps:get(codeLensEnabled, ErlangSection, false),
-        autosave => maps:get(autoSave, FilesSecton, <<"afterDelay">>) =:= <<"afterDelay">>,
-        verbose => maps:get(verbose, ErlangSection, false)
-    }),
+    gen_lsp_config_server:update_config(erlang, ErlangSection),
+    gen_lsp_config_server:update_config(computed, ComputedSecton),
     lists:foreach(fun (File) ->
         gen_lsp_server:lsp_log("File = ~p",[File]),
         send_diagnostics(Socket, File, []),
@@ -55,12 +43,7 @@ workspace_didChangeConfiguration(Socket, _Params) ->
 
 textDocument_didOpen(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
-    case maps:get(autosave, gen_lsp_doc_server:get_config(), true) of
-        true ->
-            file_contents_update(Socket, File, undefined);
-        _ ->
-            ok
-    end.
+    gen_lsp_config_server:autosave() andalso file_contents_update(Socket, File, undefined).
 
 textDocument_didClose(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
@@ -69,16 +52,11 @@ textDocument_didClose(Socket, Params) ->
 
 textDocument_didSave(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
-    case maps:get(autosave, gen_lsp_doc_server:get_config(), false) of
-        true ->
-            file_contents_update(Socket, File, undefined);
-        _ ->
-            ok
-    end.
+    gen_lsp_config_server:autosave() andalso file_contents_update(Socket, File, undefined).
 
 textDocument_didChange(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
-    case maps:get(autosave, gen_lsp_doc_server:get_config(), true) of
+    case gen_lsp_config_server:autosave() of
         false ->
             Version = mapmapget(textDocument, version, Params),
             Contents = if
@@ -144,7 +122,7 @@ textDocument_formatting(_Socket, Params) ->
 
 textDocument_codeLens(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),
-    case maps:get(codeLensEnabled, gen_lsp_doc_server:get_config(), false) of
+    case gen_lsp_config_server:codeLensEnabled() of
         false -> [];
         _ ->
             lists:foldl(fun (#{data := Data} = Item, Acc) ->
@@ -188,7 +166,7 @@ references_code_lens(Uri, #{data := Data} = Item) ->
     }.
 
 file_contents_update(Socket, File, Contents) ->
-    Linting = maps:get(linting, gen_lsp_doc_server:get_config(), true),
+    Linting = gen_lsp_config_server:linting(),
     {ContentsFile, Cleaner} = case Contents of
         undefined ->
             {File, fun () -> ok end};
@@ -219,8 +197,7 @@ validate_config_file(Socket, File, ContentsFile) ->
 
 mktemp(Contents) ->
     Rand = integer_to_list(binary:decode_unsigned(crypto:strong_rand_bytes(8)), 36),
-    TempPath = filename:basedir(user_cache, "ERL"),
-    TempFile = filename:join(TempPath, Rand),
+    TempFile = filename:join(gen_lsp_config_server:tmpdir(), Rand),
     filelib:ensure_dir(TempFile),
     file:write_file(TempFile, Contents),
     TempFile.
@@ -229,7 +206,7 @@ request_configuration(Socket) ->
     gen_lsp_server:send_to_client(Socket, #{
         id => <<"configuration">>,
         method => <<"workspace/configuration">>,
-        params => #{items => [#{section => <<"erlang">>}, #{section => <<"files">>}]}
+        params => #{items => [#{section => <<"erlang">>}, #{section => <<"<computed>">>}]}
     }).
 
 send_diagnostics(Socket, File, Diagnostics) ->

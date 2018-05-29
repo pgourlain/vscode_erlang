@@ -28,7 +28,7 @@ init_lsp() ->
 compile_needed_modules() ->
     CompileOptions = [verbose, binary, report],
     do_compile(["src/vscode_lsp_app", "src/gen_lsp_server", 
-        "src/gen_lsp_sup", "src/gen_lsp_doc_sup","src/gen_lsp_doc_server",
+        "src/gen_lsp_sup", "src/gen_lsp_doc_sup","src/gen_lsp_doc_server", "src/gen_lsp_config_sup","src/gen_lsp_config_server",
         "src/gen_lsp_help_sup","src/gen_lsp_help_server", "src/lsp_handlers", "src/lsp_utils",
         "src/vscode_lsp_app_sup", "src/lsp_navigation", "src/lsp_syntax", "src/lsp_completion",
         "src/gen_connection", "src/vscode_jsone","src/vscode_jsone_decode","src/hover_doc_layout"], CompileOptions)

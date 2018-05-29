@@ -1,5 +1,6 @@
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import {
     workspace as Workspace, window as Window, ExtensionContext, TextDocument, OutputChannel, WorkspaceFolder,
     Uri, Disposable, WorkspaceConfiguration, ProviderResult, CodeLens, FileSystemWatcher, workspace
@@ -54,26 +55,22 @@ namespace Configuration {
         if (!params.items) {
             return null;
         }
-        let result: (ErlangSettings | null)[] = [];
+        let result: any[] = [];
         for (let item of params.items) {
-            // The server asks the client for configuration settings without a section
-            // If a section is present we return null to indicate that the configuration
-            // is not supported.
             if (item.section) {
-                let erlSectionConfig = JSON.parse(JSON.stringify(Workspace.getConfiguration(item.section)));
-                result.push(erlSectionConfig);
-                result.push(null);
-                continue;
+                if (item.section === "<computed>") {
+                    result.push({
+                        autosave: Workspace.getConfiguration("files").get("autoSave", "afterDelay") === "afterDelay",
+                        tmpdir: os.tmpdir()
+                    });
+                }
+                else {
+                    result.push(Workspace.getConfiguration(item.section));
+                }
             }
-            let config: WorkspaceConfiguration;
-            if (item.scopeUri) {
-                config = Workspace.getConfiguration('erlang', client.protocol2CodeConverter.asUri(item.scopeUri));
-            } else {
-                config = Workspace.getConfiguration('erlang');
-            }
-
-            let erlConfig = JSON.parse(JSON.stringify(config));
-            result.push(erlConfig);
+            else {
+                result.push(null);                
+            }
         }
         return result;
     }
@@ -225,7 +222,8 @@ function getPort(callback) {
 }
 
 export function activate(context: ExtensionContext) {
-    lspOutputChannel = Window.createOutputChannel('Erlang Language Server');
+    if (Workspace.getConfiguration("erlang").get("verbose", false))
+        lspOutputChannel = Window.createOutputChannel('Erlang Language Server');
 
     let middleware: Middleware = {
         workspace: {

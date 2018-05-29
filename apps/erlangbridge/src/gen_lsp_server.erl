@@ -47,10 +47,7 @@ handle_info(_Data, State) ->
     {noreply, State}.
 
 lsp_log(Msg, Args) ->
-    case maps:get(verbose, gen_lsp_doc_server:get_config(), false) of
-        true -> error_logger:info_msg(Msg, Args);
-        _ -> ok
-    end.
+    gen_lsp_config_server:verbose() andalso error_logger:info_msg(Msg, Args).
 
 remove_text_for_logging(#{params := #{contentChanges := ChangesList} = Params} = Input) ->
     Input#{params := Params#{contentChanges := lists:map(fun 
