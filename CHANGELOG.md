@@ -1,5 +1,12 @@
 # Change log
 
+## Version 0.4.2 (May 29, 2018)
+### Fix #84, #85
+* [PR #86](https://github.com/pgourlain/vscode_erlang/pull/86) 
+	- Fix #84 and #85
+---
+
+
 ## Version 0.4.1 (May 29, 2018)
 ### LSP fixes and improvements
 * [PR #78](https://github.com/pgourlain/vscode_erlang/pull/78) 
