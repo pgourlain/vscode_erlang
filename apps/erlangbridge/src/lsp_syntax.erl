@@ -91,10 +91,15 @@ epp_parse_file(File, IncludePath, Defines) ->
     end.
 
 do_epp_parse_file(File, FIO, IncludePath, Defines) ->
-    case epp:open(File, FIO, {1,1}, IncludePath, Defines) of
+    case epp:open(as_string(File), FIO, {1,1}, IncludePath, Defines) of
         {ok, Epp} -> {ok, epp:parse_file(Epp)};
         {error, _Err} -> {error, _Err} 
     end.
+
+as_string(Text) when is_binary(Text) ->
+    binary_to_list(Text);
+as_string(Text) ->
+    Text.
 
 get_include_path(File) ->
     Candidates = get_standard_include_paths() ++
