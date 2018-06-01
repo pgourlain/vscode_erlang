@@ -1,5 +1,18 @@
 # Change log
 
+## Version 0.4.3 (May 29, 2018)
+### Dialyzer support and Linter fix
+* [PR #87](https://github.com/pgourlain/vscode_erlang/pull/87) 
+	- Add Dialyzer support
+* [PR #88](https://github.com/pgourlain/vscode_erlang/pull/88) 
+	- Fix linter include paths when the recommended Erlang structure is used.
+
+Thanks to 
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+* [Nigel Rook](https://github.com/NigelRook)
+---
+
+
 ## Version 0.4.2 (May 29, 2018)
 ### Fix #84, #85
 * [PR #86](https://github.com/pgourlain/vscode_erlang/pull/86) 
