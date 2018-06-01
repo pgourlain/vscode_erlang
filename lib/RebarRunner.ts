@@ -112,7 +112,7 @@ export class RebarRunner implements vscode.Disposable {
 			this.runScript(vscode.workspace.rootPath, ["dialyzer"]).then(data => {
                 this.diagnosticCollection.clear();
                 var lines = data.split("\n");
-                var currentFile = undefined;
+                var currentFile = null;
         		var lineAndMessage = new RegExp("^ +([0-9]+): *(.+)$");
                 var diagnostics: { [id: string]: vscode.Diagnostic[]; } = {};
                 for (var i = 0; i < lines.length; ++i) {
@@ -130,12 +130,16 @@ export class RebarRunner implements vscode.Disposable {
                                 currentFile = filepath;
                         }
                     }
+                    else
+                        currentFile = null;
                 }
                 utils.keysFromDictionary(diagnostics).forEach(filepath => {
                     var fileUri = vscode.Uri.file(filepath);
                     var diags = diagnostics[filepath];
                     this.diagnosticCollection.set(fileUri, diags);
                 });
+                if (utils.keysFromDictionary(diagnostics).length > 0)
+                    vscode.commands.executeCommand("workbench.action.problems.focus");
             }, reject => {});
 		} catch (e) {
 			vscode.window.showErrorMessage('Couldn\'t execute rebar.\n' + e);
