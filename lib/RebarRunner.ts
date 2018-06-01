@@ -20,12 +20,14 @@ export class RebarRunner implements vscode.Disposable {
 	private getDepsCommand: vscode.Disposable;
 	private updateDepsCommand: vscode.Disposable;
 	private eunitCommand: vscode.Disposable;
+	private dialyzerCommand: vscode.Disposable;
 
 	public activate(subscriptions: vscode.Disposable[]) {
 		this.compileCommand = vscode.commands.registerCommand('extension.rebarBuild', () => { this.runRebarCompile(); });
 		this.getDepsCommand = vscode.commands.registerCommand('extension.rebarGetDeps', () => { this.runRebarCommand(['get-deps']); });
 		this.updateDepsCommand = vscode.commands.registerCommand('extension.rebarUpdateDeps', () => { this.runRebarCommand(['update-deps']); });
 		this.eunitCommand = vscode.commands.registerCommand('extension.rebareunit', () => { this.runRebarCommand(['eunit']) });
+		this.eunitCommand = vscode.commands.registerCommand('extension.dialyzer', () => { this.runDialyzer() });
 		vscode.workspace.onDidCloseTextDocument(this.onCloseDocument.bind(this), null, subscriptions);
 		vscode.workspace.onDidOpenTextDocument(this.onOpenDocument.bind(this), null, subscriptions);
 		this.diagnosticCollection = vscode.languages.createDiagnosticCollection("erlang");
@@ -40,6 +42,7 @@ export class RebarRunner implements vscode.Disposable {
 		this.getDepsCommand.dispose();
 		this.updateDepsCommand.dispose();
 		this.eunitCommand.dispose();
+		this.dialyzerCommand.dispose();
 	}
 
 	private runRebarCompile() {
@@ -98,8 +101,46 @@ export class RebarRunner implements vscode.Disposable {
 	private runRebarCommand(command: string[]): void {
 		try {
 			this.runScript(vscode.workspace.rootPath, command).then(data => {
-
 			}, reject => {});
+		} catch (e) {
+			vscode.window.showErrorMessage('Couldn\'t execute rebar.\n' + e);
+		}
+	}
+
+    private runDialyzer(): void {
+		try {
+			this.runScript(vscode.workspace.rootPath, ["dialyzer"]).then(data => {
+                this.diagnosticCollection.clear();
+                var lines = data.split("\n");
+                var currentFile = null;
+        		var lineAndMessage = new RegExp("^ +([0-9]+): *(.+)$");
+                var diagnostics: { [id: string]: vscode.Diagnostic[]; } = {};
+                for (var i = 0; i < lines.length; ++i) {
+                    if (lines[i]) {
+                        var match = lineAndMessage.exec(lines[i]);
+                        if (match && currentFile) {
+                            if (!diagnostics[currentFile])
+                                diagnostics[currentFile] = [];
+                            var range = new vscode.Range(Number(match[1]) - 1, 0, Number(match[1]) - 1, 255);
+                            diagnostics[currentFile].push(new vscode.Diagnostic(range , match[2], vscode.DiagnosticSeverity.Information));
+                        }
+                        else {
+                            var filepath = path.join(vscode.workspace.rootPath, lines[i]);
+                            if (fs.existsSync(filepath))
+                                currentFile = filepath;
+                        }
+                    }
+                    else
+                        currentFile = null;
+                }
+                utils.keysFromDictionary(diagnostics).forEach(filepath => {
+                    var fileUri = vscode.Uri.file(filepath);
+                    var diags = diagnostics[filepath];
+                    this.diagnosticCollection.set(fileUri, diags);
+                });
+                if (utils.keysFromDictionary(diagnostics).length > 0)
+                    vscode.commands.executeCommand("workbench.action.problems.focus");
+            }, reject => {});
 		} catch (e) {
 			vscode.window.showErrorMessage('Couldn\'t execute rebar.\n' + e);
 		}
@@ -160,10 +201,10 @@ export class RebarRunner implements vscode.Disposable {
 			rebar.stdout.on('data', buffer => {
 				var bufferAsString = buffer.toString();
 				output += bufferAsString;
-				outputChannel.appendLine(bufferAsString);
+				outputChannel.append(bufferAsString);
 			});
 			rebar.stderr.on('data', buffer => {
-				outputChannel.appendLine(buffer.toString());
+				outputChannel.append(buffer.toString());
 			});
 
 			rebar.on('close', (exitCode) => {

@@ -17,7 +17,8 @@
 		"onCommand:extension.rebarBuild",
 		"onCommand:extension.rebarGetDeps",
 		"onCommand:extension.rebarUpdateDeps",
-		"onCommand:extension.erleunit"
+		"onCommand:extension.erleunit",
+		"onCommand:extension.dialyzer"
 	],
 	"main": "./out/lib/extension",
 	"contributes": {
@@ -118,6 +119,10 @@
 			{
 				"command": "extension.erleunit",
 				"title": "Erlang: run eunit tests with erlang shell"
+			},
+			{
+				"command": "extension.dialyzer",
+				"title": "Erlang: rebar dialyzer"
 			}
 		],
 		"keybindings": [
