@@ -51,7 +51,11 @@ The modified code may be automatically build before debugger is started. To set 
 Then, before debugging is started, modified files will be recompiled automatically.
 
 ## Available commands
+Support for Erlang tools, including rebar3, EUnit and Dialyzer
+
 ![commands](images/vscode-erlang-commands.png)
+
+* Dialyzer warnings displayed in Problems tab for easy navigation
 
 ## Settings
   * `erlang.erlangPath` - Directory location of erl/escript
