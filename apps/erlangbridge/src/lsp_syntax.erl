@@ -126,7 +126,23 @@ get_settings_include_paths() ->
     end, SettingPaths).
 
 get_file_include_paths(File) ->
-    [filename:dirname(File), filename:rootname(File)].
+    Paths = [filename:dirname(File), filename:rootname(File)],
+    case get_file_include_directory(File) of
+        undefined ->
+            Paths;
+        Path ->
+            [Path|Paths]
+    end.
+
+get_file_include_directory(File) ->
+    case lists:reverse(filename:split(filename:dirname(File))) of
+        ["src"|Rest] ->
+            filename:join(lists:reverse(["include"|Rest]));
+        [_, "src"|Rest] ->
+            filename:join(lists:reverse(["include"|Rest]));
+        _Other ->
+            undefined
+    end.
 
 get_define_from_rebar_config(File) ->
     RebarConfig = find_rebar_config(filename:dirname(File)),
