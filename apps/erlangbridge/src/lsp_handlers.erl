@@ -1,21 +1,21 @@
 -module(lsp_handlers).
 
--export([initialize/2, initialized/2, shutdown/2, exit/2, configuration/2, workspace_didChangeConfiguration/2,
+-export([initialize/2, initialized/2, shutdown/2, exit/2, configuration/2,
+    workspace_didChangeConfiguration/2, workspace_didChangeWatchedFiles/2,
     textDocument_didOpen/2, textDocument_didClose/2, textDocument_didSave/2, textDocument_didChange/2,
     textDocument_definition/2, textDocument_references/2, textDocument_hover/2, textDocument_completion/2,
     textDocument_formatting/2, textDocument_codeLens/2]).
 
 initialize(_Socket, Params) ->
     gen_lsp_config_server:update_config(root, binary_to_list(maps:get(rootPath, Params))),
+    gen_lsp_doc_server:root_available(),
     #{capabilities => #{
         textDocumentSync => 1, % Full
         definitionProvider => true,
         documentFormattingProvider => true,
         referencesProvider => true,
         hoverProvider => true,
-        completionProvider => #{triggerCharacters => lists:map(fun (Char) ->
-            <<Char>>
-        end, ":#.abcdefghijklmnopqrstuvwxyzABCDEFGHIJAKLMNOPQRSTUVWXYZ_@0123456789")},
+        completionProvider => #{triggerCharacters => <<":#.">>},
         codeLensProvider => true
     }}.
 
@@ -41,6 +41,16 @@ configuration(Socket, [ErlangSection, ComputedSecton]) ->
 workspace_didChangeConfiguration(Socket, _Params) ->
     request_configuration(Socket).
 
+workspace_didChangeWatchedFiles(_Socket, Params) ->
+    lists:foreach(fun
+        (#{uri := Uri, type := 1}) -> % Created 
+            gen_lsp_doc_server:add_project_file(lsp_utils:file_uri_to_file(Uri));
+        (#{uri := _Uri, type := 2}) -> % Changed  
+            nothing;
+        (#{uri := Uri, type := 3}) -> % Deleted  
+            gen_lsp_doc_server:remove_project_file(lsp_utils:file_uri_to_file(Uri))
+    end, maps:get(changes, Params)).
+
 textDocument_didOpen(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
     gen_lsp_config_server:autosave() andalso file_contents_update(Socket, File, undefined).
@@ -56,6 +66,13 @@ textDocument_didSave(Socket, Params) ->
 
 textDocument_didChange(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
+    case filename:extension(File) of
+        ".erl" ->
+            [ContentChange] = maps:get(contentChanges, Params),
+            gen_lsp_doc_server:set_document_attribute(File, contents, maps:get(text, ContentChange));
+        _ ->
+            ok
+    end,
     case gen_lsp_config_server:autosave() of
         false ->
             Version = mapmapget(textDocument, version, Params),
@@ -63,8 +80,8 @@ textDocument_didChange(Socket, Params) ->
                 Version =:= 1 ->
                     undefined;
                 true ->
-                    [ContentChange] = maps:get(contentChanges, Params),
-                    maps:get(text, ContentChange)
+                    [ParseContentChange] = maps:get(contentChanges, Params),
+                    maps:get(text, ParseContentChange)
             end,
             file_contents_update(Socket, File, Contents);
         _ ->
@@ -105,21 +122,10 @@ textDocument_completion(_Socket, Params) ->
     Line = mapmapget(position, line, Params),
     Character = mapmapget(position, character, Params),
     File = lsp_utils:file_uri_to_file(Uri),
-    {ok, {_FileSyntaxTree, Contents}} = gen_lsp_doc_server:get_document(File),
+    Contents = gen_lsp_doc_server:get_document_attribute(File, contents),
     LineText = lists:nth(Line + 1, binary:split(Contents, <<"\n">>, [global])),
-    TextBefore = binary:part(LineText, 0, min(Character, byte_size(LineText))),
-    auto_complete(File, Line + 1, get_text(TextBefore, Params)).
-
-get_text(TextBefore, Params) ->
-    case mapmapget(context, triggerKind, Params) of
-        1 -> % Invoked
-            TextBefore;
-        2 -> % TriggerCharacter
-            TriggerCharacter = mapmapget(context, triggerCharacter, Params),
-            <<TextBefore/binary, TriggerCharacter/binary>>;
-        _ ->
-            throw("Unexpected triggerKind")
-    end.
+    TextBefore = binary:part(LineText, 0, min(Character + 1, byte_size(LineText))),
+    auto_complete(File, Line + 1, TextBefore).
 
 textDocument_formatting(_Socket, Params) ->
     erl_tidy:file(lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)), [{backups, false}]).

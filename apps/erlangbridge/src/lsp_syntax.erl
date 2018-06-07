@@ -1,20 +1,19 @@
 -module(lsp_syntax).
 
--export([parse_source_file/2, validate_parsed_source_file/1, parse_config_file/2, file_syntax_tree/1, module_syntax_tree/1, find_module_file/2]).
+-export([parse_source_file/2, validate_parsed_source_file/1, parse_config_file/2, file_syntax_tree/1, module_syntax_tree/1]).
 
 parse_source_file(File, ContentsFile) ->
     case epp_parse_file(ContentsFile, get_include_path(File), get_define_from_rebar_config(File)) of
         {ok, FileSyntaxTree} ->
             UpdatedSyntaxTree = update_file_in_forms(File, ContentsFile, FileSyntaxTree),
-            {_Result, Contents} = file:read_file(ContentsFile),
-            gen_lsp_doc_server:add_or_update_document(File, {UpdatedSyntaxTree, Contents}),
+            gen_lsp_doc_server:set_document_attribute(File, syntax_tree, UpdatedSyntaxTree),
             #{parse_result => true};
         _ ->
             #{parse_result => false, error_message => <<"Cannot open file">>}
     end.
 
 validate_parsed_source_file(File) ->
-    {ok, {FileSyntaxTree, _Contents}} = gen_lsp_doc_server:get_document(File),
+    FileSyntaxTree = gen_lsp_doc_server:get_document_attribute(File, syntax_tree),
     lint(FileSyntaxTree, File).
 
 parse_config_file(File, ContentsFile) ->
@@ -28,47 +27,21 @@ parse_config_file(File, ContentsFile) ->
     end.
 
 file_syntax_tree(File) ->
-    case gen_lsp_doc_server:get_document(File) of
-        {ok, {FileSyntaxTree, _Contents}} ->
-            FileSyntaxTree;
-        not_found -> 
+    case gen_lsp_doc_server:get_document_attribute(File, syntax_tree) of
+        undefined -> 
             case epp_parse_file(File, get_include_path(File), get_define_from_rebar_config(File)) of
-                {ok, FileSyntaxTree} ->
-                    FileSyntaxTree;
+                {ok, FileSyntaxTree} -> FileSyntaxTree;
                 _ -> throw("Cannot parse file " ++ File)
-            end
+            end;
+        FileSyntaxTree ->
+            FileSyntaxTree
     end.
 
 module_syntax_tree(Module) ->
-    File = find_module_file(Module, gen_lsp_config_server:root()),
+    File = gen_lsp_doc_server:get_module_file(Module),
     case File of
         undefined -> undefined;
         _ -> {file_syntax_tree(File), File}
-    end.
-
-find_module_file(Module, RootDir) ->
-    Files = filelib:fold_files(RootDir, atom_to_list(Module) ++ ".erl", true, fun (Found, Acc) ->
-        case list_to_atom(filename:rootname(filename:basename(Found))) of
-            Module -> [Found | Acc];
-            _ -> Acc
-        end
-    end, []),
-    case Files of
-        [] ->
-            undefined;
-        [OneFile] ->
-            OneFile;
-        [AFile|_] ->
-            BuildElements = filename:split(RootDir) ++ ["_build"],
-            NoBuildFiles = lists:filter(fun (Filename) ->
-                not lists:prefix(BuildElements, filename:split(Filename))
-            end, Files),
-            case NoBuildFiles of
-                [ANoBuioldFile|_] ->
-                    ANoBuioldFile;
-                _ ->
-                    AFile
-            end
     end.
 
 update_file_in_forms(File, File, FileSyntaxTree) ->

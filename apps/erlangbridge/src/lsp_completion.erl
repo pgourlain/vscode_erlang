@@ -134,7 +134,6 @@ atom(File, Prefix) ->
             _ -> false
         end
     end, gen_lsp_config_server:standard_modules()),
-    project_modules(),
     ProjectModules = lists:filtermap(fun (Module) ->
         case lists:prefix(Prefix, Module) of
             true -> {true, #{
@@ -143,7 +142,7 @@ atom(File, Prefix) ->
             }};
             _ -> false
         end
-    end, project_modules()),
+    end, gen_lsp_doc_server:project_modules()),
     BIFs = lists:filtermap(fun (Function) ->
         case lists:prefix(Prefix, Function) of
             true -> {true, #{
@@ -183,8 +182,3 @@ local_atoms(File) ->
         ({_, Name}, Type, Acc) ->
             [#{label => Name, kind => Type} | Acc]
     end, [], AtomTypes).
-
-project_modules() -> % TODO store
-    sets:to_list(filelib:fold_files(gen_lsp_config_server:root(), ".erl$", true, fun (Found, Acc) ->
-        sets:add_element(filename:rootname(filename:basename(Found)), Acc)
-    end, sets:new())).

@@ -9,11 +9,11 @@ client_range(Line, StartChar, EndChar) ->
     }.
 
 file_uri_to_file(Uri) ->
-    binary_to_list(case Uri of
+    re:replace(case Uri of
         <<"file:///", Drive, "%3A", Rest/binary>> -> <<Drive, ":", Rest/binary>>;
         <<"file://", Rest/binary>> -> Rest;
       _ -> Uri
-    end).
+    end, <<"\\\\">>, <<"/">>, [global, {return, list}]).
 
 file_uri_to_vscode_uri(Uri) ->
     case Uri of 

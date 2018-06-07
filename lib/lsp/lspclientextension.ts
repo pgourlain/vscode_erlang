@@ -86,10 +86,14 @@ namespace Configuration {
         });
         fileSystemWatcher = workspace.createFileSystemWatcher('**/*.erl');
         fileSystemWatcher.onDidCreate(uri => {
-            client.sendNotification(DidChangeWatchedFilesNotification.type,
-                {changes: [{uri: uri.fsPath, type: FileChangeType.Created}]});
-        })
-    }
+          client.sendNotification(DidChangeWatchedFilesNotification.type,
+            { changes: [{ uri: uri.fsPath, type: FileChangeType.Created }] });
+        });
+        fileSystemWatcher.onDidDelete(uri => {
+          client.sendNotification(DidChangeWatchedFilesNotification.type,
+            { changes: [{ uri: uri.fsPath, type: FileChangeType.Deleted }] });
+        });
+     }
 
     export function dispose() {
         if (configurationListener) {
@@ -287,4 +291,3 @@ export function deactivate(): Thenable<void> {
     Configuration.dispose();
     return client.stop();
 }
-
