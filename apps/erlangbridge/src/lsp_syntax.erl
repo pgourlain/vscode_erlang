@@ -175,7 +175,6 @@ rebar_define_to_epp_define([H|T]) ->
     _ -> rebar_define_to_epp_define(T)
     end.
 
-
 get_include_paths_from_rebar_config(File) ->
     RebarConfig = find_rebar_config(filename:dirname(File)),
     case RebarConfig of

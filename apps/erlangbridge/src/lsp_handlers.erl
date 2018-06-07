@@ -101,18 +101,22 @@ textDocument_hover(_Socket, Params) ->
     lsp_navigation:hover_info(lsp_utils:file_uri_to_file(Uri), Line + 1, Character + 1).
 
 textDocument_completion(_Socket, Params) ->
+    Uri = mapmapget(textDocument, uri, Params),
+    Line = mapmapget(position, line, Params),
+    Character = mapmapget(position, character, Params),
+    File = lsp_utils:file_uri_to_file(Uri),
+    {ok, {_FileSyntaxTree, Contents}} = gen_lsp_doc_server:get_document(File),
+    LineText = lists:nth(Line + 1, binary:split(Contents, <<"\n">>, [global])),
+    TextBefore = binary:part(LineText, 0, min(Character, byte_size(LineText))),
+    auto_complete(File, Line + 1, get_text(TextBefore, Params)).
+
+get_text(TextBefore, Params) ->
     case mapmapget(context, triggerKind, Params) of
+        1 -> % Invoked
+            TextBefore;
         2 -> % TriggerCharacter
-            Uri = mapmapget(textDocument, uri, Params),
-            Line = mapmapget(position, line, Params),
-            Character = mapmapget(position, character, Params),
             TriggerCharacter = mapmapget(context, triggerCharacter, Params),
-            File = lsp_utils:file_uri_to_file(Uri),
-            {ok, {_FileSyntaxTree, Contents}} = gen_lsp_doc_server:get_document(File),
-            LineText = lists:nth(Line + 1, binary:split(Contents, <<"\n">>, [global])),
-            TextBefore = binary:part(LineText, 0, min(Character - 1, byte_size(LineText))),
-            Text = <<TextBefore/binary, TriggerCharacter/binary>>,
-            auto_complete(File, Line + 1, Text);
+            <<TextBefore/binary, TriggerCharacter/binary>>;
         _ ->
             throw("Unexpected triggerKind")
     end.
@@ -236,7 +240,8 @@ auto_complete(File, Line, Text) ->
         {"[^a-zA-Z0-0_@]([a-z][a-zA-Z0-0_@]*):((?:[a-z][a-zA-Z0-0_@]*)?)$", module_function},
         {"#((?:[a-z][a-zA-Z0-0_@]*)?)$", record},
         {"#([a-z][a-zA-Z0-0_@]*)\.((?:[a-z][a-zA-Z0-0_@]*)?)$", field},
-        {"[^a-zA-Z0-0_@]([A-Z][a-zA-Z0-0_@]*)$", variable}
+        {"[^a-zA-Z0-0_@]([A-Z][a-zA-Z0-0_@]*)$", variable},
+        {"([a-z][a-zA-Z0-0_@]*)$", atom}
     ],
     case match_regex(Text, RegexList) of
         {module_function, [Module, Function]} ->
@@ -247,6 +252,8 @@ auto_complete(File, Line, Text) ->
             lsp_completion:field(File, list_to_atom(binary_to_list(Record)), binary_to_list(Field));
         {variable, [Variable]} ->
             lsp_completion:variable(File, Line, binary_to_list(Variable));
+        {atom, [Atom]} ->
+            lsp_completion:atom(File, binary_to_list(Atom));
         {nomatch, _}
             -> []
     end.
