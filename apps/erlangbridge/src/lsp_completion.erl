@@ -25,9 +25,9 @@ module_function(Module, Prefix) ->
     end.
 
 module_function_item(Module, Name) ->
-    Help = gen_lsp_help_server:get_help(Module, list_to_atom(Name)),
-    case Help of
-        undefined ->
+    Description = lsp_navigation:function_description(Module, list_to_atom(Name)),
+    case Description of
+        <<>> ->
             #{
                 label => list_to_binary(Name),
                 kind => 3 % Function
@@ -37,7 +37,7 @@ module_function_item(Module, Name) ->
                 label => list_to_binary(Name),
                 kind => 3, % Function
                 documentation => #{
-                    value => Help,
+                    value => Description,
                     kind => <<"markdown">>
                 }
             }
@@ -134,7 +134,6 @@ atom(File, Prefix) ->
             _ -> false
         end
     end, gen_lsp_config_server:standard_modules()),
-    project_modules(),
     ProjectModules = lists:filtermap(fun (Module) ->
         case lists:prefix(Prefix, Module) of
             true -> {true, #{
@@ -143,17 +142,10 @@ atom(File, Prefix) ->
             }};
             _ -> false
         end
-    end, project_modules()),
+    end, gen_lsp_doc_server:project_modules()),
     BIFs = lists:filtermap(fun (Function) ->
         case lists:prefix(Prefix, Function) of
-            true -> {true, #{
-                label => list_to_binary(Function),
-                kind => 3, % Function
-                documentation => #{
-                    value => gen_lsp_help_server:get_help(erlang, list_to_atom(Function)),
-                    kind => <<"markdown">>
-                }
-            }};
+            true -> {true, module_function_item(erlang, Function)};
             _ -> false
         end
     end, gen_lsp_config_server:bifs()),
@@ -180,11 +172,11 @@ local_atoms(File) ->
     maps:fold(fun
         ({_, _Name}, 0, Acc) ->
             Acc;
+        ({_, Name}, 3, Acc) -> 
+            Module = list_to_atom(filename:rootname(filename:basename(File))),
+            [#{label => Name, kind => 3, documentation =>
+                #{value => lsp_navigation:function_description(Module, Name),  kind => <<"markdown">> }
+            } | Acc];
         ({_, Name}, Type, Acc) ->
             [#{label => Name, kind => Type} | Acc]
     end, [], AtomTypes).
-
-project_modules() -> % TODO store
-    sets:to_list(filelib:fold_files(gen_lsp_config_server:root(), ".erl$", true, fun (Found, Acc) ->
-        sets:add_element(filename:rootname(filename:basename(Found)), Acc)
-    end, sets:new())).

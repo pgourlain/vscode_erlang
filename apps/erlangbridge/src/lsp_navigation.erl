@@ -1,6 +1,7 @@
 -module(lsp_navigation).
 
--export([goto_definition/3, hover_info/3, function_description/3, references_info/3, codelens_info/1, find_function_with_line/2, find_record/2]).
+-export([goto_definition/3, hover_info/3, function_description/2, function_description/3, references_info/3, codelens_info/1,
+    find_function_with_line/2, get_function_arities/2, find_record/2]).
 
 goto_definition(File, Line, Column) ->
     FileSyntaxTree = lsp_syntax:file_syntax_tree(File),
@@ -21,13 +22,21 @@ hover_info(File, Line, Column) ->
     What = element_at_position(Module, lsp_syntax:file_syntax_tree(File), Line, Column),
     case What of
         {function_use, FunctionModule, Function, Arity} ->
-            Description = function_description(FunctionModule, Function, Arity),
-            case Description of
-                undefined -> #{contents => <<>>};
-                _ -> #{contents => Description}
-            end;
+            #{contents => function_description(FunctionModule, Function, Arity)};
         _ ->
             #{contents => <<>>}
+    end.
+
+function_description(Module, Function) ->
+    Help = gen_lsp_help_server:get_help(Module, Function),
+    case Help of
+        undefined ->
+            lists:foldl(fun (Arity, Acc) ->
+                Description = function_description(Module, Function, Arity),
+                <<Acc/binary, Description/binary>>
+            end, <<>>, get_function_arities(Module, Function));
+        _ ->
+            Help
     end.
 
 function_description(Module, Function, Arity) ->
@@ -40,7 +49,7 @@ function_description(Module, Function, Arity) ->
                         [{layout, hover_doc_layout}, {filter, [{function, {Function, Arity}}]} ]) of
                             _Any -> _Any
                         catch
-                            _Err:Reason -> lists:flatten(io_lib:format("Unable to parse comment of '~p/~p'  \n  \n ~p", [Function, Arity, Reason]))
+                            _Err:_Reason -> ""
                         end,                                                                        
                     FunctionHeaders = join_strings(lists:map(fun ({clause, _Location, Args, _Guard, _Body}) ->
                         function_header(Function, Args)
@@ -50,11 +59,15 @@ function_description(Module, Function, Arity) ->
                     %check if a BIF
                     case lists:keyfind(Function,1, erlang:module_info(exports)) of
                         {Function, _} -> gen_lsp_help_server:get_help(erlang, Function);
-                        _  -> undefined
+                        _  -> <<>>
                     end
             end;                                
         _ ->
-            gen_lsp_help_server:get_help(Module, Function)
+            Help = gen_lsp_help_server:get_help(Module, Function),
+            case Help of
+                undefined -> <<>>;
+                _ -> Help
+            end
     end.
 
 references_info(File, Line, Column) ->
@@ -345,6 +358,19 @@ variable_location_in_fun_clause(Variable, Line, Column, Clause) ->
 
 variable_in_fun_clause_arguments(Variable, {clause, {_, _}, Arguments, _, _}) ->
     length(find_variable_occurrences(Variable, Arguments)) > 0.
+
+get_function_arities(Module, Function) ->
+    case lsp_syntax:module_syntax_tree(Module) of
+        {FileSyntaxTree, _File} ->
+            lists:sort(fold_in_file_syntax_tree(FileSyntaxTree, [], fun
+                ({function, _Position, FoundFunction, Arity, _Clauses}, Acc) when FoundFunction =:= Function ->
+                    [Arity | Acc];
+                (_, Acc) ->
+                    Acc
+            end));
+        _ ->
+            []
+    end.
 
 find_function(FileSyntaxTree, Function, Arity) ->
     Fun = fun (SyntaxTree, _File) ->

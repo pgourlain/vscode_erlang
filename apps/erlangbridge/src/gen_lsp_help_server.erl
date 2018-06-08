@@ -112,8 +112,15 @@ tag(<<"p">>, _Attributes, TagsStack) ->
     {<<>>, [<<"  \n">> | TagsStack]};
 tag(<<"dt">>, _Attributes, TagsStack) ->
     {<<"  \n**">>, [<<"**  \n">> | TagsStack]};
-tag(<<"h3">>, _Attributes, TagsStack) ->
-    {<<"\n#### ">>, [<<"\n">> | TagsStack]};
+tag(<<"strong">>, _Attributes, TagsStack) ->
+    {<<" **">>, [<<"** ">> | TagsStack]};
+tag(<<"h3">>, Attributes, TagsStack) ->
+    case re:run(Attributes, <<"func-types-title">>) of
+        nomatch ->
+            {<<"\n#### ">>, [<<"\n">> | TagsStack]};
+        _ ->
+            {<<"  \n">>, [<<"  \n">> | TagsStack]}
+    end;
 tag(_Tag, Attributes, TagsStack) ->
     case re:run(Attributes, <<"bold_code">>) of
         nomatch ->
@@ -121,7 +128,10 @@ tag(_Tag, Attributes, TagsStack) ->
                 nomatch ->
                     case re:run(Attributes, <<"REFTYPES|func-types-title">>) of
                         nomatch ->
-                            {<<>>, [<<>> | TagsStack]};
+                            case re:run(Attributes, <<"REFBODY">>) of
+                                nomatch -> {<<>>, [<<>> | TagsStack]};
+                                _ -> {<<"  \n">>, [<<>> | TagsStack]}
+                            end;
                         _ ->
                             {<<>>, [off | TagsStack]}
                     end;
@@ -129,7 +139,7 @@ tag(_Tag, Attributes, TagsStack) ->
                     {<<>>, [<<"  \n">> | TagsStack]}
             end;
         _ ->
-            {<<" **">>, [<<" **">> | TagsStack]}
+            {<<" **">>, [<<"**">> | TagsStack]}
     end.
 
 end_tag([off | TagsStackTail]) ->
