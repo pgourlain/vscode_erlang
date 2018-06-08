@@ -1,6 +1,19 @@
 # Change log
 
-## Version 0.4.3 (May 29, 2018)
+
+## Version 0.4.4 (June 8, 2018)
+### Autocompletion improvements
+* [PR #92](https://github.com/pgourlain/vscode_erlang/pull/92) 
+	- Autocomplete for atoms
+* [PR #93](https://github.com/pgourlain/vscode_erlang/pull/93) 
+	- Autocompletion improvements
+
+Thanks to 
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+---
+
+
+## Version 0.4.3 (June 1, 2018)
 ### Dialyzer support and Linter fix
 * [PR #87](https://github.com/pgourlain/vscode_erlang/pull/87) 
 	- Add Dialyzer support
