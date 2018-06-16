@@ -15,6 +15,7 @@ export interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArgum
     arguments: string;
     verbose: boolean;
     addEbinsToCodepath: boolean;
+    erlangPath : string; // path of erlang if specified in configuration
 }
 
 export class FunctionBreakpoint implements DebugProtocol.Breakpoint {
@@ -45,7 +46,6 @@ export class FunctionBreakpoint implements DebugProtocol.Breakpoint {
 export class ErlangShellForDebugging extends ErlGenericShell {
     breakPoints: DebugProtocol.Breakpoint[];
     functionBreakPoints: FunctionBreakpoint[];
-    function
     started : boolean;
     argsFileName: string;
     constructor(whichOutput: IErlangShellOutput) {

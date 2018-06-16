@@ -162,6 +162,8 @@ function readRebarConfigWithErlangShell(): Thenable<CompileArgs> {
     return new Promise<CompileArgs>((a, r) => {
 
         var erlangShell = new erlang.ErlangShell();
+        erlangShell.erlangPath = vscode.workspace.getConfiguration("erlang").get("erlangPath", null);
+
         erlangShell.Start(vscode.workspace.rootPath, []).then(
             _ => {
                 var compileArgs = new CompileArgs();
@@ -281,6 +283,8 @@ function compile(compileArgs: CompileArgs): Thenable<string[]> {
         }).then(args => {
             var argsCmd = args.IncludeDirs.concat(["-o", eunitDirectory]).concat(args.ErlangFiles);
             var erlc = new erlang.ErlangCompilerShell();
+            erlc.erlangPath = vscode.workspace.getConfiguration("erlang").get("erlangPath", null);
+
             return erlc.Start(vscode.workspace.rootPath, argsCmd.map<string>(x => x.toString()))
                 .then(exitCode => {
                     return args.ErlangFiles;

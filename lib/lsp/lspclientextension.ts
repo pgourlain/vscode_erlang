@@ -195,6 +195,7 @@ function waitForSocket(options:any, callback:any, _tries:any) {
     return new Promise<number>((a, r) => {
         //TODO: #if DEBUG
         var compiler = new ErlangShellForDebugging(lspOutputChannel);
+        compiler.erlangPath = Workspace.getConfiguration("erlang").get("erlangPath", null);
         var erlFiles = ["vscode_lsp_entry.erl"];
         //create dir if not exists
         let ebinDir = path.normalize(path.join(erlangBridgePath, "..", "ebin"));
@@ -265,6 +266,8 @@ export function activate(context: ExtensionContext) {
         return new Promise<StreamInfo>(async (resolve, reject) => {
             await compile_erlang_connection();
             let erlangLsp = new ErlangShellLSP(lspOutputChannel);
+            erlangLsp.erlangPath = Workspace.getConfiguration("erlang").get("erlangPath", null);
+
             getPort(async function (port) {
                 erlangLsp.Start("", erlangBridgePath + "/..", port, "src", "");
                 let socket = await waitForSocket({ port: port }, function (error, socket) {
