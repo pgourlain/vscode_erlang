@@ -86,7 +86,7 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 	}
 
 	protected initializeRequest(response: DebugProtocol.InitializeResponse, args: DebugProtocol.InitializeRequestArguments): void {
-		//this.debug("Initializing erlang debugger");
+		//this.debug("Initializing erlang debugger");		
 		this.erlDebugger = new ErlangShellForDebugging(this);
 		this.erlDebugger.on('close', (exitCode) => {
 			this.quitEvent(exitCode);
@@ -148,6 +148,7 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 			this.debug(`	path      : ${args.cwd}`);
 			this.debug(`	arguments : ${args.arguments}`);
 		}
+		this.erlDebugger.erlangPath = args.erlangPath;
 		var bridgeBinPath = path.normalize(path.join(erlangBridgePath, "..", "ebin"))
 		this.erlDebugger.Start(args.erlpath, args.cwd, this._port, bridgeBinPath, args).then(r => {
 			this.sendResponse(response);

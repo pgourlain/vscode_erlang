@@ -7,7 +7,7 @@ import * as path from 'path';
 import { ErlangShellForDebugging } from './ErlangShellDebugger';
 import { IErlangShellOutput } from './GenericShell';
 import * as Adapter from './vscodeAdapter';
-import * as fs from 'fs'; 
+import * as fs from 'fs';
 
 export var erlangBridgePath = path.join(__dirname, "..", "..", "apps", "erlangbridge", "src");
 

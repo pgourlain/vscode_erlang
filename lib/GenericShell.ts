@@ -1,5 +1,6 @@
 import { ChildProcess, spawn } from 'child_process'
 import { EventEmitter } from 'events'
+import * as utils from './utils';
 
 //inspired from https://github.com/WebFreak001/code-debug/blob/master/src/backend/mi2/mi2.ts for inspiration of an EventEmitter 
 const nonOutput = /^(?:\d*|undefined)[\*\+\=]|[\~\@\&\^]/;
@@ -20,6 +21,8 @@ export class ErlGenericShell extends EventEmitter {
     protected channelOutput: IErlangShellOutput;
     protected buffer: string = "";
     protected errbuf: string = "";
+    public erlangPath: string = null;
+
 
     constructor(whichOutput: IErlangShellOutput) {
         super();
@@ -48,9 +51,19 @@ export class ErlGenericShell extends EventEmitter {
                 if (this.channelOutput) {
                     channel.show();
                 }
-                if (!quiet)
+                if (!quiet) {
+                    if (this.erlangPath) {
+                        this.log("log",`using erlang binaries from path : '${this.erlangPath}'`);
+                    }
                     this.log("log", `starting : ${processName} \r\n` + args.join(" "));
-                this.erlangShell = spawn(processName, args, { cwd: startDir, shell: true, stdio: 'pipe' });
+                }
+                var childEnv = null;
+                if (this.erlangPath) {
+                    childEnv = process.env;
+                    childEnv.PATH = this.erlangPath +";"+childEnv.PATH
+                }
+
+                this.erlangShell = spawn(processName, args, { cwd: startDir, shell: true, stdio: 'pipe', env : childEnv });
                 this.erlangShell.on('error', error => {
                     this.log("stderr", error.message);
                     if (process.platform == 'win32') {
