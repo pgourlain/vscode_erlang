@@ -261,7 +261,8 @@ export function activate(context: ExtensionContext) {
         outputChannel: lspOutputChannel
     }
 
-    client = new LanguageClient('Erlang Language Server', 'Erlang Language Server',  async () => {
+    let clientName = Workspace.getConfiguration("erlang").get("verbose", false) ? 'Erlang Language Server' : '';
+    client = new LanguageClient(clientName, async () => {
         return new Promise<StreamInfo>(async (resolve, reject) => {
             await compile_erlang_connection();
             let erlangLsp = new ErlangShellLSP(lspOutputChannel);

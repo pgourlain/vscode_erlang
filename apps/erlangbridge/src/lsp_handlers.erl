@@ -247,6 +247,7 @@ auto_complete(File, Line, Text) ->
         {"#((?:[a-z][a-zA-Z0-0_@]*)?)$", record},
         {"#([a-z][a-zA-Z0-0_@]*)\.((?:[a-z][a-zA-Z0-0_@]*)?)$", field},
         {"[^a-zA-Z0-0_@]([A-Z][a-zA-Z0-0_@]*)$", variable},
+        {"^-([a-z]*)$", attribute},
         {"([a-z][a-zA-Z0-0_@]*)$", atom}
     ],
     case match_regex(Text, RegexList) of
@@ -258,6 +259,8 @@ auto_complete(File, Line, Text) ->
             lsp_completion:field(File, list_to_atom(binary_to_list(Record)), binary_to_list(Field));
         {variable, [Variable]} ->
             lsp_completion:variable(File, Line, binary_to_list(Variable));
+        {attribute, [Attribute]} ->
+            lsp_completion:attribute(binary_to_list(Attribute));
         {atom, [Atom]} ->
             lsp_completion:atom(File, binary_to_list(Atom));
         {nomatch, _}

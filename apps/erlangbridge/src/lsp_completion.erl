@@ -1,6 +1,6 @@
 -module(lsp_completion).
 
--export([module_function/2, record/2, field/3, variable/3, atom/2]).
+-export([module_function/2, record/2, field/3, variable/3, atom/2, attribute/1]).
 
 module_function(Module, Prefix) ->
     SyntaxTreeFile = lsp_syntax:module_syntax_tree(Module),
@@ -180,3 +180,16 @@ local_atoms(File) ->
         ({_, Name}, Type, Acc) ->
             [#{label => Name, kind => Type} | Acc]
     end, [], AtomTypes).
+
+attribute(Prefix) ->
+    Attributes = ["module", "export", "include", "include_lib", "record", "behaviour", "import",
+        "compile", "vsn", "on_load", "callback", "define", "file", "type", "spec"],
+    lists:filtermap(fun (Attribute) ->
+        case lists:prefix(Prefix, Attribute) of
+            true -> {true, #{
+                label => list_to_binary(Attribute),
+                kind => 11 % Unit
+            }};
+            _ -> false
+        end
+    end, Attributes).
