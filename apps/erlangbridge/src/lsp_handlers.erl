@@ -128,7 +128,29 @@ textDocument_completion(_Socket, Params) ->
     auto_complete(File, Line + 1, TextBefore).
 
 textDocument_formatting(_Socket, Params) ->
-    erl_tidy:file(lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)), [{backups, false}]).
+    File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
+    Contents = case gen_lsp_doc_server:get_document_attribute(File, contents) of
+        undefined ->
+            {ok, FileContents} = file:read_file(File),
+            FileContents;
+        StoredContents ->
+            StoredContents
+    end,
+    TempFile = mktemp(Contents),
+    erl_tidy:file(binary_to_list(TempFile), [
+        {backups, false},
+        {idem, true}
+    ]),
+    {ok, UpdatedContents} = file:read_file(TempFile),
+    file:delete(TempFile),
+    [
+        #{range =>
+            #{
+                <<"start">> => #{line => 0, character => 0},
+                <<"end">> => #{line => 999999, character => 255}
+            },
+        newText => UpdatedContents}
+    ].
 
 textDocument_codeLens(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),
@@ -206,7 +228,7 @@ validate_config_file(Socket, File, ContentsFile) ->
     send_diagnostics(Socket, File, maps:get(errors_warnings, ErrorsWarnings, [])).
 
 mktemp(Contents) ->
-    Rand = integer_to_list(binary:decode_unsigned(crypto:strong_rand_bytes(8)), 36),
+    Rand = integer_to_list(binary:decode_unsigned(crypto:strong_rand_bytes(8)), 36) ++ ".erl",
     TempFile = filename:join(gen_lsp_config_server:tmpdir(), Rand),
     filelib:ensure_dir(TempFile),
     file:write_file(TempFile, Contents),
