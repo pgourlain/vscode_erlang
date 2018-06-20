@@ -1,5 +1,23 @@
 # Change log
+## Version 0.4.6 (June 20, 2018)
+### Bug fix
+* [PR #99](https://github.com/pgourlain/vscode_erlang/pull/99) 
+	- bug fix : Format Document fixes
 
+Thanks to 
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+---
+
+## Version 0.4.5 (June 16, 2018)
+### Autocompletion improvements and bug fixes
+* [PR #96](https://github.com/pgourlain/vscode_erlang/pull/96) 
+	- Autocompletion fixes and improvements
+* [PR #98](https://github.com/pgourlain/vscode_erlang/pull/98) 
+	- bug fix : using 'erlangPath' configuration everywhere
+
+Thanks to 
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+---
 
 ## Version 0.4.4 (June 8, 2018)
 ### Autocompletion improvements
