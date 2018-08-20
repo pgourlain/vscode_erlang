@@ -84,6 +84,7 @@
 				"extensions": [
 					".erl",
 					".hrl",
+					".xrl",
 					".yrl",
 					".escript",
 					".app.src",
