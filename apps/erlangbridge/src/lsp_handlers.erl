@@ -4,7 +4,7 @@
     workspace_didChangeConfiguration/2, workspace_didChangeWatchedFiles/2,
     textDocument_didOpen/2, textDocument_didClose/2, textDocument_didSave/2, textDocument_didChange/2,
     textDocument_definition/2, textDocument_references/2, textDocument_hover/2, textDocument_completion/2,
-    textDocument_formatting/2, textDocument_codeLens/2]).
+    textDocument_formatting/2, textDocument_codeLens/2, textDocument_documentSymbol/2]).
 
 initialize(_Socket, Params) ->
     gen_lsp_config_server:update_config(root, binary_to_list(maps:get(rootPath, Params))),
@@ -16,7 +16,8 @@ initialize(_Socket, Params) ->
         referencesProvider => true,
         hoverProvider => true,
         completionProvider => #{triggerCharacters => <<":#.">>},
-        codeLensProvider => true
+        codeLensProvider => true,
+        documentSymbolProvider => true
     }}.
 
 initialized(Socket, _Params) ->
@@ -170,6 +171,12 @@ textDocument_codeLens(_Socket, Params) ->
                 end
             end, [], lsp_navigation:codelens_info(lsp_utils:file_uri_to_file(Uri)))
     end.
+
+
+textDocument_documentSymbol(_Socket, Params) ->
+    Uri = mapmapget(textDocument, uri, Params),
+    lsp_navigation:symbol_info(Uri, lsp_utils:file_uri_to_file(Uri)).
+    %test_symbols(Uri, 25).
 
 exported_code_lens(#{data := Data} = Item) ->
     StartChar = maps:get(character, Item),

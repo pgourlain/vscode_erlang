@@ -1,7 +1,7 @@
 -module(lsp_navigation).
 
 -export([goto_definition/3, hover_info/3, function_description/2, function_description/3, references_info/3, codelens_info/1,
-    find_function_with_line/2, get_function_arities/2, find_record/2]).
+    find_function_with_line/2, get_function_arities/2, find_record/2, symbol_info/2]).
 
 goto_definition(File, Line, Column) ->
     FileSyntaxTree = lsp_syntax:file_syntax_tree(File),
@@ -166,6 +166,70 @@ codelens_add_or_update_refcount(Map, Key, Count) ->
         NewFMap = maps:put(count, NewCount, FMap), 
         maps:put(Key, NewFMap, Map)
     end.
+
+symbol_info(Uri, File) ->
+    fold_in_file_syntax_tree(lsp_syntax:file_syntax_tree(File), [], fun (S, Acc) -> symbolinfo_analyze(Uri, S, Acc) end).
+    %test_symbols(Uri, 25).
+
+test_symbols(Uri, 0) ->
+    [];
+test_symbols(Uri, N) ->
+        Sn = integer_to_list(N),
+        Name = list_to_binary("symbolName_" ++Sn),
+        [ #{
+        containerName => <<"root">>,
+        name => Name,
+        detail => <<"signature">>,
+        children => [],
+        kind => N, %"Function"
+        location => #{ 
+            uri => Uri, 
+            range => #{ 
+                start => #{ character => 1, line => N}, 
+                <<"end">> => #{ character => 1, line => N } 
+            } 
+        }
+    }] ++ test_symbols(Uri, N-1).
+
+symbolinfo_analyze(Uri, SyntaxTree, List) ->
+    case SyntaxTree of
+    {function, Location, FuncName, _Arity, _} -> 
+        % FunKey = lists:flatten(io_lib:format("~p/~p", [FuncName,Arity])),
+        List++ create_symbolinfo(FuncName, Uri, function, Location);
+    _ -> List
+    end.
+
+symbol_kind(ErlangKind) ->
+    case ErlangKind of 
+    function -> 9;
+    interface -> 11;
+    array -> 18;
+    namespace -> 19;
+    event -> 24;
+    string -> 15;
+    struct -> 23;
+    number -> 16;
+    null -> 21;
+    constant -> 14;
+    class -> 5;
+    boolean -> 17;
+    _ -> 1
+    end. 
+
+create_symbolinfo(FuncName, Uri, SymbolKind, {L, C}) ->
+    %gen_lsp_server:lsp_log("create symbol info, ~p: ~p", [FuncName, Location]),
+    [#{
+        containerName => <<"root">>,
+        name => FuncName,
+        kind => symbol_kind(SymbolKind), 
+        location => #{ 
+            uri => Uri, 
+            range => #{ 
+                start => #{ character => C, line => L}, 
+                <<"end">> => #{ character => C, line => L } 
+            } 
+        }
+    }].
 
 function_header(Function, Args) ->
     "**" ++ atom_to_list(Function) ++ "**(" ++ join_strings(lists:map(fun erl_prettypr:format/1, Args), ", ") ++ ")".
