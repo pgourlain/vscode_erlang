@@ -168,34 +168,19 @@ codelens_add_or_update_refcount(Map, Key, Count) ->
     end.
 
 symbol_info(Uri, File) ->
-    fold_in_file_syntax_tree(lsp_syntax:file_syntax_tree(File), [], fun (S, Acc) -> symbolinfo_analyze(Uri, S, Acc) end).
-    %test_symbols(Uri, 25).
 
-test_symbols(Uri, 0) ->
-    [];
-test_symbols(Uri, N) ->
-        Sn = integer_to_list(N),
-        Name = list_to_binary("symbolName_" ++Sn),
-        [ #{
-        containerName => <<"root">>,
-        name => Name,
-        detail => <<"signature">>,
-        children => [],
-        kind => N, %"Function"
-        location => #{ 
-            uri => Uri, 
-            range => #{ 
-                start => #{ character => 1, line => N}, 
-                <<"end">> => #{ character => 1, line => N } 
-            } 
-        }
-    }] ++ test_symbols(Uri, N-1).
+    SyntaxTree = lsp_syntax:file_syntax_tree(File),
+    %gen_lsp_server:lsp_log("syntax for symbolinfo : ~p", [SyntaxTree]),
+
+    fold_in_file_syntax_tree(SyntaxTree, [], fun (S, Acc) -> symbolinfo_analyze(Uri, S, Acc) end).
 
 symbolinfo_analyze(Uri, SyntaxTree, List) ->
     case SyntaxTree of
     {function, Location, FuncName, _Arity, _} -> 
-        % FunKey = lists:flatten(io_lib:format("~p/~p", [FuncName,Arity])),
         List++ create_symbolinfo(FuncName, Uri, function, Location);
+    {attribute, Location, record, {Record, _}} ->
+        %gen_lsp_server:lsp_log("create record symbol info, ~p: ~p", [Record, Location]),
+        List++ create_symbolinfo(Record, Uri, struct, Location);
     _ -> List
     end.
 
@@ -225,8 +210,8 @@ create_symbolinfo(FuncName, Uri, SymbolKind, {L, C}) ->
         location => #{ 
             uri => Uri, 
             range => #{ 
-                start => #{ character => C, line => L}, 
-                <<"end">> => #{ character => C, line => L } 
+                start => #{ character => C, line => L-1}, 
+                <<"end">> => #{ character => C, line => L-1 } 
             } 
         }
     }].
