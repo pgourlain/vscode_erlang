@@ -121,7 +121,7 @@ export class ErlangDebugSession extends DebugSession implements genericShell.IEr
 		//store launch arguments in order to start erlang when configuration is done
 		if (!args.erlpath) {
 				args.erlpath = "erl";
-		} else if (!fs.exists(args.erlpath)) {
+		} else if (!fs.existsSync(args.erlpath)) {
 				this.log("The specified erlPath in your launch.json is invalid. Please fix !")
 				this.sendErrorResponse(response, 3000, `The specified erlPath is invalid : check your launch configuration.`);
 				return;
