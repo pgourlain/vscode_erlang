@@ -6,6 +6,9 @@ start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init(_Args) ->
+    % error_logger:info_msg("~p:init()", [?MODULE]),
+    % because lsp_log use another gen_server we can't use it
+    % gen_lsp_server:lsp_log("~p:init()", [?MODULE]),
     UserSpec = #{id => gen_lsp_doc_server,
         start => {gen_lsp_doc_server, start_link, []},
         restart => permanent,
