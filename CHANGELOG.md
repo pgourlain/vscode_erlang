@@ -1,4 +1,15 @@
 # Change log
+## Version 0.4.7 (November 3, 2018)
+### New features
+* [PR #103](https://github.com/pgourlain/vscode_erlang/pull/103) 
+	- Support for .xrl (leex) extension
+* [PR #113](https://github.com/pgourlain/vscode_erlang/pull/113) 
+	- Add symbol provider. Now outline view is filled with functions, types and records 
+
+Thanks to 
+* [Jon Parise](https://github.com/jparise)
+---
+
 ## Version 0.4.6 (June 20, 2018)
 ### Bug fix
 * [PR #99](https://github.com/pgourlain/vscode_erlang/pull/99) 
