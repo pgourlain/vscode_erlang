@@ -168,23 +168,25 @@ codelens_add_or_update_refcount(Map, Key, Count) ->
     end.
 
 symbol_info(Uri, File) ->
-
+    %return all symbols for the specified document 
     SyntaxTree = lsp_syntax:file_syntax_tree(File),
     %gen_lsp_server:lsp_log("syntax for symbolinfo : ~p", [SyntaxTree]),
-
     fold_in_file_syntax_tree(SyntaxTree, [], fun (S, Acc) -> symbolinfo_analyze(Uri, S, Acc) end).
 
 symbolinfo_analyze(Uri, SyntaxTree, List) ->
     case SyntaxTree of
-    {function, Location, FuncName, _Arity, _} -> 
-        List++ create_symbolinfo(FuncName, Uri, function, Location);
+    {function, Location, FuncName, Arity, _} -> 
+        FuncFullName = list_to_binary(lists:flatten(io_lib:format("~p/~p", [FuncName,Arity]))),
+        List++ create_symbolinfo(FuncFullName, Uri, function, Location);
     {attribute, Location, record, {Record, _}} ->
-        %gen_lsp_server:lsp_log("create record symbol info, ~p: ~p", [Record, Location]),
         List++ create_symbolinfo(Record, Uri, struct, Location);
+    {attribute, Location, type, {Type, _, _}} ->
+        List++ create_symbolinfo(Type, Uri, class, Location);
     _ -> List
     end.
 
 symbol_kind(ErlangKind) ->
+    %mapping a name to number expected by vscode
     case ErlangKind of 
     function -> 9;
     interface -> 11;
@@ -199,12 +201,21 @@ symbol_kind(ErlangKind) ->
     class -> 5;
     boolean -> 17;
     _ -> 1
-    end. 
+    end.
+
+symbol_container_from_symbol_kind(ErlangKind) ->
+    case ErlangKind of
+    function -> <<"functions">>;
+    class -> <<"types">>;
+    struct -> <<"records">>;
+    _ -> <<"root">>
+    end.
 
 create_symbolinfo(FuncName, Uri, SymbolKind, {L, C}) ->
     %gen_lsp_server:lsp_log("create symbol info, ~p: ~p", [FuncName, Location]),
+    %vscode documentation  : https://code.visualstudio.com/docs/extensionAPI/vscode-api#SymbolInformation
     [#{
-        containerName => <<"root">>,
+        containerName => symbol_container_from_symbol_kind(SymbolKind),
         name => FuncName,
         kind => symbol_kind(SymbolKind), 
         location => #{ 
