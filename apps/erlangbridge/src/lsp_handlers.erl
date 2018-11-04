@@ -29,10 +29,12 @@ shutdown(_Socket, _) ->
 exit(_Socket, _) ->
     init:stop().
 
-configuration(Socket, [ErlangSection, ComputedSecton]) ->
+configuration(Socket, [ErlangSection, ComputedSecton, HttpSection]) ->
     gen_lsp_server:lsp_log("configuration ~p", [gen_lsp_doc_server:get_documents()]),
     gen_lsp_config_server:update_config(erlang, ErlangSection),
     gen_lsp_config_server:update_config(computed, ComputedSecton),
+    %error_logger:info_msg("http section : ~p~n", [HttpSection]),
+    gen_lsp_config_server:update_config(http, HttpSection),
     lists:foreach(fun (File) ->
         gen_lsp_server:lsp_log("File = ~p",[File]),
         send_diagnostics(Socket, File, []),
@@ -57,9 +59,7 @@ textDocument_didOpen(Socket, Params) ->
     %spawn to delegate in other process the parsing
     %PGO 03/11/2018 : I didn't found why there is kind of dead lock on gen_server(gen_lsp_doc)
     %   I put traces to show if gen_lsp_doc is ready to work...and it seems in traces...  
-	spawn(fun() -> 
-			gen_lsp_config_server:autosave() andalso file_contents_update(Socket, File, undefined) 
-		end).
+	gen_lsp_config_server:autosave() andalso file_contents_update(Socket, File, undefined).
 
 textDocument_didClose(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
@@ -251,7 +251,7 @@ request_configuration(Socket) ->
     gen_lsp_server:send_to_client(Socket, #{
         id => <<"configuration">>,
         method => <<"workspace/configuration">>,
-        params => #{items => [#{section => <<"erlang">>}, #{section => <<"<computed>">>}]}
+        params => #{items => [#{section => <<"erlang">>}, #{section => <<"<computed>">>}, #{section => <<"http">>}]}
     }).
 
 send_diagnostics(Socket, File, Diagnostics) ->

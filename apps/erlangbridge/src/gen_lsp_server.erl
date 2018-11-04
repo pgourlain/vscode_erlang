@@ -149,12 +149,12 @@ handle_tcp_data(Socket, Contents, State) ->
             StateWithLength;
         ContentLength when ContentLength =:= byte_size(StateWithLength#state.contents) ->
             {ok, Input, _} = vscode_jsone_decode:decode(StateWithLength#state.contents, [{keys, atom}]),
-            do_contents(Socket, Input),
+            spawn(fun() -> do_contents(Socket, Input) end),
             StateWithLength#state{contents = <<"">>, content_length = undefined};
         ContentLength when ContentLength < byte_size(StateWithLength#state.contents) ->
             ShorterContents = binary:part(StateWithLength#state.contents, 0, ContentLength),
             {ok, Input, _} = vscode_jsone_decode:decode(ShorterContents, [{keys, atom}]),
-            do_contents(Socket, Input),
+            spawn(fun() -> do_contents(Socket, Input) end),
             handle_tcp_data(
                 Socket,
                 binary:part(StateWithLength#state.contents, ContentLength, byte_size(StateWithLength#state.contents) - ContentLength),
