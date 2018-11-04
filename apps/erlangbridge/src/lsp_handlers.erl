@@ -56,9 +56,6 @@ workspace_didChangeWatchedFiles(_Socket, Params) ->
 
 textDocument_didOpen(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
-    %spawn to delegate in other process the parsing
-    %PGO 03/11/2018 : I didn't found why there is kind of dead lock on gen_server(gen_lsp_doc)
-    %   I put traces to show if gen_lsp_doc is ready to work...and it seems in traces...  
 	gen_lsp_config_server:autosave() andalso file_contents_update(Socket, File, undefined).
 
 textDocument_didClose(Socket, Params) ->
