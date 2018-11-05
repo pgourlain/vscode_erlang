@@ -29,11 +29,37 @@ handle_call({get_help, Module, Function}, _From, State) ->
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
+set_proxy() ->
+    % get proxyUrl configuration
+    ActualProxy = gen_lsp_config_server:proxy(),
+    %systemProxy
+    ProxyUrl = lsp_utils:to_string(ActualProxy),
+    %error_logger:info_msg("set_proxy : ~p~n", [ProxyUrl]),
+    case length(ProxyUrl) of
+    L when L > 0 ->
+        {ok, {_Scheme, _UserInfo, Host, Port, _Path, _Query}} = http_uri:parse(ProxyUrl),
+        % if proxy is on localhost, NoProxy should not contains localhost 
+        NoProxy = case string:to_lower(Host) of
+            "localhost" -> [];
+            "127.0.0.1" -> [];
+            _ -> ["localhost"]
+        end,
+	    %error_logger:info_msg("proxy info : ~p, ~p~n", [Host, Port]),
+        httpc:set_options([{proxy, {{Host, Port}, NoProxy}}]),
+        proxy_set;
+    _ -> noproxy
+    end.
+
 get_page_lines(Module, Modules) ->
     case Modules of
         #{Module := Lines} = _ ->
             {Lines, Modules};
         _ ->
+            try set_proxy()
+			catch
+			_:Err -> error_logger:info_msg("set_proxy failed: ~p~n", [Err])
+			end,
+            %httpc:set_options([{proxy, {{"www-proxy.mycompany.com", 8000}, ["localhost"]}}]),
             Result = httpc:request("http://erlang.org/doc/man/" ++ atom_to_list(Module) ++ ".html"),
             case Result of
                 {ok, {_, _, Body}} ->

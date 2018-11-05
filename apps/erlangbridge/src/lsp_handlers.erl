@@ -36,6 +36,7 @@ configuration(Socket, [ErlangSection, ComputedSecton, HttpSection]) ->
     gen_lsp_server:lsp_log("configuration ~p", [Documents]),
     gen_lsp_config_server:update_config(computed, ComputedSecton),
     gen_lsp_config_server:update_config(http, HttpSection),
+    gen_lsp_server:lsp_log("vscode configuration ~p, ~p, ~p", [ErlangSection, ComputedSecton, HttpSection]),
     lists:foreach(fun (File) ->
         gen_lsp_server:lsp_log("File = ~p",[File]),
         send_diagnostics(Socket, File, []),
