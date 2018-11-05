@@ -1,6 +1,6 @@
 -module(lsp_utils).
 
--export([client_range/3, file_uri_to_file/1, file_uri_to_vscode_uri/1]).
+-export([client_range/3, file_uri_to_file/1, file_uri_to_vscode_uri/1, to_string/1]).
 
 client_range(Line, StartChar, EndChar) ->
     #{
@@ -20,3 +20,11 @@ file_uri_to_vscode_uri(Uri) ->
         <<"file://", Drive, ":/", Rest/binary>> -> <<"file:///", Drive, "%3A/", Rest/binary>>;
       _ -> Uri
     end.
+
+to_string(X) when is_binary(X) ->
+    erlang:binary_to_list(X);
+to_string(X) when is_atom(X) ->
+    erlang:atom_to_list(X);
+
+to_string(X) ->
+    X.
