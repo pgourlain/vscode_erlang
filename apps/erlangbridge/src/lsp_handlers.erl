@@ -29,17 +29,18 @@ shutdown(_Socket, _) ->
 exit(_Socket, _) ->
     init:stop().
 
-configuration(Socket, [ErlangSection, ComputedSecton, HttpSection]) ->
-    gen_lsp_server:lsp_log("configuration ~p", [gen_lsp_doc_server:get_documents()]),
+configuration(Socket, [ErlangSection, ComputedSecton, HttpSection]) ->    
+    Documents = gen_lsp_doc_server:get_documents(),
     gen_lsp_config_server:update_config(erlang, ErlangSection),
+    % because 'verbose' is store in erlang section, loggin should be after update erlang config
+    gen_lsp_server:lsp_log("configuration ~p", [Documents]),
     gen_lsp_config_server:update_config(computed, ComputedSecton),
-    %error_logger:info_msg("http section : ~p~n", [HttpSection]),
     gen_lsp_config_server:update_config(http, HttpSection),
     lists:foreach(fun (File) ->
         gen_lsp_server:lsp_log("File = ~p",[File]),
         send_diagnostics(Socket, File, []),
         file_contents_update(Socket, File, undefined)
-    end, gen_lsp_doc_server:get_documents()).
+    end, Documents).
 
 workspace_didChangeConfiguration(Socket, _Params) ->
     request_configuration(Socket).
