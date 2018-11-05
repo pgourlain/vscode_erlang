@@ -10,7 +10,7 @@ init(VsCodePort) ->
     DocSpec = doc_spec(),
     ConfigSpec = config_spec(),
     HelpSpec = help_spec(),
-    StartSpecs = {{one_for_one, 60, 3600}, [SocketSpec, DocSpec, ConfigSpec, HelpSpec]},
+    StartSpecs = {{one_for_one, 60, 3600}, [ConfigSpec, DocSpec, SocketSpec, HelpSpec]},
     {ok, StartSpecs}.
 
 socket_spec(VsCodePort) ->
