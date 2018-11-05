@@ -1,4 +1,11 @@
 # Change log
+## Version 0.4.8 (November 5, 2018)
+### Bug fix
+* [PR #116](https://github.com/pgourlain/vscode_erlang/pull/116) 
+	- Bug fix #112 : Proxy setting support 
+* [PR #115](https://github.com/pgourlain/vscode_erlang/pull/115) 
+	- Bug fix #100 : call timeout on gen_lsp_doc_server 
+
 ## Version 0.4.7 (November 3, 2018)
 ### New features
 * [PR #103](https://github.com/pgourlain/vscode_erlang/pull/103) 
