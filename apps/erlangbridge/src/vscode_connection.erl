@@ -225,10 +225,13 @@ map_bindings({Name, Value}) ->
             MapF = fun({Index, El}) -> map_bindings({iolist_to_binary(io_lib:format("~p", [Index])), El}) end,
             Ret = lists:map(MapF, IndexedValue),
             #{children => Ret};  
-        map -> #{children => lists:map(fun map_bindings/1, maps:to_list(Value))};
+        map -> #{children => lists:map(fun map_bindings_force_binary_name/1, maps:to_list(Value))};
         _ -> #{}
     end,
     maps:merge(V, H).
+
+map_bindings_force_binary_name({Name, Value}) ->
+    map_bindings({iolist_to_binary(io_lib:format("~p", [Name])), Value}).
 
 debugger_bindings(Pid, Sp) when is_pid(Pid) ->
     {ok, UnderlyingPid} = dbg_iserver:call({get_meta,Pid}),
