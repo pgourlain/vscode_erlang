@@ -216,19 +216,20 @@ map_bindings({Name, Value}) ->
     V = case T of
         list -> 
             IndexedValue = lists:zip(lists:seq(1, length(Value)), Value),
-            MapF = fun({Index, El}) -> map_bindings({iolist_to_binary(io_lib:format("~p", [Index])), El}) end,
-            Ret = lists:map(MapF, IndexedValue),
-            #{children => Ret};
+            #{children => lists:map(fun map_bindings_nested/1, IndexedValue)};
         tuple ->
             List = tuple_to_list(Value),
             IndexedValue = lists:zip(lists:seq(1, length(List)), List),
-            MapF = fun({Index, El}) -> map_bindings({iolist_to_binary(io_lib:format("~p", [Index])), El}) end,
-            Ret = lists:map(MapF, IndexedValue),
-            #{children => Ret};  
-        map -> #{children => lists:map(fun map_bindings/1, maps:to_list(Value))};
-        _ -> #{}
+            #{children => lists:map(fun map_bindings_nested/1, IndexedValue)};  
+        map ->
+            #{children => lists:map(fun map_bindings_nested/1, maps:to_list(Value))};
+        _ ->
+            #{}
     end,
     maps:merge(V, H).
+
+map_bindings_nested({Name, Value}) ->
+    map_bindings({iolist_to_binary(io_lib:format("~p", [Name])), Value}).
 
 debugger_bindings(Pid, Sp) when is_pid(Pid) ->
     {ok, UnderlyingPid} = dbg_iserver:call({get_meta,Pid}),
