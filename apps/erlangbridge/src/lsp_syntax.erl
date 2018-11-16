@@ -231,8 +231,7 @@ abspath(BaseDir, Path) ->
     end.
 
 lint(FileSyntaxTree, File) ->
-    LintResult = erl_lint:module(FileSyntaxTree, File,[ {strong_validation}, verbose, {i, "C:/Users/wojtek/Projects/technopop/_build/default/lib/"}]),
-    io:format("LINT ~p", [LintResult]),
+    LintResult = erl_lint:module(FileSyntaxTree, File,[ {strong_validation} ]),
     case LintResult of
     % nothing wrong
     {ok, []} -> #{parse_result => true};
