@@ -1,4 +1,14 @@
 # Change log
+
+## Version 0.5.0 (November 17, 2018)
+### Improvements
+* [PR #118](https://github.com/pgourlain/vscode_erlang/pull/117) 
+	- Behaviours not from standard library recognised by linter
+
+Thanks to 
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+
+---
 ## Version 0.4.9 (November 11, 2018)
 ### Bug fix
 * [PR #117](https://github.com/pgourlain/vscode_erlang/pull/117) 
