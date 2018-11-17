@@ -14,7 +14,16 @@ parse_source_file(File, ContentsFile) ->
 
 validate_parsed_source_file(File) ->
     FileSyntaxTree = gen_lsp_doc_server:get_document_attribute(File, syntax_tree),
-    lint(FileSyntaxTree, File).
+    ModuleToDelete = case should_load_behaviour_module(FileSyntaxTree) of
+        undefined -> undefined;
+        BehaviourModule -> load_behaviour_module(BehaviourModule)
+    end,
+    Result = lint(FileSyntaxTree, File),
+    case ModuleToDelete of
+        undefined -> void;
+        _ -> code:delete(ModuleToDelete)
+    end,
+    Result.
 
 parse_config_file(File, ContentsFile) ->
     case file:path_consult(filename:dirname(ContentsFile), ContentsFile) of
@@ -53,6 +62,35 @@ update_file_in_forms(File, ContentsFile, FileSyntaxTree) ->
         (Form) ->
             Form
     end, FileSyntaxTree).
+
+should_load_behaviour_module(FileSyntaxTree) ->
+    BehaviourModule = lists:foldl(fun
+        ({attribute, _, behaviour, Module}, undefined) -> Module;
+        (_, Acc) -> Acc
+    end, undefined, FileSyntaxTree),
+    case BehaviourModule of
+        undefined -> undefined;
+        _ ->
+            case code:is_loaded(BehaviourModule) of
+                false -> BehaviourModule;
+                _ -> undefined
+            end
+    end.
+
+load_behaviour_module(BehaviourModule) ->
+    case gen_lsp_doc_server:get_module_file(BehaviourModule) of
+        undefined -> undefined;
+        SourceFile ->
+            case lists:reverse(filename:split(SourceFile)) of
+                [FilenameErl, "src" | T] ->
+                    RootBeamName = filename:join(lists:reverse([filename:rootname(FilenameErl), "ebin" | T])),
+                    case code:load_abs(RootBeamName) of
+                        {module, _} -> BehaviourModule;
+                        _ -> undefined
+                    end;
+                _ -> undefined
+            end
+    end.
 
 epp_parse_file(File, IncludePath, Defines) ->
     case file:open(File, [read]) of
@@ -193,7 +231,7 @@ abspath(BaseDir, Path) ->
     end.
 
 lint(FileSyntaxTree, File) ->
-    LintResult = erl_lint:module(FileSyntaxTree, File,[ {strong_validation}]),
+    LintResult = erl_lint:module(FileSyntaxTree, File,[ {strong_validation} ]),
     case LintResult of
     % nothing wrong
     {ok, []} -> #{parse_result => true};
