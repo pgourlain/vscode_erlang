@@ -1,5 +1,20 @@
 # Change log
 
+## Version 0.5.1 (February 26, 2019)
+### Bug fix
+* [PR #123](https://github.com/pgourlain/vscode_erlang/pull/123) 
+	- Fix accidental reassignment of eunitCommand
+* [PR #125](https://github.com/pgourlain/vscode_erlang/pull/125) 
+	- Fix erlangPath setting for Linux/OSX
+* [PR #126](https://github.com/pgourlain/vscode_erlang/pull/126) 
+	- Fix includes for linting of test files
+
+Thanks to 
+* [Benedikt Reinartz](https://github.com/filmor)
+* [Nigel Rook](https://github.com/NigelRook)
+
+
+---
 ## Version 0.5.0 (November 17, 2018)
 ### Improvements
 * [PR #118](https://github.com/pgourlain/vscode_erlang/pull/117) 
