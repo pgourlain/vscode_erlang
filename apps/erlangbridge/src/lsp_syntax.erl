@@ -147,9 +147,9 @@ get_file_include_paths(File) ->
 
 get_file_include_directory(File) ->
     case lists:reverse(filename:split(filename:dirname(File))) of
-        ["src"|Rest] ->
+        [DirName|Rest] when DirName =:= "src" orelse DirName =:= "test" ->
             filename:join(lists:reverse(["include"|Rest]));
-        [_, "src"|Rest] ->
+        [_, DirName|Rest] when DirName =:= "src" orelse DirName =:= "test" ->
             filename:join(lists:reverse(["include"|Rest]));
         _Other ->
             undefined
