@@ -60,7 +60,8 @@ export class ErlGenericShell extends EventEmitter {
                 var childEnv = null;
                 if (this.erlangPath) {
                     childEnv = process.env;
-                    childEnv.PATH = this.erlangPath +";"+childEnv.PATH
+                    var separator = process.platform == 'win32' ? ";" : ":";
+                    childEnv.PATH = this.erlangPath + separator + childEnv.PATH;
                 }
 
                 this.erlangShell = spawn(processName, args, { cwd: startDir, shell: true, stdio: 'pipe', env : childEnv });
