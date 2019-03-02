@@ -1,5 +1,11 @@
 # Change log
 
+## Version 0.5.2 (March 2, 2019)
+### Bug fix
+* [PR #129](https://github.com/pgourlain/vscode_erlang/pull/129) 
+	- Fix completion #128 & #129
+
+---
 ## Version 0.5.1 (February 26, 2019)
 ### Bug fix
 * [PR #123](https://github.com/pgourlain/vscode_erlang/pull/123) 
@@ -12,7 +18,6 @@
 Thanks to 
 * [Benedikt Reinartz](https://github.com/filmor)
 * [Nigel Rook](https://github.com/NigelRook)
-
 
 ---
 ## Version 0.5.0 (November 17, 2018)
