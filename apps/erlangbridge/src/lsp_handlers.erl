@@ -58,7 +58,12 @@ workspace_didChangeWatchedFiles(_Socket, Params) ->
 
 textDocument_didOpen(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
-	gen_lsp_config_server:autosave() andalso file_contents_update(Socket, File, undefined).
+    gen_lsp_doc_server:set_document_attribute(File, contents, mapmapget(textDocument, text, Params)),
+    gen_lsp_config_server:autosave() andalso file_contents_update(Socket, File, undefined).
+
+% textDocument_didOpen(Socket, Params) ->
+%     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
+% 	gen_lsp_config_server:autosave() andalso file_contents_update(Socket, File, undefined).
 
 textDocument_didClose(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
