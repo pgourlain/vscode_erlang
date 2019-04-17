@@ -2534,12 +2534,6 @@
 					<key>name</key>
 					<string>constant.other.placeholder.erlang</string>
 				</dict>
-				<dict>
-					<key>match</key>
-					<string>~.?</string>
-					<key>name</key>
-					<string>invalid.illegal.string.erlang</string>
-				</dict>
 			</array>
 		</dict>
 		<key>symbolic-operator</key>
