@@ -86,6 +86,7 @@
 					".hrl",
 					".xrl",
 					".yrl",
+					".es",
 					".escript",
 					".app.src",
 					"rebar.config"
