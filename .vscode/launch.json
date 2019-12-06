@@ -17,7 +17,7 @@
 			"stopOnEntry": false,
 			"sourceMaps": true,
 			"outFiles": ["${workspaceRoot}/src"],
-			"preLaunchTask": "npm"
+			"preLaunchTask": "tsc: watch - tsconfig.json"
 		},
 		{
 			"name": "Launch Tests",
@@ -28,7 +28,7 @@
 			"stopOnEntry": false,
 			"sourceMaps": true,
 			"outFiles": ["${workspaceRoot}/out/test"],
-			"preLaunchTask": "npm"
+			"preLaunchTask": "tsc: watch - tsconfig.json"
 		}
 	]
 }
