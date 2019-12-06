@@ -312,7 +312,7 @@
 			<array>
 				<dict>
 					<key>begin</key>
-					<string>^\s*+(-)\s*+(define)\s*+(\()\s*+([a-zA-Z\d@_]++)\s*+(,)</string>
+					<string>^\s*+(-)\s*+(define)\s*+(\()\s*+([a-zA-Z\d@_]++)\s*+</string>
 					<key>beginCaptures</key>
 					<dict>
 						<key>1</key>
@@ -334,11 +334,6 @@
 						<dict>
 							<key>name</key>
 							<string>entity.name.function.macro.definition.erlang</string>
-						</dict>
-						<key>5</key>
-						<dict>
-							<key>name</key>
-							<string>punctuation.separator.parameters.erlang</string>
 						</dict>
 					</dict>
 					<key>end</key>
