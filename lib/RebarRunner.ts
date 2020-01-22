@@ -36,7 +36,6 @@ export class RebarRunner implements vscode.Disposable {
 
 
 	public dispose(): void {
-		this.diagnosticCollection.clear();
 		this.diagnosticCollection.dispose();
 		this.compileCommand.dispose();
 		this.getDepsCommand.dispose();
