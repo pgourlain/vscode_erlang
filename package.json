@@ -33,11 +33,6 @@
 				"program": "./out/lib/erlangDebug.js",
 				"runtime": "node",
 				"label": "Erlang",
-				"enableBreakpointsFor": {
-					"languageIds": [
-						"erlang"
-					]
-				},
 				"initialConfigurations": [
 					{
 						"name": "Launch erlang",
