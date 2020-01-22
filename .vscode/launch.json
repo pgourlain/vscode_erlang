@@ -16,7 +16,7 @@
 			"args": ["--extensionDevelopmentPath=${workspaceRoot}" ],
 			"stopOnEntry": false,
 			"sourceMaps": true,
-			"outFiles": ["${workspaceRoot}/src"],
+			"outFiles": ["${workspaceRoot}/out"],
 			"preLaunchTask": "tsc: watch - tsconfig.json"
 		},
 		{
