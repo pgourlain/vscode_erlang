@@ -5,7 +5,7 @@ import {
 } from 'vscode-debugadapter';
 import { DebugProtocol } from 'vscode-debugprotocol';
 import { ErlangShellForDebugging, LaunchRequestArguments, FunctionBreakpoint } from './ErlangShellDebugger';
-import * as genericShell from './GenericShell';
+import { ILogOutput } from './GenericShell';
 import * as path from 'path';
 import * as fs from 'fs';
 import { EventEmitter } from 'events'
@@ -34,7 +34,7 @@ class ConditionalBreakpoint {
 }
 
 /** this class is entry point of debugger  */
-export class ErlangDebugSession extends DebugSession implements genericShell.IErlangShellOutput {
+export class ErlangDebugSession extends DebugSession implements ILogOutput {
 
 	protected threadIDs: { [processName: string]: {thid: number, stack:any, vscode: boolean}};
 	erlDebugger: ErlangShellForDebugging;

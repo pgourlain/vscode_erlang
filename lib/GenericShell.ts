@@ -11,22 +11,33 @@ function couldBeOutput(line: string) {
     return true;
 }
 
-export interface IErlangShellOutput {
+/**
+ * Defines support for log output from the GenericShell class.
+ */
+export interface ILogOutput {
     show(): void;
     appendLine(value: string): void;
 }
 
-export class ErlGenericShell extends EventEmitter {
-    protected erlangShell: ChildProcess;
-    protected channelOutput: IErlangShellOutput;
+/**
+ * Defines support for raw shell output from processes spawned by GenericShell.
+ */
+export interface IShellOutput {
+    append(value: string): void;
+}
+
+export class GenericShell extends EventEmitter {
+    protected childProcess: ChildProcess;
+    protected logOutput: ILogOutput;
+    protected shellOutput: IShellOutput;
     protected buffer: string = "";
     protected errbuf: string = "";
     public erlangPath: string = null;
 
-
-    constructor(whichOutput: IErlangShellOutput) {
+    constructor(logOutput?: ILogOutput, shellOutput?: IShellOutput) {
         super();
-        this.channelOutput = whichOutput;
+        this.logOutput = logOutput;
+        this.shellOutput = shellOutput;
     }
 
     protected RunProcess(processName, startDir: string, args: string[]): Promise<number> {
@@ -47,10 +58,7 @@ export class ErlGenericShell extends EventEmitter {
     protected LaunchProcess(processName, startDir: string, args: string[], quiet: boolean = false): Promise<boolean> {
         return new Promise<boolean>((resolve, reject) => {
             try {
-                var channel = this.channelOutput;
-                if (this.channelOutput) {
-                    channel.show();
-                }
+                this.logOutput && this.logOutput.show();
                 if (!quiet) {
                     if (this.erlangPath) {
                         this.log("log",`using erlang binaries from path : '${this.erlangPath}'`);
@@ -64,21 +72,17 @@ export class ErlGenericShell extends EventEmitter {
                     childEnv.PATH = this.erlangPath + separator + childEnv.PATH;
                 }
 
-                this.erlangShell = spawn(processName, args, { cwd: startDir, shell: true, stdio: 'pipe', env : childEnv });
-                this.erlangShell.on('error', error => {
+                this.childProcess = spawn(processName, args, { cwd: startDir, shell: true, stdio: 'pipe', env : childEnv });
+                this.childProcess.on('error', error => {
                     this.log("stderr", error.message);
                     if (process.platform == 'win32') {
                         this.log("stderr", "ensure '" + processName + "' is in your path.");
                     }
                 });
-                this.erlangShell.stdout.on("data", this.stdout.bind(this));
-                this.erlangShell.stderr.on("data", this.stderr.bind(this));
+                this.childProcess.stdout.on('data', this.stdout.bind(this));
+                this.childProcess.stderr.on('data', this.stderr.bind(this));
 
-                this.erlangShell.on('close', (exitCode) => {
-                    this.log("log", processName + ' exit code:' + exitCode);
-                    this.emit('close', exitCode);
-                });
-                this.erlangShell.on('exit', (exitCode: number, signal: string) => {
+                this.childProcess.on('exit', (exitCode: number, signal: string) => {
                     this.log("log", processName + ' exit code:' + exitCode);
                     this.emit('close', exitCode);
                 });
@@ -94,12 +98,14 @@ export class ErlGenericShell extends EventEmitter {
         lines = <string[]>lines.split('\n');
         lines.forEach(line => {
             this.log("stdout", line);
+            this.appendToShellOutput(`${line}\n`);
         });
     }
 
     onOutputPartial(line) {
         if (couldBeOutput(line)) {
             this.logNoNewLine("stdout", line);
+            this.appendToShellOutput(line);
             return true;
         }
         return false;
@@ -142,26 +148,27 @@ export class ErlGenericShell extends EventEmitter {
         lines = <string[]>lines.split('\n');
         lines.forEach(line => {
             this.log("stderr", line);
+            this.appendToShellOutput(line);
         });
     }
 
     protected logNoNewLine(type: string, msg: string): void {
-        if (this.channelOutput) {
-            this.channelOutput.appendLine(msg);
-        }
+        this.logOutput && this.logOutput.appendLine(msg);
         this.emit("msg", type, msg);
     }
 
     protected log(type: string, msg: string): void {
-        if (this.channelOutput) {
-            this.channelOutput.appendLine(msg);
-        }
+        this.logOutput && this.logOutput.appendLine(msg);
         this.emit("msg", type, msg[msg.length - 1] == '\n' ? msg : (msg + "\n"));
     }
 
     public Send(what: string) {
         this.log("log", what);
-        this.erlangShell.stdin.write(what);
-        this.erlangShell.stdin.write("\r\n");
+        this.childProcess.stdin.write(what);
+        this.childProcess.stdin.write('\r\n');
+    }
+
+    private appendToShellOutput(data: string) {
+        this.shellOutput && this.shellOutput.append(data);
     }
 }

@@ -1,7 +1,7 @@
-import { ErlGenericShell, IErlangShellOutput } from '../GenericShell';
+import { GenericShell, ILogOutput } from '../GenericShell';
 
-export class ErlangShellLSP extends ErlGenericShell {
-    constructor(whichOutput: IErlangShellOutput) {
+export class ErlangShellLSP extends GenericShell {
+    constructor(whichOutput: ILogOutput) {
         super(whichOutput);
     }
     public Start(erlPath:string, startDir: string, listen_port: number, bridgePath: string, args: string): Promise<boolean> {

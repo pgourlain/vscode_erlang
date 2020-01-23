@@ -5,23 +5,27 @@ import { DebugProtocol } from 'vscode-debugprotocol';
 import { Variable } from 'vscode-debugadapter';
 import * as path from 'path';
 import { ErlangShellForDebugging } from './ErlangShellDebugger';
-import { IErlangShellOutput } from './GenericShell';
+import { ILogOutput } from './GenericShell';
 import * as Adapter from './vscodeAdapter';
 import * as fs from 'fs';
 
-export var erlangBridgePath = path.join(__dirname, "..", "..", "apps", "erlangbridge", "src");
+const rebar3BuildPath = path.join('_build', 'default', 'lib', 'vscode_lsp');
+// Based on JS output path, not TS path
+export let erlangBridgePath = path.join(__dirname, "..", "..", rebar3BuildPath);
 
-let extensionPath = "";
-
+/**
+ * Update path to erlangbridge Erlang app based on extension path.
+ *
+ * @param currentExtensionPath - The current extension path
+ */
 export function setExtensionPath(currentExtensionPath: string): void {
-    extensionPath = currentExtensionPath;
-    erlangBridgePath = path.join(extensionPath, "apps", "erlangbridge", "src");
+    erlangBridgePath = path.join(currentExtensionPath, rebar3BuildPath);
 }
 /** this class is responsible to send/receive debug command to erlang bridge */
 export abstract class ErlangConnection extends EventEmitter {
     erlangbridgePort: number;
     protected events_receiver: http.Server;
-    _output: IErlangShellOutput;
+    _output: ILogOutput;
     verbose: boolean;
 
 
@@ -29,7 +33,7 @@ export abstract class ErlangConnection extends EventEmitter {
         return this.erlangbridgePort > 0;
     }
 
-    public constructor(output: IErlangShellOutput) {
+    public constructor(output: ILogOutput) {
         super();
         this._output = output;
         this.erlangbridgePort = -1;
@@ -85,11 +89,11 @@ export abstract class ErlangConnection extends EventEmitter {
             var compiler = new ErlangShellForDebugging(this.verbose ? this._output : null);
             var erlFiles = this.get_ErlangFiles();
             //create dir if not exists
-            let ebinDir = path.normalize(path.join(erlangBridgePath, "..", "ebin"));
+            const ebinDir = path.join(erlangBridgePath, 'ebin');
             if (!fs.existsSync(ebinDir)) {
                 fs.mkdirSync(ebinDir);
             }
-            
+
             let args = ["-o", "../ebin"].concat(erlFiles);
             return compiler.Compile(erlangBridgePath, args).then(res => {
                 //this.debug("Compilation of erlang bridge...ok");

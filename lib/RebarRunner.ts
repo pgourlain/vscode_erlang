@@ -2,7 +2,9 @@ import * as vscode from 'vscode';
 import * as path from 'path'
 import * as fs from 'fs'
 import * as child_process from 'child_process'
+import RebarShell from './RebarShell';
 import * as utils from './utils'
+import { ErlangOutputAdapter } from './vscodeAdapter';
 
 var rebarOutputChannel: vscode.OutputChannel;
 
@@ -14,6 +16,7 @@ see : https://github.com/hoovercj/vscode-extension-tutorial
 
 export class RebarRunner implements vscode.Disposable {
 
+	private extensionPath: string;
 	diagnosticCollection: vscode.DiagnosticCollection;
 	private static commandId: string = 'extension.rebarBuild';
 	private compileCommand: vscode.Disposable;
@@ -22,7 +25,10 @@ export class RebarRunner implements vscode.Disposable {
 	private eunitCommand: vscode.Disposable;
 	private dialyzerCommand: vscode.Disposable;
 
-	public activate(subscriptions: vscode.Disposable[]) {
+	public activate(context: vscode.ExtensionContext) {
+		const subscriptions = context.subscriptions;
+		this.extensionPath = context.extensionPath;
+
 		this.compileCommand = vscode.commands.registerCommand('extension.rebarBuild', () => { this.runRebarCompile(); });
 		this.getDepsCommand = vscode.commands.registerCommand('extension.rebarGetDeps', () => { this.runRebarCommand(['get-deps']); });
 		this.updateDepsCommand = vscode.commands.registerCommand('extension.rebarUpdateDeps', () => { this.runRebarCommand(['update-deps']); });
@@ -46,9 +52,8 @@ export class RebarRunner implements vscode.Disposable {
 
 	private runRebarCompile() {
 		try {
-			var cfg = vscode.workspace.getConfiguration('erlang');
-			var cfgRebarPath = cfg.get("rebarBuildArgs", ["compile"]);
-			this.runScript(vscode.workspace.rootPath, cfgRebarPath).then(data => {
+			const buildArgs = vscode.workspace.getConfiguration('erlang').get('rebarBuildArgs', ['compile']);
+			this.runScript(buildArgs).then(data => {
 				this.diagnosticCollection.clear();
 				this.parseCompilationResults(data);
 			});
@@ -99,7 +104,7 @@ export class RebarRunner implements vscode.Disposable {
 
 	private runRebarCommand(command: string[]): void {
 		try {
-			this.runScript(vscode.workspace.rootPath, command).then(data => {
+			this.runScript(command).then(data => {
 			}, reject => {});
 		} catch (e) {
 			vscode.window.showErrorMessage('Couldn\'t execute rebar.\n' + e);
@@ -108,7 +113,7 @@ export class RebarRunner implements vscode.Disposable {
 
     private runDialyzer(): void {
 		try {
-			this.runScript(vscode.workspace.rootPath, ["dialyzer"]).then(data => {
+			this.runScript(["dialyzer"]).then(data => {
                 this.diagnosticCollection.clear();
                 var lines = data.split("\n");
                 var currentFile = null;
@@ -145,73 +150,33 @@ export class RebarRunner implements vscode.Disposable {
 		}
 	}
 
-	private getRebarFullPath(workspaceRootPath: string): string {
-		var cfg = vscode.workspace.getConfiguration('erlang');
-		var cfgRebarPath = cfg.get("rebarPath", "");
-		if (cfgRebarPath == "") {
-			cfgRebarPath = workspaceRootPath;
+	/**
+	 * Get search paths for the rebar executable in order of priority.
+	 *
+	 * @returns Directories to search for the rebar executable
+	 */
+	private getRebarSearchPaths(): string[] {
+		const cfgRebarPath = vscode.workspace.getConfiguration('erlang').get('rebarPath'),
+			rebarSearchPaths = [];
+		if (cfgRebarPath) {
+			rebarSearchPaths.push(cfgRebarPath);
 		}
-		var rebarSearchPaths = [cfgRebarPath];
-		if (cfgRebarPath !== workspaceRootPath) {
-			rebarSearchPaths.push(workspaceRootPath);
+		if (cfgRebarPath !== vscode.workspace.rootPath) {
+			rebarSearchPaths.push(vscode.workspace.rootPath);
 		}
-		if (process.platform == 'win32') { // on Windows the extension root directory is searched too
-			rebarSearchPaths.push(path.join(__dirname, '..', '..'));
-		}
-		return this.findBestFile(rebarSearchPaths, ['rebar3', 'rebar'], 'rebar3');
+		return rebarSearchPaths;
 	}
 
-	private findBestFile(dirs : string[], fileNames : string[], defaultResult : string) : string
-	{
-		var result = defaultResult;
-		for (var i=0; i < dirs.length; i++)
-		{
-			for (var j=0; j < fileNames.length; j++)
-			{
-				var fullPath = path.normalize(path.join(dirs[i], fileNames[j]));
-				if (fs.existsSync(fullPath)) {
-					return fullPath;
-				}
-			}
-		}
-		return result;
-	}
-
-	public runScript(dirName: string, commands: string[]): Thenable<string> {
-		return new Promise<string>((a, r) => {
-			var rebarFileName = this.getRebarFullPath(dirName);
-			let args = commands;
-			var outputChannel = RebarRunner.RebarOutput;
-			var output: string = "";
-			outputChannel.show();
-			if (process.platform == 'win32') {
-				args = [rebarFileName].concat(args);
-				rebarFileName = 'escript.exe';
-			}
-			let rebar = child_process.spawn(rebarFileName, args, { cwd: dirName, stdio: 'pipe' });
-			rebar.on('error', error => {
-				outputChannel.appendLine(error.message);
-				if (process.platform == 'win32') {
-					outputChannel.appendLine("ensure 'escript.exe' is in your path. And after changed your path, you must close vscode (all instances).");
-				}
-			});
-			outputChannel.appendLine('starting rebar ' + commands + ' ...');
-
-			rebar.stdout.on('data', buffer => {
-				var bufferAsString = buffer.toString();
-				output += bufferAsString;
-				outputChannel.append(bufferAsString);
-			});
-			rebar.stderr.on('data', buffer => {
-				outputChannel.append(buffer.toString());
-			});
-
-			rebar.on('close', (exitCode) => {
-				outputChannel.appendLine('rebar exit code:' + exitCode);
-				a(output);
-			});
-
-		});
+	/**
+	 * Execute rebar on the workspace project with supplied arguments.
+	 *
+	 * @param commands - Arguments to rebar
+	 * @returns Promise resolved or rejected when rebar exits
+	 */
+	public async runScript(commands: string[]): Promise<string> {
+		const { output } = await new RebarShell(this.getRebarSearchPaths(), this.extensionPath, ErlangOutputAdapter(RebarRunner.RebarOutput))
+			.runScript(vscode.workspace.rootPath, commands);
+		return output;
 	}
 
 	private onCloseDocument(doc: vscode.TextDocument): any {

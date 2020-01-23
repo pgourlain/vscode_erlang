@@ -34,7 +34,7 @@ export function activate(context: ExtensionContext) {
     //disposables.push(vscode.commands.registerCommand('extension.rebarBuild', () => { runRebarCommand(['compile']);}));
 
     var rebar = new Rebar.RebarRunner();
-    rebar.activate(context.subscriptions);
+    rebar.activate(context);
 
     var eunit = new Eunit.EunitRunner();
     eunit.activate(context);

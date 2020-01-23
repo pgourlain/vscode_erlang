@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import {IErlangShellOutput} from './GenericShell';
+import { ILogOutput } from './GenericShell';
 
 var erlangOutputChannel : vscode.OutputChannel;
 
@@ -11,13 +11,13 @@ export function ErlangOutput() : vscode.OutputChannel {
         return erlangOutputChannel;
     }
 
-export function ErlangOutputAdapter() : IErlangShellOutput {
-    return new ErlangWrapperOutput(ErlangOutput());
+export function ErlangOutputAdapter(outputChannel?: vscode.OutputChannel) : ILogOutput {
+    return new ErlangWrapperOutput(outputChannel || ErlangOutput());
 }
 
 
-class ErlangWrapperOutput implements IErlangShellOutput {
-    
+class ErlangWrapperOutput implements ILogOutput {
+
     constructor (private channel : vscode.OutputChannel) {
 
     }

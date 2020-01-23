@@ -1,6 +1,6 @@
 import { ChildProcess, spawn } from 'child_process';
 import { EventEmitter } from 'events';
-import { ErlGenericShell, IErlangShellOutput } from './GenericShell';
+import { GenericShell, ILogOutput } from './GenericShell';
 import { DebugProtocol } from 'vscode-debugprotocol';
 import * as path from 'path';
 import * as os from 'os';
@@ -43,12 +43,12 @@ export class FunctionBreakpoint implements DebugProtocol.Breakpoint {
 //     error(value: string): void;
 // }
 
-export class ErlangShellForDebugging extends ErlGenericShell {
+export class ErlangShellForDebugging extends GenericShell {
     breakPoints: DebugProtocol.Breakpoint[];
     functionBreakPoints: FunctionBreakpoint[];
     started : boolean;
     argsFileName: string;
-    constructor(whichOutput: IErlangShellOutput) {
+    constructor(whichOutput: ILogOutput) {
         super(whichOutput);
         this.breakPoints = [];
         this.functionBreakPoints = [];
@@ -180,4 +180,3 @@ export class ErlangShellForDebugging extends ErlGenericShell {
         }
     }
 }
-
