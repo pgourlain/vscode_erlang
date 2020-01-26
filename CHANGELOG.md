@@ -1,5 +1,14 @@
 # Change log
 
+## [Unreleased]
+
+* Improve auto indentation:
+  * Continue comments if break line in the middle except module documentation
+    (triple `%`) that always continue
+  * Half-indent guards
+  * Indent after clause starts, inside tuples, list and parameter lists
+  * Outdent after clause ends
+
 ## Version 0.6.0 (January 23, 2020)
 
 Use updates from [Daniel Finke](https://github.com/danielfinke)'s
