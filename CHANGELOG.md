@@ -8,6 +8,12 @@
   * Half-indent guards
   * Indent after clause starts, inside tuples, list and parameter lists
   * Outdent after clause ends
+* Fix syntax highlight:
+  * Allow comment between '}' and ').' in record definitions
+  * Allow variables as module or function names in implicit function
+    expressions
+  * Distinguish function type in type specification and explicit function
+    expression
 
 ## Version 0.6.0 (January 23, 2020)
 

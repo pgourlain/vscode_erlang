@@ -7,7 +7,10 @@
 	<key>fileTypes</key>
 	<array>
 		<string>erl</string>
+		<string>escript</string>
 		<string>hrl</string>
+		<string>xrl</string>
+		<string>yrl</string>
 	</array>
 	<key>keyEquivalent</key>
 	<string>^~E</string>
@@ -724,6 +727,54 @@
 							<key>name</key>
 							<string>keyword.control.fun.erlang</string>
 						</dict>
+						<key>10</key>
+						<dict>
+							<key>name</key>
+							<string>punctuation.separator.function-arity.erlang</string>
+						</dict>
+						<key>4</key>
+						<dict>
+							<key>name</key>
+							<string>entity.name.type.class.module.erlang</string>
+						</dict>
+						<key>5</key>
+						<dict>
+							<key>name</key>
+							<string>variable.other.erlang</string>
+						</dict>
+						<key>6</key>
+						<dict>
+							<key>name</key>
+							<string>punctuation.separator.module-function.erlang</string>
+						</dict>
+						<key>8</key>
+						<dict>
+							<key>name</key>
+							<string>entity.name.function.erlang</string>
+						</dict>
+						<key>9</key>
+						<dict>
+							<key>name</key>
+							<string>variable.other.erlang</string>
+						</dict>
+					</dict>
+					<key>comment</key>
+					<string>Implicit function expression with optional module qualifier when both module and function can be atom or variable</string>
+					<key>match</key>
+					<string>\b(fun)\s+((([a-z][a-zA-Z\d@_]*+)|(_[a-zA-Z\d@_]++|[A-Z][a-zA-Z\d@_]*+))\s*+(:)\s*+)?(([a-z][a-zA-Z\d@_]*+|'[^']*+')|(_[a-zA-Z\d@_]++|[A-Z][a-zA-Z\d@_]*+))\s*(/)</string>
+					<key>name</key>
+					<string>meta.expression.fun.implicit.erlang</string>
+				</dict>
+				<dict>
+					<key>begin</key>
+					<string>\b(fun)\s+(([a-z][a-zA-Z\d@_]*+)|(_[a-zA-Z\d@_]++|[A-Z][a-zA-Z\d@_]*+))\s*+(:)</string>
+					<key>beginCaptures</key>
+					<dict>
+						<key>1</key>
+						<dict>
+							<key>name</key>
+							<string>keyword.control.fun.erlang</string>
+						</dict>
 						<key>3</key>
 						<dict>
 							<key>name</key>
@@ -732,21 +783,104 @@
 						<key>4</key>
 						<dict>
 							<key>name</key>
-							<string>punctuation.separator.module-function.erlang</string>
+							<string>variable.other.erlang</string>
 						</dict>
 						<key>5</key>
 						<dict>
 							<key>name</key>
-							<string>entity.name.function.erlang</string>
+							<string>punctuation.separator.module-function.erlang</string>
 						</dict>
-						<key>6</key>
+					</dict>
+					<key>comment</key>
+					<string>Implicit function expression with module qualifier when module can be atom or variable and function can by anything</string>
+					<key>end</key>
+					<string>(/)</string>
+					<key>endCaptures</key>
+					<dict>
+						<key>1</key>
 						<dict>
 							<key>name</key>
 							<string>punctuation.separator.function-arity.erlang</string>
 						</dict>
 					</dict>
-					<key>match</key>
-					<string>\b(fun)\s+(([a-z][a-zA-Z\d@_]*+)\s*+(:)\s*+)?([a-z][a-zA-Z\d@_]*+)\s*(/)</string>
+					<key>name</key>
+					<string>meta.expression.fun.implicit.erlang</string>
+					<key>patterns</key>
+					<array>
+						<dict>
+							<key>include</key>
+							<string>#everything-else</string>
+						</dict>
+					</array>
+				</dict>
+				<dict>
+					<key>begin</key>
+					<string>\b(fun)\s+(?!\()</string>
+					<key>beginCaptures</key>
+					<dict>
+						<key>1</key>
+						<dict>
+							<key>name</key>
+							<string>keyword.control.fun.erlang</string>
+						</dict>
+					</dict>
+					<key>comment</key>
+					<string>Implicit function expression when both module and function can by anything</string>
+					<key>end</key>
+					<string>(/)</string>
+					<key>endCaptures</key>
+					<dict>
+						<key>1</key>
+						<dict>
+							<key>name</key>
+							<string>punctuation.separator.function-arity.erlang</string>
+						</dict>
+					</dict>
+					<key>name</key>
+					<string>meta.expression.fun.implicit.erlang</string>
+					<key>patterns</key>
+					<array>
+						<dict>
+							<key>include</key>
+							<string>#everything-else</string>
+						</dict>
+					</array>
+				</dict>
+				<dict>
+					<key>begin</key>
+					<string>\b(fun)\s*+(\()(?=(\s*+\())</string>
+					<key>beginCaptures</key>
+					<dict>
+						<key>1</key>
+						<dict>
+							<key>name</key>
+							<string>entity.name.function.erlang</string>
+						</dict>
+						<key>2</key>
+						<dict>
+							<key>name</key>
+							<string>punctuation.definition.parameters.begin.erlang</string>
+						</dict>
+					</dict>
+					<key>comment</key>
+					<string>Function type in type specification</string>
+					<key>end</key>
+					<string>(\))</string>
+					<key>endCaptures</key>
+					<dict>
+						<key>1</key>
+						<dict>
+							<key>name</key>
+							<string>punctuation.definition.parameters.end.erlang</string>
+						</dict>
+					</dict>
+					<key>patterns</key>
+					<array>
+						<dict>
+							<key>include</key>
+							<string>#everything-else</string>
+						</dict>
+					</array>
 				</dict>
 				<dict>
 					<key>begin</key>
@@ -759,6 +893,8 @@
 							<string>keyword.control.fun.erlang</string>
 						</dict>
 					</dict>
+					<key>comment</key>
+					<string>Explicit function expression</string>
 					<key>end</key>
 					<string>\b(end)\b</string>
 					<key>endCaptures</key>
@@ -975,7 +1111,7 @@
 		<key>function-call</key>
 		<dict>
 			<key>begin</key>
-			<string>(?=([a-z][a-zA-Z\d@_]*+|'[^']*+')\s*+(\(|:\s*+([a-z][a-zA-Z\d@_]*+|'[^']*+')\s*+\())</string>
+			<string>(?=([a-z][a-zA-Z\d@_]*+|'[^']*+'|_[a-zA-Z\d@_]++|[A-Z][a-zA-Z\d@_]*+)\s*+(\(|:\s*+([a-z][a-zA-Z\d@_]*+|'[^']*+'|_[a-zA-Z\d@_]++|[A-Z][a-zA-Z\d@_]*+)\s*+\())</string>
 			<key>end</key>
 			<string>(\))</string>
 			<key>endCaptures</key>
@@ -1034,25 +1170,35 @@
 				</dict>
 				<dict>
 					<key>begin</key>
-					<string>(([a-z][a-zA-Z\d@_]*+|'[^']*+')\s*+(:)\s*+)?([a-z][a-zA-Z\d@_]*+|'[^']*+')\s*+(\()</string>
+					<string>((([a-z][a-zA-Z\d@_]*+|'[^']*+')|(_[a-zA-Z\d@_]++|[A-Z][a-zA-Z\d@_]*+))\s*+(:)\s*+)?(([a-z][a-zA-Z\d@_]*+|'[^']*+')|(_[a-zA-Z\d@_]++|[A-Z][a-zA-Z\d@_]*+))\s*+(\()</string>
 					<key>beginCaptures</key>
 					<dict>
-						<key>2</key>
+						<key>3</key>
 						<dict>
 							<key>name</key>
 							<string>entity.name.type.class.module.erlang</string>
 						</dict>
-						<key>3</key>
+						<key>4</key>
+						<dict>
+							<key>name</key>
+							<string>variable.other.erlang</string>
+						</dict>
+						<key>5</key>
 						<dict>
 							<key>name</key>
 							<string>punctuation.separator.module-function.erlang</string>
 						</dict>
-						<key>4</key>
+						<key>7</key>
 						<dict>
 							<key>name</key>
 							<string>entity.name.function.erlang</string>
 						</dict>
-						<key>5</key>
+						<key>8</key>
+						<dict>
+							<key>name</key>
+							<string>variable.other.erlang</string>
+						</dict>
+						<key>9</key>
 						<dict>
 							<key>name</key>
 							<string>punctuation.definition.parameters.begin.erlang</string>
@@ -1364,14 +1510,22 @@
 				</dict>
 			</dict>
 			<key>end</key>
-			<string>(?=\})</string>
+			<string>(\})</string>
+			<key>endCaptures</key>
+			<dict>
+				<key>1</key>
+				<dict>
+					<key>name</key>
+					<string>punctuation.definition.class.record.end.erlang</string>
+				</dict>
+			</dict>
 			<key>name</key>
 			<string>meta.structure.record.erlang</string>
 			<key>patterns</key>
 			<array>
 				<dict>
 					<key>begin</key>
-					<string>(([a-z][a-zA-Z\d@_]*+|'[^']*+')|(_))\s*+(=|::)</string>
+					<string>(([a-z][a-zA-Z\d@_]*+|'[^']*+')|(_))</string>
 					<key>beginCaptures</key>
 					<dict>
 						<key>2</key>
@@ -1383,11 +1537,6 @@
 						<dict>
 							<key>name</key>
 							<string>variable.language.omitted.field.erlang</string>
-						</dict>
-						<key>4</key>
-						<dict>
-							<key>name</key>
-							<string>keyword.operator.assignment.erlang</string>
 						</dict>
 					</dict>
 					<key>end</key>
@@ -1407,23 +1556,6 @@
 							<string>#everything-else</string>
 						</dict>
 					</array>
-				</dict>
-				<dict>
-					<key>captures</key>
-					<dict>
-						<key>1</key>
-						<dict>
-							<key>name</key>
-							<string>variable.other.field.erlang</string>
-						</dict>
-						<key>2</key>
-						<dict>
-							<key>name</key>
-							<string>punctuation.separator.class.record.erlang</string>
-						</dict>
-					</dict>
-					<key>match</key>
-					<string>([a-z][a-zA-Z\d@_]*+|'[^']*+')\s*+(,)?</string>
 				</dict>
 				<dict>
 					<key>include</key>
@@ -2305,25 +2437,15 @@
 				</dict>
 			</dict>
 			<key>end</key>
-			<string>((\}))\s*+(\))\s*+(\.)</string>
+			<string>(\))\s*+(\.)</string>
 			<key>endCaptures</key>
 			<dict>
 				<key>1</key>
 				<dict>
 					<key>name</key>
-					<string>meta.structure.record.erlang</string>
-				</dict>
-				<key>2</key>
-				<dict>
-					<key>name</key>
-					<string>punctuation.definition.class.record.end.erlang</string>
-				</dict>
-				<key>3</key>
-				<dict>
-					<key>name</key>
 					<string>punctuation.definition.parameters.end.erlang</string>
 				</dict>
-				<key>4</key>
+				<key>2</key>
 				<dict>
 					<key>name</key>
 					<string>punctuation.section.directive.end.erlang</string>
@@ -2336,6 +2458,10 @@
 				<dict>
 					<key>include</key>
 					<string>#internal-record-body</string>
+				</dict>
+				<dict>
+					<key>include</key>
+					<string>#comment</string>
 				</dict>
 			</array>
 		</dict>
@@ -2389,20 +2515,7 @@
 						</dict>
 					</dict>
 					<key>end</key>
-					<string>((\}))</string>
-					<key>endCaptures</key>
-					<dict>
-						<key>1</key>
-						<dict>
-							<key>name</key>
-							<string>meta.structure.record.erlang</string>
-						</dict>
-						<key>2</key>
-						<dict>
-							<key>name</key>
-							<string>punctuation.definition.class.record.end.erlang</string>
-						</dict>
-					</dict>
+					<string>(?&lt;=\})</string>
 					<key>name</key>
 					<string>meta.record-usage.erlang</string>
 					<key>patterns</key>
