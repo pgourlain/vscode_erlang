@@ -1,5 +1,16 @@
 # Change log
 
+## Version 0.6.0 (January 23, 2020)
+
+Use updates from [Daniel Finke](https://github.com/danielfinke)'s
+[vscode_erlang](https://github.com/danielfinke/vscode_erlang) repository:
+
+* Remove Erlang binaries and compile Erlang counterpart of the extension
+  on-the-fly at the first usage per Visual Studio Code instance
+* Fix syntax highlight: comma is not needed in `-define` on the same line as
+  macro name
+* Remove `pgoconsoloe` and use `erlang` output channel only
+
 ## Version 0.5.2 (March 2, 2019)
 ### Bug fix
 * [PR #129](https://github.com/pgourlain/vscode_erlang/pull/129) 
