@@ -15,6 +15,9 @@
   * Distinguish function type in type specification and explicit function
     expression
 * Setting `erlang.erlangPath` now can accept workspace relative path
+* Respect setting `search.exclude` when looking for the source file of an erlang
+  module. With this setting source files duplicated by build system can be
+  excluded from for example "Go to definition" and other code navigation.
 
 ## Version 0.6.0 (January 23, 2020)
 

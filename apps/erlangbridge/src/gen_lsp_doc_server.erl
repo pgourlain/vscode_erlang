@@ -65,23 +65,17 @@ handle_call(project_modules, _From, State) ->
     {reply, maps:keys(State#state.project_modules), State};
 
 handle_call({get_module_file, Module},_From, State) ->
-    File = case maps:get(atom_to_list(Module), State#state.project_modules, []) of
-        [] ->
-            undefined;
-        [OneFile] ->
-            OneFile;
-        [AFile|Rest] ->
-            BuildElements = filename:split(gen_lsp_config_server:root()) ++ ["_build"],
-            NoBuildFiles = lists:filter(fun (Filename) ->
-                not lists:prefix(BuildElements, filename:split(Filename))
-            end, [AFile|Rest]),
-            case NoBuildFiles of
-                [ANoBuioldFile|_] ->
-                    ANoBuioldFile;
-                _ ->
-                    AFile
-            end
-    end,
+    %% Get search.exclude setting of Visual Studio Code
+    SearchExcludeConf = gen_lsp_config_server:search_exclude(),
+    SearchExclude = lsp_utils:search_exclude_globs_to_regexps(SearchExcludeConf),
+    %% Select a non-excluded file
+    Files = maps:get(atom_to_list(Module), State#state.project_modules, []),
+    File =
+        case [F || F<-Files, not lsp_utils:is_path_excluded(F, SearchExclude)] of
+            []          -> undefined;
+            [OneFile]   -> OneFile;
+            [AFile | _] -> AFile
+        end,
     {reply, File, State};
 
 handle_call(_Request, _From, State) ->
@@ -95,17 +89,12 @@ handle_cast(stop, State) ->
     {stop, normal, State};
 
 handle_cast(root_available, State) ->
-    ProjectModules = filelib:fold_files(gen_lsp_config_server:root(), ".erl$", true, fun (Found, Acc) ->
-        Module = filename:rootname(filename:basename(Found)),
-        UpdatedFiles = [Found | maps:get(Module, Acc, [])],
-        Acc#{Module => UpdatedFiles}
-    end, #{}),
+    ProjectModules = filelib:fold_files(gen_lsp_config_server:root(), ".erl$", true,
+                                        fun do_add_project_file/2, #{}),
     {noreply, State#state{project_modules = ProjectModules}};
 
 handle_cast({add_project_file, File}, State) ->
-    Module = filename:rootname(filename:basename(File)),
-    UpdatedFiles = [File | maps:get(Module, State#state.project_modules, [])],
-    UpdatedProjectModules = (State#state.project_modules)#{Module => UpdatedFiles},
+    UpdatedProjectModules = do_add_project_file(File, State#state.project_modules),
     {noreply, State#state{project_modules = UpdatedProjectModules}};
 
 handle_cast({remove_project_file, File}, State) ->
@@ -125,3 +114,8 @@ terminate(_Reason, _State) ->
 
 code_change(_OldVersion, State, _Extra) ->
     {ok, State}.
+
+do_add_project_file(File, ProjectModules) ->
+    Module = filename:rootname(filename:basename(File)),
+    UpdatedFiles = [File | maps:get(Module, ProjectModules, [])],
+    ProjectModules#{Module => UpdatedFiles}.
