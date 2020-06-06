@@ -1,6 +1,6 @@
 # Change log
 
-## [Unreleased]
+## Version 0.6.1 (June 6, 2020)
 
 * Improve auto indentation:
   * Continue comments if break line in the middle except module documentation
