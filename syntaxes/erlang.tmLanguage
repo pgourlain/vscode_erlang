@@ -101,7 +101,7 @@
 								</dict>
 							</dict>
 							<key>match</key>
-							<string>(\\)([bdefnrstv\\'"]|(\^)[@-_]|[0-7]{1,3})</string>
+							<string>(\\)([bdefnrstv\\'"]|(\^)[@-_a-z]|[0-7]{1,3}|x\h{2})</string>
 							<key>name</key>
 							<string>constant.other.symbol.escape.erlang</string>
 						</dict>
@@ -243,7 +243,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>(\$)((\\)([bdefnrstv\\'"]|(\^)[@-_]|[0-7]{1,3}))</string>
+					<string>(\$)((\\)([bdefnrstv\\'"]|(\^)[@-_a-z]|[0-7]{1,3}|x\h{2}))</string>
 					<key>name</key>
 					<string>constant.character.erlang</string>
 				</dict>
@@ -263,7 +263,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>(\$)\S</string>
+					<string>(\$)[ \S]</string>
 					<key>name</key>
 					<string>constant.character.erlang</string>
 				</dict>
@@ -563,6 +563,10 @@
 				<dict>
 					<key>include</key>
 					<string>#textual-operator</string>
+				</dict>
+				<dict>
+					<key>include</key>
+					<string>#language-constant</string>
 				</dict>
 				<dict>
 					<key>include</key>
@@ -1605,11 +1609,21 @@
 						<key>5</key>
 						<dict>
 							<key>name</key>
+							<string>punctuation.separator.unit-specifiers.erlang</string>
+						</dict>
+						<key>6</key>
+						<dict>
+							<key>name</key>
+							<string>constant.numeric.integer.decimal.erlang</string>
+						</dict>
+						<key>7</key>
+						<dict>
+							<key>name</key>
 							<string>punctuation.separator.type-specifiers.erlang</string>
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>(integer|float|binary|bytes|bitstring|bits)|(signed|unsigned)|(big|little|native)|(unit)|(-)</string>
+					<string>(integer|float|binary|bytes|bitstring|bits|utf8|utf16|utf32)|(signed|unsigned)|(big|little|native)|(unit)(:)(\d++)|(-)</string>
 				</dict>
 			</array>
 		</dict>
@@ -1619,6 +1633,13 @@
 			<string>\b(after|begin|case|catch|cond|end|fun|if|let|of|query|try|receive|when)\b</string>
 			<key>name</key>
 			<string>keyword.control.erlang</string>
+		</dict>
+		<key>language-constant</key>
+		<dict>
+			<key>match</key>
+			<string>\b(false|true|undefined)\b</string>
+			<key>name</key>
+			<string>constant.language</string>
 		</dict>
 		<key>list</key>
 		<dict>
@@ -1878,7 +1899,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>2(#)[0-1]++</string>
+					<string>2(#)([0-1]++_)*[0-1]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.binary.erlang</string>
 				</dict>
@@ -1892,7 +1913,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>3(#)[0-2]++</string>
+					<string>3(#)([0-2]++_)*[0-2]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-3.erlang</string>
 				</dict>
@@ -1906,7 +1927,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>4(#)[0-3]++</string>
+					<string>4(#)([0-3]++_)*[0-3]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-4.erlang</string>
 				</dict>
@@ -1920,7 +1941,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>5(#)[0-4]++</string>
+					<string>5(#)([0-4]++_)*[0-4]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-5.erlang</string>
 				</dict>
@@ -1934,7 +1955,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>6(#)[0-5]++</string>
+					<string>6(#)([0-5]++_)*[0-5]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-6.erlang</string>
 				</dict>
@@ -1948,7 +1969,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>7(#)[0-6]++</string>
+					<string>7(#)([0-6]++_)*[0-6]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-7.erlang</string>
 				</dict>
@@ -1962,7 +1983,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>8(#)[0-7]++</string>
+					<string>8(#)([0-7]++_)*[0-7]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.octal.erlang</string>
 				</dict>
@@ -1976,7 +1997,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>9(#)[0-8]++</string>
+					<string>9(#)([0-8]++_)*[0-8]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-9.erlang</string>
 				</dict>
@@ -1990,7 +2011,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>10(#)\d++</string>
+					<string>10(#)(\d++_)*\d++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.decimal.erlang</string>
 				</dict>
@@ -2004,7 +2025,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>11(#)[\daA]++</string>
+					<string>11(#)([\daA]++_)*[\daA]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-11.erlang</string>
 				</dict>
@@ -2018,7 +2039,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>12(#)[\da-bA-B]++</string>
+					<string>12(#)([\da-bA-B]++_)*[\da-bA-B]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-12.erlang</string>
 				</dict>
@@ -2032,7 +2053,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>13(#)[\da-cA-C]++</string>
+					<string>13(#)([\da-cA-C]++_)*[\da-cA-C]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-13.erlang</string>
 				</dict>
@@ -2046,7 +2067,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>14(#)[\da-dA-D]++</string>
+					<string>14(#)([\da-dA-D]++_)*[\da-dA-D]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-14.erlang</string>
 				</dict>
@@ -2060,7 +2081,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>15(#)[\da-eA-E]++</string>
+					<string>15(#)([\da-eA-E]++_)*[\da-eA-E]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-15.erlang</string>
 				</dict>
@@ -2074,7 +2095,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>16(#)\h++</string>
+					<string>16(#)(\h++_)*\h++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.hexadecimal.erlang</string>
 				</dict>
@@ -2088,7 +2109,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>17(#)[\da-gA-G]++</string>
+					<string>17(#)([\da-gA-G]++_)*[\da-gA-G]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-17.erlang</string>
 				</dict>
@@ -2102,7 +2123,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>18(#)[\da-hA-H]++</string>
+					<string>18(#)([\da-hA-H]++_)*[\da-hA-H]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-18.erlang</string>
 				</dict>
@@ -2116,7 +2137,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>19(#)[\da-iA-I]++</string>
+					<string>19(#)([\da-iA-I]++_)*[\da-iA-I]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-19.erlang</string>
 				</dict>
@@ -2130,7 +2151,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>20(#)[\da-jA-J]++</string>
+					<string>20(#)([\da-jA-J]++_)*[\da-jA-J]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-20.erlang</string>
 				</dict>
@@ -2144,7 +2165,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>21(#)[\da-kA-K]++</string>
+					<string>21(#)([\da-kA-K]++_)*[\da-kA-K]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-21.erlang</string>
 				</dict>
@@ -2158,7 +2179,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>22(#)[\da-lA-L]++</string>
+					<string>22(#)([\da-lA-L]++_)*[\da-lA-L]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-22.erlang</string>
 				</dict>
@@ -2172,7 +2193,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>23(#)[\da-mA-M]++</string>
+					<string>23(#)([\da-mA-M]++_)*[\da-mA-M]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-23.erlang</string>
 				</dict>
@@ -2186,7 +2207,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>24(#)[\da-nA-N]++</string>
+					<string>24(#)([\da-nA-N]++_)*[\da-nA-N]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-24.erlang</string>
 				</dict>
@@ -2200,7 +2221,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>25(#)[\da-oA-O]++</string>
+					<string>25(#)([\da-oA-O]++_)*[\da-oA-O]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-25.erlang</string>
 				</dict>
@@ -2214,7 +2235,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>26(#)[\da-pA-P]++</string>
+					<string>26(#)([\da-pA-P]++_)*[\da-pA-P]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-26.erlang</string>
 				</dict>
@@ -2228,7 +2249,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>27(#)[\da-qA-Q]++</string>
+					<string>27(#)([\da-qA-Q]++_)*[\da-qA-Q]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-27.erlang</string>
 				</dict>
@@ -2242,7 +2263,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>28(#)[\da-rA-R]++</string>
+					<string>28(#)([\da-rA-R]++_)*[\da-rA-R]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-28.erlang</string>
 				</dict>
@@ -2256,7 +2277,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>29(#)[\da-sA-S]++</string>
+					<string>29(#)([\da-sA-S]++_)*[\da-sA-S]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-29.erlang</string>
 				</dict>
@@ -2270,7 +2291,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>30(#)[\da-tA-T]++</string>
+					<string>30(#)([\da-tA-T]++_)*[\da-tA-T]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-30.erlang</string>
 				</dict>
@@ -2284,7 +2305,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>31(#)[\da-uA-U]++</string>
+					<string>31(#)([\da-uA-U]++_)*[\da-uA-U]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-31.erlang</string>
 				</dict>
@@ -2298,7 +2319,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>32(#)[\da-vA-V]++</string>
+					<string>32(#)([\da-vA-V]++_)*[\da-vA-V]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-32.erlang</string>
 				</dict>
@@ -2312,7 +2333,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>33(#)[\da-wA-W]++</string>
+					<string>33(#)([\da-wA-W]++_)*[\da-wA-W]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-33.erlang</string>
 				</dict>
@@ -2326,7 +2347,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>34(#)[\da-xA-X]++</string>
+					<string>34(#)([\da-xA-X]++_)*[\da-xA-X]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-34.erlang</string>
 				</dict>
@@ -2340,7 +2361,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>35(#)[\da-yA-Y]++</string>
+					<string>35(#)([\da-yA-Y]++_)*[\da-yA-Y]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-35.erlang</string>
 				</dict>
@@ -2354,19 +2375,19 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>36(#)[\da-zA-Z]++</string>
+					<string>36(#)([\da-zA-Z]++_)*[\da-zA-Z]++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.base-36.erlang</string>
 				</dict>
 				<dict>
 					<key>match</key>
-					<string>\d++#[\da-zA-Z]++</string>
+					<string>\d++#([\da-zA-Z]++_)*[\da-zA-Z]++</string>
 					<key>name</key>
 					<string>invalid.illegal.integer.erlang</string>
 				</dict>
 				<dict>
 					<key>match</key>
-					<string>\d++</string>
+					<string>(\d++_)*\d++</string>
 					<key>name</key>
 					<string>constant.numeric.integer.decimal.erlang</string>
 				</dict>
@@ -2569,7 +2590,7 @@
 						</dict>
 					</dict>
 					<key>match</key>
-					<string>(\\)([bdefnrstv\\'"]|(\^)[@-_]|[0-7]{1,3})</string>
+					<string>(\\)([bdefnrstv\\'"]|(\^)[@-_a-z]|[0-7]{1,3}|x\h{2})</string>
 					<key>name</key>
 					<string>constant.character.escape.erlang</string>
 				</dict>
