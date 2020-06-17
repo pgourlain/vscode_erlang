@@ -4,3 +4,4 @@ node_modules
 *.beam
 *.dump
 _build/
+/syntaxes/*.yaml

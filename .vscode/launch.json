@@ -16,8 +16,8 @@
 			"args": ["--extensionDevelopmentPath=${workspaceRoot}" ],
 			"stopOnEntry": false,
 			"sourceMaps": true,
-			"outFiles": ["${workspaceRoot}/src"],
-			"preLaunchTask": "npm"
+			"outFiles": ["${workspaceRoot}/out"],
+			"preLaunchTask": "tsc: build - tsconfig.json"
 		},
 		{
 			"name": "Launch Tests",
@@ -28,7 +28,7 @@
 			"stopOnEntry": false,
 			"sourceMaps": true,
 			"outFiles": ["${workspaceRoot}/out/test"],
-			"preLaunchTask": "npm"
+			"preLaunchTask": "tsc: build - tsconfig.json"
 		}
 	]
 }

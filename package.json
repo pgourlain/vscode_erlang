@@ -1,9 +1,9 @@
 {
 	"name": "erlang",
 	"description": "Erlang language extension for Visual Studio Code",
-	"version": "0.5.2",
+	"version": "0.6.1",
 	"icon": "images/icon.png",
-	"publisher": "pgourlain",
+	"publisher": "KornelHorvath",
 	"engines": {
 		"vscode": "^1.23.0"
 	},
@@ -33,11 +33,6 @@
 				"program": "./out/lib/erlangDebug.js",
 				"runtime": "node",
 				"label": "Erlang",
-				"enableBreakpointsFor": {
-					"languageIds": [
-						"erlang"
-					]
-				},
 				"initialConfigurations": [
 					{
 						"name": "Launch erlang",

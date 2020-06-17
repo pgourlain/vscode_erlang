@@ -11,23 +11,20 @@ import * as Rebar from './RebarRunner';
 import * as Eunit from './eunitRunner';
 import { ErlangDebugConfigurationProvider } from './ErlangConfigurationProvider';
 import * as erlangConnection from './erlangConnection';
-import * as Utils from './utils';
 
 import * as LspClient from './lsp/lspclientextension';
 
 var myoutputChannel : OutputChannel;
-var myConsole : OutputChannel;
 // this method is called when your extension is activated
 // your extension is activated the very first time the command is executed
 export function activate(context: ExtensionContext) {
     erlangConnection.setExtensionPath(context.extensionPath);
     
     myoutputChannel = Adapter.ErlangOutput();
-    myConsole = Utils.pgoConsole();
     // Use the console to output diagnostic information (console.log) and errors (console.error)
     // This line of code will only be executed once when your extension is activated
-    console.log('Congratulations, your extension "erlang" is now active!'); 
-    myConsole.appendLine("erlang extension is active");
+    console.log('Congratulations, your extension "erlang" is now active!');
+    myoutputChannel.appendLine("erlang extension is active");
 
     //configuration of erlang language -> documentation : https://code.visualstudio.com/Docs/extensionAPI/vscode-api#LanguageConfiguration
     var disposables=[];
@@ -37,7 +34,7 @@ export function activate(context: ExtensionContext) {
     //disposables.push(vscode.commands.registerCommand('extension.rebarBuild', () => { runRebarCommand(['compile']);}));
 
     var rebar = new Rebar.RebarRunner();
-    rebar.activate(context.subscriptions);
+    rebar.activate(context);
 
     var eunit = new Eunit.EunitRunner();
     eunit.activate(context);
@@ -49,34 +46,108 @@ export function activate(context: ExtensionContext) {
 
     languages.setLanguageConfiguration("erlang", {
         onEnterRules: [
-            {
-                beforeText: /^.*(->|\s+(after|catch|if|of|receive))\s*$/,
-                action: { indentAction: IndentAction.Indent }
-            },
-            {
-                beforeText: /^\s*end$/,
-                action: { indentAction: IndentAction.Outdent }
-            },
-            {
-                beforeText: /^.*[^;,[({<]\s*$/,
-                action: { indentAction: IndentAction.Outdent }
-            },
-            {
-                beforeText: /^.*->.+;\s*$/,
-                action: { indentAction: IndentAction.None }
-            },
-            {
-                beforeText: /^.*(\.|;)\s*$/,
-                action: { indentAction: IndentAction.Outdent }
-            },
-            {
-                beforeText: /^%%% .*$/,
-                action: { indentAction: IndentAction.None, appendText: "%%% " }
-            },
-            {
-                beforeText: /^%%%.*$/,
-                action: { indentAction: IndentAction.None, appendText: "%%%" }
-            }
+            // Module comment: always continue comment
+            {
+                beforeText: /^%%% .*$/,
+                action: { indentAction: IndentAction.None, appendText: "%%% " }
+            },
+            {
+                beforeText: /^%%%.*$/,
+                action: { indentAction: IndentAction.None, appendText: "%%%" }
+            },
+            // Comment line with double %: continue comment if needed
+            {
+                beforeText: /^\s*%% .*$/,
+                afterText: /^.*\S.*$/,
+                action: { indentAction: IndentAction.None, appendText: "%% " }
+            },
+            {
+                beforeText: /^\s*%%.*$/,
+                afterText: /^.*\S.*$/,
+                action: { indentAction: IndentAction.None, appendText: "%%" }
+            },
+            // Comment line with single %: continue comment if needed
+            {
+                beforeText: /^\s*% .*$/,
+                afterText: /^.*\S.*$/,
+                action: { indentAction: IndentAction.None, appendText: "% " }
+            },
+            {
+                beforeText: /^\s*%.*$/,
+                afterText: /^.*\S.*$/,
+                action: { indentAction: IndentAction.None, appendText: "%" }
+            },
+            // Any other comment line: do nothing, ignore below rules
+            {
+                beforeText: /^\s*%.*$/,
+                afterText: /^\s*$/,
+                action: { indentAction: IndentAction.None }
+            },
+
+            // Empty line: do nothing, ignore below rules
+            {
+                beforeText: /^\s*$/,
+                action: { indentAction: IndentAction.None }
+            },
+
+            // Before guard sequence (before 'when')
+            {
+                beforeText: /.*/,
+                afterText: /^\s*when(\s.*)?$/,
+                action: { indentAction: IndentAction.None, appendText: "  " }
+            },
+            // After guard sequence (after 'when')
+            {
+                beforeText: /^\s*when(\s.*)?->\s*$/,
+                action: { indentAction: IndentAction.None, appendText: "  " }
+            },
+            {
+                beforeText: /^\s*when(\s.*)?(,|;)\s*$/,
+                action: { indentAction: IndentAction.None, appendText: "     " }
+            },
+
+            // Start of clause, right hand side of an assignment, after 'after', etc.
+            {
+                beforeText: /^.*(->|[^=]=|\s+(after|case|catch|if|of|receive|try))\s*$/,
+                action: { indentAction: IndentAction.Indent }
+            },
+
+            // Not closed bracket
+            {
+                beforeText: /^.*[(][^)]*$/,
+                action: { indentAction: IndentAction.Indent }
+            },
+            {
+                beforeText: /^.*[{][^}]*$/,
+                action: { indentAction: IndentAction.Indent }
+            },
+            {
+                beforeText: /^.*[[][^\]]*$/,
+                action: { indentAction: IndentAction.Indent }
+            },
+
+            // One liner clause but not the last
+            {
+                beforeText: /^.*->.+;\s*$/,
+                action: { indentAction: IndentAction.None }
+            },
+            // End of function or attribute (e.g. export list)
+            {
+                beforeText: /^.*\.\s*$/,
+                action: { indentAction: IndentAction.Outdent, removeText: 9000 }
+            },
+            // End of clause but not the last
+            // FIXME: After a guard (;) it falsely outdents
+            {
+                beforeText: /^.*;\s*$/,
+                action: { indentAction: IndentAction.Outdent }
+            },
+            // Last statement of a clause
+            // TODO: double outdent or outdent + removeText: <tabsize>
+            {
+                beforeText: /^.*[^;,[({<]\s*$/,
+                action: { indentAction: IndentAction.Outdent }
+            }
         ]
     });
 }

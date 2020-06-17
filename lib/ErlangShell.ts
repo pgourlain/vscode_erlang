@@ -1,10 +1,10 @@
 import * as vscode from 'vscode';
 import * as child_process from 'child_process';
-import * as shell from './GenericShell';
+import { GenericShell } from './GenericShell';
 import * as adapt from './vscodeAdapter';
 
 
-export class ErlangShell extends shell.ErlGenericShell {
+export class ErlangShell extends GenericShell {
     constructor(){
         super(adapt.ErlangOutputAdapter());//ErlangShell.ErlangOutput);
     }
@@ -13,7 +13,7 @@ export class ErlangShell extends shell.ErlGenericShell {
     }    
 }
 
-export class ErlangCompilerShell extends shell.ErlGenericShell {
+export class ErlangCompilerShell extends GenericShell {
     constructor(){
         super(adapt.ErlangOutputAdapter());//ErlangShell.ErlangOutput);
     }

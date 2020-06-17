@@ -23,6 +23,9 @@ import { ErlangShellForDebugging } from '../ErlangShellDebugger';
 import * as erlConnection from '../erlangConnection';
 
 import { ErlangSettings } from '../erlangSettings';
+import RebarShell from '../RebarShell';
+import { ErlangOutputAdapter } from '../vscodeAdapter';
+
 /*
 other LSP
 https://github.com/rust-lang-nursery/rls-vscode/blob/master/src/extension.ts
@@ -191,27 +194,18 @@ function waitForSocket(options:any, callback:any, _tries:any) {
   socket.once('error', handleError);
 }
 
-    function compile_erlang_connection(): Promise < number > {
-    return new Promise<number>((a, r) => {
-        //TODO: #if DEBUG
-        var compiler = new ErlangShellForDebugging(lspOutputChannel);
-        compiler.erlangPath = Workspace.getConfiguration("erlang").get("erlangPath", null);
-        var erlFiles = ["vscode_lsp_entry.erl"];
-        //create dir if not exists
-        let ebinDir = path.normalize(path.join(erlangBridgePath, "..", "ebin"));
-        if (!fs.existsSync(ebinDir)) {
-            fs.mkdirSync(ebinDir);
-        }
-
-        let args = ["-o", "../ebin"].concat(erlFiles);
-        return compiler.Compile(erlangBridgePath, args).then(res => {
-            //this.debug("Compilation of erlang bridge...ok");
-            a(res);
-        }, exitCode => {
-            console.log("Compilation of erlang bridge...ko");
-            r(exitCode);
-        });
-    });
+/**
+ * Uses the extension-provided rebar3 executable to compile the erlangbridge app.
+ *
+ * @param extensionPath - Path to the editor extension.
+ * @returns Promise resolved or rejected when compilation is complete.
+ */
+// TODO: convert to async function
+function compileErlangBridge(extensionPath: string) : Thenable<string> {
+    return new RebarShell([], extensionPath, ErlangOutputAdapter())
+        .compile(extensionPath)
+        .then(({ output }) => output);
+    // TODO: handle failure to compile erlangbridge
 }
 
 function getPort(callback) {
@@ -265,12 +259,12 @@ export function activate(context: ExtensionContext) {
     let clientName = Workspace.getConfiguration("erlang").get("verbose", false) ? 'Erlang Language Server' : '';
     client = new LanguageClient(clientName, async () => {
         return new Promise<StreamInfo>(async (resolve, reject) => {
-            await compile_erlang_connection();
+            await compileErlangBridge(context.extensionPath);
             let erlangLsp = new ErlangShellLSP(lspOutputChannel);
             erlangLsp.erlangPath = Workspace.getConfiguration("erlang").get("erlangPath", null);
 
             getPort(async function (port) {
-                erlangLsp.Start("", erlangBridgePath + "/..", port, "src", "");
+                erlangLsp.Start("", erlangBridgePath, port, "src", "");
                 let socket = await waitForSocket({ port: port }, function (error, socket) {
                     resolve({ reader: socket, writer: socket });
                 }, undefined);
