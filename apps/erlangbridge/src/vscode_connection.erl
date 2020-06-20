@@ -9,11 +9,25 @@
 
 %%called with "erl -s vscode_connection -vscode_port 1234"
 start() ->
+    compile_argumentsfile(),
     gen_connection:start(?MODULE).
 
 get_port() ->
     {ok, [[P]]}=init:get_argument(vscode_port),
     P.
+
+%% before 0.6.2, int:ni(...) were put in -eval command line, but erlang crash in erl_scan and I don't known why...
+compile_argumentsfile() ->
+    case init:get_argument(compiled_args_file) of
+    {ok, [[FileName]]} ->
+        %compile file to interpret int:ni(..), list of breapoints int:break(...)
+        {ok, NewModule} = c:c(FileName),
+        %call :configure to execute int:ni,int:break,...
+        NewModule:configure(),
+        ok;
+    _ ->
+        no_compiled_args_file
+    end.
 
 init(Port) ->
     init_subscribe(Port).

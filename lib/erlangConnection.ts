@@ -8,6 +8,7 @@ import { ErlangShellForDebugging } from './ErlangShellDebugger';
 import { ILogOutput } from './GenericShell';
 import * as Adapter from './vscodeAdapter';
 import * as fs from 'fs';
+import { AddressInfo } from 'net';
 
 const rebar3BuildPath = path.join('_build', 'default', 'lib', 'vscode_lsp');
 // Based on JS output path, not TS path
@@ -89,13 +90,14 @@ export abstract class ErlangConnection extends EventEmitter {
             var compiler = new ErlangShellForDebugging(this.verbose ? this._output : null);
             var erlFiles = this.get_ErlangFiles();
             //create dir if not exists
-            const ebinDir = path.join(erlangBridgePath, 'ebin');
+            //compile erlang_connection in specifc diretory to avoid that the target can access to lspxxx.beam at debug time            
+            const ebinDir = path.join(erlangBridgePath, '..', 'ebin');
             if (!fs.existsSync(ebinDir)) {
                 fs.mkdirSync(ebinDir);
             }
 
-            let args = ["-o", "../ebin"].concat(erlFiles);
-            return compiler.Compile(erlangBridgePath, args).then(res => {
+            let args = ["-o", path.normalize(ebinDir)].concat(erlFiles);
+            return compiler.Compile(path.join(erlangBridgePath,'src'), args).then(res => {
                 //this.debug("Compilation of erlang bridge...ok");
                 a(res);
             }, exitCode => {
@@ -134,7 +136,7 @@ export abstract class ErlangConnection extends EventEmitter {
                 });
             });
             this.events_receiver.listen(0, '127.0.0.1', () => {
-                var p = this.events_receiver.address().port;
+                var p = (<AddressInfo>this.events_receiver.address()).port;
                 if (this.verbose)
                     this.debug(` on http://127.0.0.1:${p}\n`);
                 accept(p);

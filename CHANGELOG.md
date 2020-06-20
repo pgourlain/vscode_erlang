@@ -1,34 +1,41 @@
 # Change log
 
-## Version 0.6.1 (June 6, 2020)
+## Version 0.6.2 (June 20, 2020)
 
-* Improve auto indentation:
-  * Continue comments if break line in the middle except module documentation
-    (triple `%`) that always continue
-  * Half-indent guards
-  * Indent after clause starts, inside tuples, list and parameter lists
-  * Outdent after clause ends
-* Fix syntax highlight:
-  * Allow comment between '}' and ').' in record definitions
-  * Allow variables as module or function names in implicit function
-    expressions
-  * Distinguish function type in type specification and explicit function
-    expression
-* Setting `erlang.erlangPath` now can accept workspace relative path
-* Respect setting `search.exclude` when looking for the source file of an erlang
-  module. With this setting source files duplicated by build system can be
-  excluded from for example "Go to definition" and other code navigation.
+* The debuggerAdapter (link between vscode and erlang in debug), can be hosted in two modes (server, external)
+  * see configuration : erlang.debuggerRunMode
 
-## Version 0.6.0 (January 23, 2020)
+* Merging 0.6.0, 0.6.1 from [PR #154](https://github.com/pgourlain/vscode_erlang/pull/154)
+  * Improve auto indentation:
+    * Continue comments if break line in the middle except module documentation
+      (triple `%`) that always continue
+    * Half-indent guards
+    * Indent after clause starts, inside tuples, list and parameter lists
+    * Outdent after clause ends
+  * Fix syntax highlight:
+    * Allow comment between '}' and ').' in record definitions
+    * Allow variables as module or function names in implicit function
+      expressions
+    * Distinguish function type in type specification and explicit function
+      expression
+  * Setting `erlang.erlangPath` now can accept workspace relative path
+  * Respect setting `search.exclude` when looking for the source file of an erlang
+    module. With this setting source files duplicated by build system can be
+    excluded from for example "Go to definition" and other code navigation.
 
-Use updates from [Daniel Finke](https://github.com/danielfinke)'s
-[vscode_erlang](https://github.com/danielfinke/vscode_erlang) repository:
+  * Use updates from [Daniel Finke](https://github.com/danielfinke)'s
+  [vscode_erlang](https://github.com/danielfinke/vscode_erlang) repository:
 
-* Remove Erlang binaries and compile Erlang counterpart of the extension
-  on-the-fly at the first usage per Visual Studio Code instance
-* Fix syntax highlight: comma is not needed in `-define` on the same line as
-  macro name
-* Remove `pgoconsoloe` and use `erlang` output channel only
+  * Remove Erlang binaries and compile Erlang counterpart of the extension
+    on-the-fly at the first usage per Visual Studio Code instance
+  * Fix syntax highlight: comma is not needed in `-define` on the same line as
+    macro name
+  * Remove `pgoconsoloe` and use `erlang` output channel only
+
+Thanks to
+
+* [Daniel Finke](https://github.com/danielfinke)
+* [Kornel H](https://github.com/KornelH)
 
 ## Version 0.5.2 (March 2, 2019)
 
