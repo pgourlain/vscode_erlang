@@ -6,5 +6,8 @@ src/**
 lib/**
 **/*.map
 .gitignore
-tsconfig.json
+**/tsconfig.json
 vsc-extension-quickstart.md
+**/*.vsix
+**/sample_forms.txt
+syntaxes/test/**

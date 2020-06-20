@@ -4,8 +4,10 @@
 
 * The debuggerAdapter (link between vscode and erlang in debug), can be hosted in two modes (server, external)
   * see configuration : erlang.debuggerRunMode
-
-* Merging 0.6.0, 0.6.1 from [PR #154](https://github.com/pgourlain/vscode_erlang/pull/154)
+* [PR #159](https://github.com/pgourlain/vscode_erlang/pull/159) : Adding support for %%region / %%endregion folding
+* [PR #135](https://github.com/pgourlain/vscode_erlang/pull/135) : Supervisor snippet & fix 
+* [PR #141](https://github.com/pgourlain/vscode_erlang/pull/141) : Adding *.es file association
+* [PR #154](https://github.com/pgourlain/vscode_erlang/pull/154) : Merging 0.6.0, 0.6.1 from [KornelH repo](https://github.com/KornelH/vscode_erlang)
   * Improve auto indentation:
     * Continue comments if break line in the middle except module documentation
       (triple `%`) that always continue
@@ -36,6 +38,9 @@ Thanks to
 
 * [Daniel Finke](https://github.com/danielfinke)
 * [Kornel H](https://github.com/KornelH)
+* [Emmanuel Boutin](https://github.com/eboutin)
+* [Serge Aleynikov](https://github.com/saleyn)
+* [Andrei Dziaineka](https://github.com/dziaineka)
 
 ## Version 0.5.2 (March 2, 2019)
 
