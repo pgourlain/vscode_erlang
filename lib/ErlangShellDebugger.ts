@@ -57,10 +57,13 @@ export class ErlangShellForDebugging extends GenericShell {
     public Start(erlPath: string, startDir: string, listen_port: number, bridgePath: string, launchArguments: LaunchRequestArguments): Promise<boolean> {
         var randomSuffix:string = Math.floor(Math.random() * 10000000).toString();
         this.argsFileName = path.join(os.tmpdir(), path.basename(startDir) + '_' + randomSuffix);
+        let argsPrecompiledFileName = this.argsFileName + ".erl";
+        argsPrecompiledFileName = this.formatPath(argsPrecompiledFileName);
         var debugStartArgs = ["-noshell", "-pa", `"${bridgePath}"`, "-s", "int",
             "-vscode_port", listen_port.toString(),
+            "-compiled_args_file", `"${argsPrecompiledFileName}"`,
             "-s", "vscode_connection", "start"];
-        var argsFile = this.createArgsFile(startDir, launchArguments.noDebug, launchArguments.addEbinsToCodepath);
+        var argsFile = this.createArgsFilev1(startDir, launchArguments.noDebug, launchArguments.addEbinsToCodepath);
         var processArgs = debugStartArgs.concat(argsFile).concat([launchArguments.arguments]);
         this.started = true;
         var result = this.LaunchProcess(erlPath, startDir, processArgs, !launchArguments.verbose);
@@ -70,7 +73,13 @@ export class ErlangShellForDebugging extends GenericShell {
     public CleanupAfterStart() {
         if (this.argsFileName && fs.existsSync(this.argsFileName)) {
             fs.unlinkSync(this.argsFileName);
+            fs.unlinkSync(this.argsFileName+".erl");
+            var beamFile = this.argsFileName+".beam";
+            if (fs.existsSync(beamFile)) {
+                fs.unlinkSync(beamFile);
+            }
         }
+
     }
 
     private uniqueBy<T>(arr: Array<T>, keySelector: (v: T)=> any): Array<T> {
@@ -123,7 +132,59 @@ export class ErlangShellForDebugging extends GenericShell {
         return fileList;
     }
 
-    private createArgsFile(startDir: string, noDebug: boolean, addEbinsToCodepath: boolean): string[] {
+    private createArgsFilev1(startDir: string, noDebug: boolean, addEbinsToCodepath: boolean): string[] {
+        var result: string[] = [];
+        if (this.breakPoints) {
+            var argsFileContents = "";
+            if (!noDebug) {
+                let argsPrecompiledFileName = this.argsFileName+".erl";
+                let argsModuleName = path.basename(this.argsFileName);
+                let argsCompiledContents = `-module(${argsModuleName}).\r\n-export([configure/0]).\r\n\r\n`;
+                argsCompiledContents += "configure() -> \r\n int:start()\r\n";
+
+                argsFileContents += "-eval 'int:start()";
+                var modulesWithoutBp: { [sourcePath: string]: boolean} = {};
+                this.findErlFiles(startDir).forEach(fileName => {
+                    modulesWithoutBp[fileName] = true;
+                });
+
+                //first interpret source
+                var bps = this.uniqueBy(this.breakPoints, bp => bp.source.path);
+                bps.forEach(bp => {
+                    argsCompiledContents += ",int:ni(\"" + this.formatPath(bp.source.path) + "\")\r\n";
+                    delete modulesWithoutBp[bp.source.path];
+                });
+                for (var fileName in modulesWithoutBp) {
+                    argsCompiledContents += ",int:ni(\"" + this.formatPath(fileName) + "\")\r\n";
+                }
+                //then set break
+                this.breakPoints.forEach(bp => {
+                    var moduleName = path.basename(bp.source.name, ".erl");
+                    argsCompiledContents += `,int:break(${moduleName}, ${bp.line})\r\n`;
+                });
+                this.functionBreakPoints.forEach(bp => {
+                    argsCompiledContents += `,vscode_connection:set_breakpoint(${bp.moduleName}, {function, ${bp.functionName}, ${bp.arity}})\r\n`;
+                });
+                argsFileContents += "'";
+                argsCompiledContents += ",ok.";
+            
+                fs.writeFileSync(argsPrecompiledFileName, argsCompiledContents);
+            }
+            if (addEbinsToCodepath) {
+                this.findEbinDirs(path.join(startDir, "_build")).forEach(ebin => {
+                    argsFileContents += " -pz \"" + this.formatPath(ebin) + "\"";
+                });
+            }
+            fs.writeFileSync(this.argsFileName, argsFileContents);
+            
+            result.push("-args_file");
+            result.push("\"" + this.argsFileName + "\"");
+        }
+        return result;
+    }
+
+    // old 
+    private createArgsFilev0(startDir: string, noDebug: boolean, addEbinsToCodepath: boolean): string[] {
         var result: string[] = [];
         if (this.breakPoints) {
             var argsFileContents = "";
@@ -133,6 +194,7 @@ export class ErlangShellForDebugging extends GenericShell {
                 this.findErlFiles(startDir).forEach(fileName => {
                     modulesWithoutBp[fileName] = true;
                 });
+
                 //first interpret source
                 var bps = this.uniqueBy(this.breakPoints, bp => bp.source.path);
                 bps.forEach(bp => {
@@ -150,7 +212,7 @@ export class ErlangShellForDebugging extends GenericShell {
                 this.functionBreakPoints.forEach(bp => {
                     argsFileContents += `,vscode_connection:set_breakpoint(${bp.moduleName}, {function, ${bp.functionName}, ${bp.arity}})`;
                 });
-                argsFileContents += "'";
+                argsFileContents += "'";            
             }
             if (addEbinsToCodepath) {
                 this.findEbinDirs(path.join(startDir, "_build")).forEach(ebin => {
@@ -158,6 +220,7 @@ export class ErlangShellForDebugging extends GenericShell {
                 });
             }
             fs.writeFileSync(this.argsFileName, argsFileContents);
+            
             result.push("-args_file");
             result.push("\"" + this.argsFileName + "\"");
         }

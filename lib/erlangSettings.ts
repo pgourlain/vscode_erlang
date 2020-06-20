@@ -6,4 +6,5 @@ export interface ErlangSettings {
 	linting: true;
 	codeLensEnabled : boolean;
 	verbose: boolean;
+	debuggerRunMode : string;
 }

@@ -187,7 +187,7 @@ function waitForSocket(options:any, callback:any, _tries:any) {
     );
   }
 
-  var socket = Net.connect(port, host, function(one:any, two:any) {
+  var socket = Net.connect(port, host, () => {
     socket.removeListener('error', handleError);
     callback(null, socket);
   });
@@ -213,7 +213,7 @@ function getPort(callback) {
     sock.end('OK\n');
   });
   server.listen(0, function () {
-    var port = server.address().port;
+    var port = (<Net.AddressInfo>server.address()).port;
     server.close(function () {
       callback(port);
     });

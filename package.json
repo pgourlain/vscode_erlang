@@ -1,11 +1,11 @@
 {
 	"name": "erlang",
 	"description": "Erlang language extension for Visual Studio Code",
-	"version": "0.6.1",
+	"version": "0.6.2",
 	"icon": "images/icon.png",
-	"publisher": "KornelHorvath",
+	"publisher": "pgourlain",
 	"engines": {
-		"vscode": "^1.23.0"
+		"vscode": "^1.32.0"
 	},
 	"categories": [
 		"Programming Languages",
@@ -32,14 +32,9 @@
 				"type": "erlang",
 				"program": "./out/lib/erlangDebug.js",
 				"runtime": "node",
-				"label": "Erlang",
-				"initialConfigurations": [
-					{
-						"name": "Launch erlang",
-						"type": "erlang",
-						"request": "launch",
-						"cwd": "${workspaceRoot}"
-					}
+				"label": "Erlang Debug",
+				"languages": [
+					"erlang"
 				],
 				"configurationAttributes": {
 					"launch": {
@@ -66,7 +61,15 @@
 							}
 						}
 					}
-				}
+				},
+				"initialConfigurations": [
+					{
+						"name": "Launch erlang",
+						"type": "erlang",
+						"request": "launch",
+						"cwd": "${workspaceRoot}"
+					}
+				]
 			}
 		],
 		"languages": [
@@ -207,6 +210,17 @@
 					"description": "Activate technical traces",
 					"title": "Activate technical traces for use in the extension development",
 					"default": false
+				},
+				"erlang.debuggerRunMode": {
+					"type": "string",
+					"default": "external",
+					"description": "Specifies how run vscode debuggeradpater. Usefull in extension development",
+					"title": "Specifies how run vscode debuggeradpater",
+					"enum": ["external","server"],
+					"enumDescriptions": [
+						"external : launch debugadapter in separate process",
+						"server: launch debugadapter as a socket based server"
+					]
 				}
 			}
 		},
@@ -234,24 +248,30 @@
 	},
 	"license": "MIT",
 	"scripts": {
-		"vscode:prepublish": "tsc -p ./",
-		"compile": "tsc -watch -p ./",
-		"postinstall": "node ./node_modules/vscode/bin/install",
-		"test": "node ./node_modules/vscode/bin/test",
-		"update-vscode": "node ./node_modules/vscode/bin/install"
+		"vscode:prepublish": "npm run compile",
+		"compile": "tsc -p ./",
+		"watch": "tsc -watch -p ./",
+		"test": "node ./node_modules/vscode/bin/test"
 	},
 	"dependencies": {
-		"vscode-debugadapter": "^1.16.0",
-		"vscode-debugprotocol": "^1.16.0",
-		"vscode-languageclient": "^4.1.3",
-		"vscode-languageserver": "^4.1.2",
+		"vscode-debugadapter": "^1.41.0",
+		"vscode-debugprotocol": "^1.41.0",
+		"vscode-languageclient": "^4.4.2",
+		"vscode-languageserver": "^4.4.2",
 		"vscode-uri": "^1.0.3"
 	},
 	"devDependencies": {
-		"vscode": "^1.1.17",
-		"@types/mocha": "^2.2.48",
-		"@types/node": "^6.0.101",
-		"mocha": "^2.3.3",
-		"typescript": "^2.8.3"
+		"@types/glob": "^7.1.1",
+		"@types/mocha": "^5.2.6",
+		"@types/node": "^12.12.0",
+		"@types/vscode": "^1.32.0",
+		"glob": "^7.1.4",
+		"mocha": "^6.1.4",
+		"source-map-support": "^0.5.12",
+		"@typescript-eslint/eslint-plugin": "^3.0.2",
+		"@typescript-eslint/parser": "^3.0.2",
+		"eslint": "^7.1.0",
+		"typescript": "^3.9.4",
+		"vscode-test": "^1.3.0"
 	}
 }

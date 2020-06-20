@@ -1,51 +1,75 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as path from 'path';
-import { 
-    workspace as Workspace, window as Window, ExtensionContext, TextDocument, OutputChannel, WorkspaceFolder, Uri, debug,
-    languages, IndentAction
-} from 'vscode'; 
+import {
+    workspace as Workspace, window as Window, ExtensionContext, TextDocument, OutputChannel, WorkspaceFolder, Uri, debug,
+    languages, IndentAction, DebugAdapterDescriptorFactory
+} from 'vscode';
 
 import * as Adapter from './vscodeAdapter';
 import * as Rebar from './RebarRunner';
 import * as Eunit from './eunitRunner';
 import { ErlangDebugConfigurationProvider } from './ErlangConfigurationProvider';
+import { ErlangDebugAdapterDescriptorFactory, InlineErlangDebugAdapterFactory, ErlangDebugAdapterExecutableFactory } from './ErlangAdapterDescriptorFactory';
 import * as erlangConnection from './erlangConnection';
 
 import * as LspClient from './lsp/lspclientextension';
 
-var myoutputChannel : OutputChannel;
+var myoutputChannel: OutputChannel;
+
 // this method is called when your extension is activated
 // your extension is activated the very first time the command is executed
 export function activate(context: ExtensionContext) {
-    erlangConnection.setExtensionPath(context.extensionPath);
-    
-    myoutputChannel = Adapter.ErlangOutput();
-    // Use the console to output diagnostic information (console.log) and errors (console.error)
-    // This line of code will only be executed once when your extension is activated
-    console.log('Congratulations, your extension "erlang" is now active!');
+    erlangConnection.setExtensionPath(context.extensionPath);
+
+    myoutputChannel = Adapter.ErlangOutput();
+    // Use the console to output diagnostic information (console.log) and errors (console.error)
+    // This line of code will only be executed once when your extension is activated
+    console.log('Congratulations, your extension "erlang" is now active!');
     myoutputChannel.appendLine("erlang extension is active");
 
-    //configuration of erlang language -> documentation : https://code.visualstudio.com/Docs/extensionAPI/vscode-api#LanguageConfiguration
-    var disposables=[];
-    // The command has been defined in the package.json file
-    // Now provide the implementation of the command with  registerCommand
-    // The commandId parameter must match the command field in package.json
-    //disposables.push(vscode.commands.registerCommand('extension.rebarBuild', () => { runRebarCommand(['compile']);}));
+    //configuration of erlang language -> documentation : https://code.visualstudio.com/Docs/extensionAPI/vscode-api#LanguageConfiguration
+    var disposables = [];
+    // The command has been defined in the package.json file
+    // Now provide the implementation of the command with  registerCommand
+    // The commandId parameter must match the command field in package.json
+    //disposables.push(vscode.commands.registerCommand('extension.rebarBuild', () => { runRebarCommand(['compile']);}));
 
-    var rebar = new Rebar.RebarRunner();
-    rebar.activate(context);
+    var rebar = new Rebar.RebarRunner();
+    rebar.activate(context);
 
-    var eunit = new Eunit.EunitRunner();
-    eunit.activate(context);
+    var eunit = new Eunit.EunitRunner();
+    eunit.activate(context);
 
-    disposables.push(debug.registerDebugConfigurationProvider("erlang", new ErlangDebugConfigurationProvider()));
+    disposables.push(debug.registerDebugConfigurationProvider("erlang", new ErlangDebugConfigurationProvider()));
+    let runMode = Workspace.getConfiguration("erlang").debuggerRunMode;
+    let factory: DebugAdapterDescriptorFactory;
+    switch (runMode) {
+        case 'server':
+            // run the debug adapter as a server inside the extension and communicating via a socket
+            factory = new ErlangDebugAdapterDescriptorFactory();
+            break;
 
-    disposables.forEach((disposable => context.subscriptions.push(disposable)));
-    LspClient.activate(context);
+        case 'inline':
+            // run the debug adapter inside the extension and directly talk to it
+            factory = new InlineErlangDebugAdapterFactory();
+            break;
 
-    languages.setLanguageConfiguration("erlang", {
-        onEnterRules: [
+        case 'external': default:
+            // run the debug adapter as a separate process
+            factory = new ErlangDebugAdapterExecutableFactory(context.extensionPath);
+            break;
+    }
+    
+    disposables.push(debug.registerDebugAdapterDescriptorFactory('erlang', factory));
+    if ('dispose' in factory) {
+		disposables.push(factory);
+	}
+    disposables.forEach((disposable => context.subscriptions.push(disposable)));
+    LspClient.activate(context);
+
+    languages.setLanguageConfiguration("erlang", {
+        onEnterRules: [
             // Module comment: always continue comment
             {
                 beforeText: /^%%% .*$/,
@@ -148,10 +172,10 @@ export function activate(context: ExtensionContext) {
                 beforeText: /^.*[^;,[({<]\s*$/,
                 action: { indentAction: IndentAction.Outdent }
             }
-        ]
-    });
+        ]
+    });
 }
 
 export function deactivate(): Thenable<void> {
-    return LspClient.deactivate();
+    return LspClient.deactivate();
 }
