@@ -216,7 +216,10 @@
 					"default": "external",
 					"description": "Specifies how run vscode debuggeradpater. Usefull in extension development",
 					"title": "Specifies how run vscode debuggeradpater",
-					"enum": ["external","server"],
+					"enum": [
+						"external",
+						"server"
+					],
 					"enumDescriptions": [
 						"external : launch debugadapter in separate process",
 						"server: launch debugadapter as a socket based server"

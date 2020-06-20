@@ -48,6 +48,8 @@ export class ErlangShellForDebugging extends GenericShell {
     functionBreakPoints: FunctionBreakpoint[];
     started : boolean;
     argsFileName: string;
+    argsPrecompiledFileName : string;
+
     constructor(whichOutput: ILogOutput) {
         super(whichOutput);
         this.breakPoints = [];
@@ -57,11 +59,11 @@ export class ErlangShellForDebugging extends GenericShell {
     public Start(erlPath: string, startDir: string, listen_port: number, bridgePath: string, launchArguments: LaunchRequestArguments): Promise<boolean> {
         var randomSuffix:string = Math.floor(Math.random() * 10000000).toString();
         this.argsFileName = path.join(os.tmpdir(), path.basename(startDir) + '_' + randomSuffix);
-        let argsPrecompiledFileName = this.argsFileName + ".erl";
-        argsPrecompiledFileName = this.formatPath(argsPrecompiledFileName);
+        this.argsPrecompiledFileName = path.join(os.tmpdir(), 'bp_' + randomSuffix + ".erl");
+        this.argsPrecompiledFileName = this.formatPath(this.argsPrecompiledFileName);
         var debugStartArgs = ["-noshell", "-pa", `"${bridgePath}"`, "-s", "int",
             "-vscode_port", listen_port.toString(),
-            "-compiled_args_file", `"${argsPrecompiledFileName}"`,
+            "-compiled_args_file", `"${this.argsPrecompiledFileName}"`,
             "-s", "vscode_connection", "start"];
         var argsFile = this.createArgsFilev1(startDir, launchArguments.noDebug, launchArguments.addEbinsToCodepath);
         var processArgs = debugStartArgs.concat(argsFile).concat([launchArguments.arguments]);
@@ -73,8 +75,8 @@ export class ErlangShellForDebugging extends GenericShell {
     public CleanupAfterStart() {
         if (this.argsFileName && fs.existsSync(this.argsFileName)) {
             fs.unlinkSync(this.argsFileName);
-            fs.unlinkSync(this.argsFileName+".erl");
-            var beamFile = this.argsFileName+".beam";
+            fs.unlinkSync(this.argsPrecompiledFileName);
+            var beamFile = path.join(path.dirname(this.argsPrecompiledFileName), path.basename(this.argsPrecompiledFileName, ".erl"))+".beam";
             if (fs.existsSync(beamFile)) {
                 fs.unlinkSync(beamFile);
             }
@@ -137,8 +139,7 @@ export class ErlangShellForDebugging extends GenericShell {
         if (this.breakPoints) {
             var argsFileContents = "";
             if (!noDebug) {
-                let argsPrecompiledFileName = this.argsFileName+".erl";
-                let argsModuleName = path.basename(this.argsFileName);
+                let argsModuleName = path.basename(this.argsPrecompiledFileName, ".erl");
                 let argsCompiledContents = `-module(${argsModuleName}).\r\n-export([configure/0]).\r\n\r\n`;
                 argsCompiledContents += "configure() -> \r\n int:start()\r\n";
 
@@ -168,7 +169,7 @@ export class ErlangShellForDebugging extends GenericShell {
                 argsFileContents += "'";
                 argsCompiledContents += ",ok.";
             
-                fs.writeFileSync(argsPrecompiledFileName, argsCompiledContents);
+                fs.writeFileSync(this.argsPrecompiledFileName, argsCompiledContents);
             }
             if (addEbinsToCodepath) {
                 this.findEbinDirs(path.join(startDir, "_build")).forEach(ebin => {
