@@ -29,5 +29,9 @@ class ErlangWrapperOutput implements ILogOutput {
         this.channel.appendLine(value);
     }
 
+    public debug(msg : string) : void {
+        this.channel.appendLine("debug:" + msg);
+    }
+
 
 }

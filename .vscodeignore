@@ -11,3 +11,4 @@ vsc-extension-quickstart.md
 **/*.vsix
 **/sample_forms.txt
 syntaxes/test/**
+_build/**

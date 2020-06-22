@@ -20,6 +20,7 @@ function couldBeOutput(line: string) {
 export interface ILogOutput {
     show(): void;
     appendLine(value: string): void;
+    debug(msg : string) : void;
 }
 
 /**
@@ -182,6 +183,10 @@ export class GenericShell extends EventEmitter {
     protected log(type: string, msg: string): void {
         this.logOutput && this.logOutput.appendLine(msg);
         this.emit("msg", type, msg[msg.length - 1] == '\n' ? msg : (msg + "\n"));
+    }
+
+    protected debug(msg : string) : void {
+        this.logOutput && this.logOutput.debug(msg);
     }
 
     public Send(what: string) {
