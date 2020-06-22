@@ -1,5 +1,9 @@
 # Change log
 
+## Version 0.6.3 (June 22, 2020)
+
+* Fix #162 : run without debugging failed
+
 ## Version 0.6.2 (June 20, 2020)
 
 * The debuggerAdapter (link between vscode and erlang in debug), can be hosted in two modes (server, external)

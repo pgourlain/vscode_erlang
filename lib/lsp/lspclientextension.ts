@@ -260,7 +260,7 @@ export function activate(context: ExtensionContext) {
     client = new LanguageClient(clientName, async () => {
         return new Promise<StreamInfo>(async (resolve, reject) => {
             await compileErlangBridge(context.extensionPath);
-            let erlangLsp = new ErlangShellLSP(lspOutputChannel);
+            let erlangLsp = new ErlangShellLSP(ErlangOutputAdapter(lspOutputChannel));
             erlangLsp.erlangPath = Workspace.getConfiguration("erlang").get("erlangPath", null);
 
             getPort(async function (port) {
