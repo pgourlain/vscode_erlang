@@ -1,5 +1,9 @@
 # Change log
 
+## Version 0.6.4 (June 25, 2020)
+
+* Fix [#138](https://github.com/pgourlain/vscode_erlang/issues/138) : Add support of parse_transform on syntax tree if present in compile attribute
+
 ## Version 0.6.3 (June 22, 2020)
 
 * Fix #162 : run without debugging failed
