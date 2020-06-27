@@ -25,6 +25,7 @@ import * as erlConnection from '../erlangConnection';
 import { ErlangSettings } from '../erlangSettings';
 import RebarShell from '../RebarShell';
 import { ErlangOutputAdapter } from '../vscodeAdapter';
+import { getElangConfigConfiguration } from '../ErlangConfigurationProvider';
 
 /*
 other LSP
@@ -221,7 +222,8 @@ function getPort(callback) {
 }
 
 export function activate(context: ExtensionContext) {
-    if (Workspace.getConfiguration("erlang").get("verbose", false))
+    let erlangCfg = getElangConfigConfiguration(); 
+    if (erlangCfg.verbose)
         lspOutputChannel = Window.createOutputChannel('Erlang Language Server');
 
     let middleware: Middleware = {
@@ -256,12 +258,12 @@ export function activate(context: ExtensionContext) {
         outputChannel: lspOutputChannel
     }
 
-    let clientName = Workspace.getConfiguration("erlang").get("verbose", false) ? 'Erlang Language Server' : '';
+    let clientName = erlangCfg.verbose ? 'Erlang Language Server' : '';
     client = new LanguageClient(clientName, async () => {
         return new Promise<StreamInfo>(async (resolve, reject) => {
             await compileErlangBridge(context.extensionPath);
             let erlangLsp = new ErlangShellLSP(ErlangOutputAdapter(lspOutputChannel));
-            erlangLsp.erlangPath = Workspace.getConfiguration("erlang").get("erlangPath", null);
+            erlangLsp.erlangPath = erlangCfg.erlangPath;
 
             getPort(async function (port) {
                 erlangLsp.Start("", erlangBridgePath, port, "src", "");

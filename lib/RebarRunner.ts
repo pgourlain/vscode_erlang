@@ -5,6 +5,7 @@ import * as child_process from 'child_process'
 import RebarShell from './RebarShell';
 import * as utils from './utils'
 import { ErlangOutputAdapter } from './vscodeAdapter';
+import { getElangConfigConfiguration } from './ErlangConfigurationProvider';
 
 var rebarOutputChannel: vscode.OutputChannel;
 
@@ -52,7 +53,7 @@ export class RebarRunner implements vscode.Disposable {
 
 	private runRebarCompile() {
 		try {
-			const buildArgs = vscode.workspace.getConfiguration('erlang').get('rebarBuildArgs', ['compile']);
+			const buildArgs = getElangConfigConfiguration().rebarBuildArgs;
 			this.runScript(buildArgs).then(data => {
 				this.diagnosticCollection.clear();
 				this.parseCompilationResults(data);
@@ -156,7 +157,8 @@ export class RebarRunner implements vscode.Disposable {
 	 * @returns Directories to search for the rebar executable
 	 */
 	private getRebarSearchPaths(): string[] {
-		const cfgRebarPath = vscode.workspace.getConfiguration('erlang').get('rebarPath'),
+		
+		const cfgRebarPath = getElangConfigConfiguration().rebarPath,
 			rebarSearchPaths = [];
 		if (cfgRebarPath) {
 			rebarSearchPaths.push(cfgRebarPath);

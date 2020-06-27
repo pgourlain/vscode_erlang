@@ -1,8 +1,9 @@
 import { GenericShell, ILogOutput } from '../GenericShell';
+import { getElangConfigConfiguration } from '../ErlangConfigurationProvider';
 
 export class ErlangShellLSP extends GenericShell {
     constructor(whichOutput: ILogOutput) {
-        super(whichOutput);
+        super(whichOutput, null, getElangConfigConfiguration());
     }
     public Start(erlPath:string, startDir: string, listen_port: number, bridgePath: string, args: string): Promise<boolean> {
         //var debugStartArgs = ["-pa", `"${bridgePath}"`, "-pa", "ebin", "-s", "int",
