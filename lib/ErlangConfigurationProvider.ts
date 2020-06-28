@@ -4,6 +4,13 @@ import {
 import { ErlangSettings } from './erlangSettings';
 
 export class ErlangDebugConfigurationProvider implements DebugConfigurationProvider {
+    provideDebugConfigurations?(folder: WorkspaceFolder | undefined, token?: CancellationToken): ProviderResult<DebugConfiguration[]> {
+        if (folder) {
+           return [];
+        }
+        return undefined;
+    }
+
     resolveDebugConfiguration?(folder: WorkspaceFolder, debugConfiguration: DebugConfiguration, token?: CancellationToken): ProviderResult<DebugConfiguration> {
         let cfg = getElangConfigConfiguration();
         debugConfiguration.verbose = cfg.verbose;

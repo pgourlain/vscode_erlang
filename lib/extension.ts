@@ -65,7 +65,7 @@ export function activate(context: ExtensionContext) {
     disposables.push(debug.registerDebugAdapterDescriptorFactory('erlang', factory));
     if ('dispose' in factory) {
 		disposables.push(factory);
-	}
+    }
     disposables.forEach((disposable => context.subscriptions.push(disposable)));
     LspClient.activate(context);
 

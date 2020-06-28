@@ -221,11 +221,13 @@
 					"title": "Specifies how run vscode debuggeradpater",
 					"enum": [
 						"external",
-						"server"
+						"server",
+						"inline"
 					],
 					"enumDescriptions": [
 						"external : launch debugadapter in separate process",
-						"server: launch debugadapter as a socket based server"
+						"server: launch debugadapter as a socket based server",
+						"inline: launch debugadpater in current process"
 					]
 				}
 			}

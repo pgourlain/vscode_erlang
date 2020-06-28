@@ -1,6 +1,6 @@
 import { 
     DebugAdapterDescriptorFactory, DebugSession, DebugAdapterExecutable, ProviderResult, DebugAdapterDescriptor,
-    DebugAdapterServer
+    DebugAdapterServer, DebugAdapterInlineImplementation
 } from 'vscode'; 
 
 import { AddressInfo, Server, createServer } from 'net';
@@ -31,8 +31,7 @@ export class ErlangDebugAdapterDescriptorFactory implements DebugAdapterDescript
 
 export class InlineErlangDebugAdapterFactory implements DebugAdapterDescriptorFactory {
     createDebugAdapterDescriptor(session: DebugSession, executable: DebugAdapterExecutable): ProviderResult<DebugAdapterDescriptor> {
-        //return <any>new DebugAdapterInlineImplementation(new ErlangDebugSession(true));
-        throw new Error("Method not implemented.");
+        return new DebugAdapterInlineImplementation(new ErlangDebugSession(true));
     }
 }
 
