@@ -20,11 +20,21 @@ get_port() ->
 compile_argumentsfile() ->
     case init:get_argument(compiled_args_file) of
     {ok, [[FileName]]} ->
+        io:format("Compiling arguments file  ~p~n", [FileName]),
         %compile file to interpret int:ni(..), list of breapoints int:break(...)
-        {ok, NewModule} = c:c(FileName),
-        %call :configure to execute int:ni,int:break,...
-        NewModule:configure(),
-        ok;
+         case compile:file(FileName, [binary]) of
+            {ok, ModuleName, Binary} -> 
+                io:format("Compile result: sucess ~n", []),
+                case code:load_binary(ModuleName, lists:flatten(io_lib:format("~p.beam", [ModuleName])), Binary) of
+                    {module, _} -> 
+                       io:format("Module ~p loaded~n", [ModuleName]),
+                        ModuleName:configure(), ok;
+                    _ -> no_compiled_args_file
+                end;
+            Error -> 
+                io:format("Compile result: failed ~p~n", [Error]),
+                no_compiled_args_file
+        end;
     _ ->
         no_compiled_args_file
     end.
