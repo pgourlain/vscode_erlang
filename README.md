@@ -73,6 +73,10 @@ Support for Erlang tools, including rebar3, EUnit and Dialyzer
 - `erlang.codeLensEnabled` - Enable/Disable CodeLens
 - `erlang.verbose` - Activate technical traces for use in the extension development
 
+## Help
+
+[Some configuration tricks](./HELP.MD)
+
 ## Credits
 
 File 'Erlang.tmLanguage' is inspired from <https://github.com/textmate/erlang.tmbundle/blob/master/Syntaxes/Erlang.plist>
