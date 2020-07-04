@@ -1,10 +1,11 @@
 # Change log
 
-## Version 0.6.4 (June 25, 2020)
+## Version 0.6.4 (July 4, 2020)
 
 * Fix [#138](https://github.com/pgourlain/vscode_erlang/issues/138) : Add support of parse_transform on syntax tree if present in compile attribute
 * Fix [#140](https://github.com/pgourlain/vscode_erlang/issues/140) : breakpoints set in non erlang files are exclude on startup
 * Fix [#106](https://github.com/pgourlain/vscode_erlang/issues/106) : exclude function that endswith "_test" in warnings
+* Fix [#148](https://github.com/pgourlain/vscode_erlang/issues/148) : Add rebar plugins path in includepaths to resolve include_lib
 * Migrate to vscode engine 1.46
 * Add 'inline' DebuggerMode in config
 * Add help.md link in readme.md that provide some tricks about erlang extension configuration.

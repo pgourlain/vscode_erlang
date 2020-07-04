@@ -177,6 +177,7 @@ get_standard_include_paths() ->
     RootDir = gen_lsp_config_server:root(),
     [
         filename:join([RootDir, "_build", "default", "lib"]),
+        filename:join([RootDir, "_build", "default", "plugins"]),
         filename:join([RootDir, "apps"]),
         filename:join([RootDir, "lib"])
     ].
@@ -255,8 +256,19 @@ get_include_paths_from_rebar_config(File) ->
 			   _ -> 
                    []
 			 end,
+        Deps = [],
+        %TODO: if include of each rebar dependency should be add to include paths, uncomment below 
+    %   Deps = case Consult of
+    %       {ok, DepsTerms} ->
+    %         Profiles = proplists:get_value(profiles, DepsTerms, []),
+    %         ErlDeps = lists:flatmap(fun({_,Opts})-> proplists:get_value(deps,Opts) end, Profiles),
+    %         RootDir = gen_lsp_config_server:root(),
+    %         [filename:join([RootDir, "_build", "default", "plugins", X, "include"]) || X <- ErlDeps ];
+    %       _ -> 
+    %         []
+    %       end,
 	  DefaultPaths = [filename:dirname(RebarConfig), filename:join([filename:dirname(RebarConfig), "include"])],
-	  ErlOptsPaths ++ DefaultPaths
+	  ErlOptsPaths ++ Deps ++ DefaultPaths
     end.
 
 find_rebar_config(Dir) ->
