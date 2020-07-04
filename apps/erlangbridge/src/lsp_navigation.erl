@@ -238,6 +238,8 @@ join_strings([String|Rest], Joiner) ->
     String ++ Joiner ++ join_strings(Rest, Joiner).
 
 fold_in_file_syntax_tree(FileSyntaxTree, StartAcc, Fun) ->
+    % FileStyntaxTree is [] of TopLevelStyntaxTree
+    % post-order traversal, then
     lists:foldl(fun (TopLevelSyntaxTree, Acc) ->
         erl_syntax_lib:fold(Fun, Acc, TopLevelSyntaxTree)
         end, StartAcc, FileSyntaxTree).

@@ -301,7 +301,7 @@ lint(FileSyntaxTree, File) ->
       {ok, [Warnings]} ->
 	  #{parse_result => true,
 	    errors_warnings =>
-		extract_error_or_warning(<<"warning">>, Warnings)};
+		extract_error_or_warning(<<"warning">>, filter_unused_functions(Warnings))};
       % errors, no warnings
       {error, [Errors], []} ->
 	  #{parse_result => true,
@@ -312,14 +312,34 @@ lint(FileSyntaxTree, File) ->
 	  #{parse_result => true,
 	    errors_warnings =>
 		extract_error_or_warning(<<"error">>, Errors) ++
-		  extract_error_or_warning(<<"warning">>, Warnings)};
+		  extract_error_or_warning(<<"warning">>, filter_unused_functions(Warnings))};
       {error, [], [Warnings]} ->
 	  #{parse_result => true,
 	    errors_warnings =>
-		extract_error_or_warning(<<"warning">>, Warnings)};
+		extract_error_or_warning(<<"warning">>, filter_unused_functions(Warnings))};
       _Any ->
 	  #{parse_result => false, error_message => <<"lint error">>}
     end.
+
+filter_unused_functions({_, []}) ->
+    [];
+filter_unused_functions({File, Warnings}) ->
+    %Filter unused function that ends with "_test", to avoid unwanted warnings in unit tests modules
+    %%TODO: if more than one filter to exclude, it should be configurable
+    Result = {
+        File, 
+        lists:filter(fun (X) ->
+                case X of
+                    {_, _, {unused_function, {FuncName,_}}} -> 
+                        FindResult = string:find(atom_to_list(FuncName), "_test", trailing) =/= "_test",
+                        %gen_lsp_server:lsp_log("FuncName:~p, ~p",[FuncName, FindResult]),
+                        FindResult;
+                    _ -> true 
+                end 
+            end,
+            Warnings)
+    }, 
+    Result.
 
 extract_error_or_warning(_Type, {_, []}) ->
     [];
