@@ -5,7 +5,7 @@
 	"icon": "images/icon.png",
 	"publisher": "pgourlain",
 	"engines": {
-		"vscode": "^1.32.0"
+		"vscode": "^1.46.0"
 	},
 	"categories": [
 		"Programming Languages",
@@ -14,6 +14,8 @@
 	],
 	"activationEvents": [
 		"onLanguage:erlang",
+		"onDebugInitialConfigurations",
+		"onDebugResolve:erlang",
 		"onCommand:extension.rebarBuild",
 		"onCommand:extension.rebarGetDeps",
 		"onCommand:extension.rebarUpdateDeps",
@@ -219,11 +221,13 @@
 					"title": "Specifies how run vscode debuggeradpater",
 					"enum": [
 						"external",
-						"server"
+						"server",
+						"inline"
 					],
 					"enumDescriptions": [
 						"external : launch debugadapter in separate process",
-						"server: launch debugadapter as a socket based server"
+						"server: launch debugadapter as a socket based server",
+						"inline: launch debugadpater in current process"
 					]
 				}
 			}
@@ -268,7 +272,7 @@
 		"@types/glob": "^7.1.1",
 		"@types/mocha": "^5.2.6",
 		"@types/node": "^12.12.0",
-		"@types/vscode": "^1.32.0",
+		"@types/vscode": "^1.46.0",
 		"glob": "^7.1.4",
 		"mocha": "^6.1.4",
 		"source-map-support": "^0.5.12",

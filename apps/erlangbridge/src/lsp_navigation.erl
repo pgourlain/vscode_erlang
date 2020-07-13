@@ -14,7 +14,129 @@ goto_definition(File, Line, Column) ->
                 range => lsp_utils:client_range(FoundLine, FoundColumn, FoundColumn)
             };
         _ ->
-            throw(<<"Definition not found">>)
+            %try to find if user press F12 in export attribute
+            What1 = read_and_analyse_from_tokens(File, Module, Line, Column), 
+            case find_element(What1, FileSyntaxTree, File) of
+                {FoundFile1, FoundLine1, FoundColumn1} ->
+                    #{
+                        uri => lsp_utils:file_uri_to_vscode_uri(list_to_binary("file://" ++ FoundFile1)),
+                        range => lsp_utils:client_range(FoundLine1, FoundColumn1, FoundColumn1)
+                    };
+                _ ->
+                    throw(<<"Definition not found">>)
+            end
+    end.
+
+read_and_analyse_from_tokens(File, Module, Line, Column) ->
+    %% parse file to get all tokens with all informations (Line and Column)
+    case file:open(File, [read]) of
+    {ok, FIO} ->
+        FileSize = filelib:file_size(File),
+        Ret = case file:read(FIO, FileSize) of
+            {ok, Data} ->
+                Scan = do_scan(lsp_utils:to_string(Data), [], Line, Column,{1,1}),
+                %gen_lsp_server:lsp_log("scan:~p",[Scan]),
+                TargetExport = try case analyse_export(Scan, Module, Line, Column) of
+                    {notfound} -> {notfound};
+                    Other -> Other 
+                end
+                catch
+                    Err:M:STK -> 
+                        gen_lsp_server:lsp_log("read_and_analyse_from_tokens exception:~p,~p,~p",[Err,M,STK]),
+                        {notfound}
+                end,
+                %gen_lsp_server:lsp_log("read_and_analyse_from_tokens:~p",[TargetExport]),
+                TargetExport;
+            _ -> { error, ""}
+        end,
+        file:close(FIO),
+        Ret;
+    _ ->
+        {error, could_not_open_file, File}
+    end.
+
+
+analyse_export(Tokens, Module, Line, Column) ->
+    %first find export attribute
+    {_,_,ExportTokens} = lists:foldl(fun(Token, ExportAcc) -> 
+            {IsAttrStart, ExportFound, Ts} = ExportAcc,
+            case Token of 
+                {'-', _} ->
+                    if 
+                        IsAttrStart andalso ExportFound -> ExportAcc;
+                        true  ->  {true, false,  [Token]}
+                    end;
+                {atom, _, export} -> case IsAttrStart of
+                    true -> {true, true, Ts ++ [Token]};
+                        _ -> {false, false, Ts}
+                    end;
+                _ -> if 
+                    IsAttrStart andalso ExportFound -> {true, true, Ts ++ [Token]};
+                    true -> ExportAcc
+                    end
+            end
+        end, {false, false, []}, Tokens),
+    %{'[',{4,9}},{atom,{4,10},functionA},{'/',{4,19}},{integer,{4,20},0},{',',{4,21}},
+    %{atom,{5,5},function_test},{'/',{5,18}},{integer,{5,19},0},{']',{5,20}},
+     %%keep only export tokens
+    T1 = lists:dropwhile(fun(X) -> 
+            case X of 
+                {'[', _} -> false;
+                _ -> true
+            end
+         end, ExportTokens),
+    T2 = lists:takewhile(fun(X) -> 
+            case X of 
+                {']', _} -> false;
+                _ -> true
+            end
+         end, T1),
+    %%Fns = [{functionA,{4,10},0},{function_test,{5,5},0}]
+    {_,_,Fns} = lists:foldl(fun(Token, Acc) -> 
+            {F,LC, Arr} = Acc,
+            case Token of
+                {atom, {L,C}, FnAtomAme} -> {FnAtomAme, {L,C}, Arr};
+                {integer, _, Arity} -> {1,1, Arr ++ [{F, LC, Arity}]};
+                _ -> Acc
+            end
+        end, {1,1,[]}, T2),
+    %gen_lsp_server:lsp_log("analyse_export fns:~p", [Fns]),
+    %% filter only Fns that are in line and column
+    TargetFns = lists:filter(fun({Atom, {L,C}, _}) ->
+        EndColumn = C + length(atom_to_list(Atom)),
+        if 
+           Line =:= L andalso C =< Column andalso Column =< EndColumn -> true;
+           true -> false
+        end
+        end, Fns),
+    %take the first one
+    TargetToken = lists:nth(1, TargetFns),        
+    %gen_lsp_server:lsp_log("analyse_export TargetToken:~p", [TargetToken]),
+    % %% match tokens sequence for attribute
+    % Export = [{'-', _}, {atom, export, _}], 
+    %{atom,{4,10},functionA}
+    case TargetToken of
+        {FnName, _, Arity} -> 
+            %{L1, C1} = LC,
+            {function_use, Module, FnName, Arity};
+            %{ok, L1, C1};
+        _ -> {notfound}
+    end.
+
+
+%% scan string into tokens until EndLine, EndColumn is reached
+do_scan(Data, ScannedTokens, EndLine, EndColumn, StartLocation) ->
+    case erl_scan:tokens([], lsp_utils:to_string(Data), StartLocation, []) of
+        {done, Result, LeftOverChars} ->
+            case Result of
+                {ok, Tokens, {L,C}} -> 
+                    if
+                        L >= EndLine andalso C >= EndColumn -> ScannedTokens;
+                        true -> do_scan(LeftOverChars, ScannedTokens ++ Tokens, EndLine, EndColumn, {L,C})
+                    end;                    
+                _ -> ScannedTokens
+            end;
+        _ -> ScannedTokens
     end.
 
 hover_info(File, Line, Column) ->
@@ -238,6 +360,8 @@ join_strings([String|Rest], Joiner) ->
     String ++ Joiner ++ join_strings(Rest, Joiner).
 
 fold_in_file_syntax_tree(FileSyntaxTree, StartAcc, Fun) ->
+    % FileStyntaxTree is [] of TopLevelStyntaxTree
+    % post-order traversal, then
     lists:foldl(fun (TopLevelSyntaxTree, Acc) ->
         erl_syntax_lib:fold(Fun, Acc, TopLevelSyntaxTree)
         end, StartAcc, FileSyntaxTree).
@@ -265,6 +389,10 @@ element_at_position(CurrentModule, FileSyntaxTree, Line, Column) ->
                 Column =< EndColumn -> {function_use, CurrentModule, Function, length(Args)};
                 true -> undefined
             end;
+        ({attribute, {L, StartColumn}, export, _Exports}, _) when L =:= Line andalso StartColumn =< Column ->
+            %% return function_use on export
+            %% missing line and column info on exported atoms
+            undefined;
         ({call, {_, _}, {remote, {_, _}, {atom, {_, MStartColumn}, Module}, {atom, {L, StartColumn}, Function}}, Args}, _) when L =:= Line andalso MStartColumn =< Column ->
             MEndColumn = MStartColumn + length(atom_to_list(Module)), 
             EndColumn = StartColumn + length(atom_to_list(Module)) + 1 + length(atom_to_list(Function)),
@@ -315,6 +443,7 @@ element_at_position(CurrentModule, FileSyntaxTree, Line, Column) ->
         (_SyntaxTree, _File) ->
             undefined
     end,
+    %gen_lsp_server:lsp_log("element_at_position:~p", [FileSyntaxTree]),
     {What, _File} = find_in_file_syntax_tree(FileSyntaxTree, Fun),
     What.
 

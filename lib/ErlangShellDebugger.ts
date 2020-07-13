@@ -138,6 +138,14 @@ export class ErlangShellForDebugging extends GenericShell {
         return fileList;
     }
 
+    private excludeUnwantedFiles(bp: DebugProtocol.Breakpoint) : boolean {
+        //exclude files with specific extensions
+        if (path.extname(bp.source.path)==".src") {
+            return false;
+        }
+        return true;
+    }
+
     private createArgsFilev1(startDir: string, noDebug: boolean, addEbinsToCodepath: boolean, verbose: boolean): string[] {
         var result: string[] = [];
         if (this.breakPoints) {
@@ -154,7 +162,7 @@ export class ErlangShellForDebugging extends GenericShell {
                 });
 
                 //first interpret source
-                var bps = this.uniqueBy(this.breakPoints, bp => bp.source.path);
+                var bps = this.uniqueBy(this.breakPoints, bp => bp.source.path).filter(this.excludeUnwantedFiles);
                 bps.forEach(bp => {
                     argsCompiledContents += ",int:ni(\"" + this.formatPath(bp.source.path) + "\")\r\n";
                     delete modulesWithoutBp[bp.source.path];
@@ -163,7 +171,7 @@ export class ErlangShellForDebugging extends GenericShell {
                     argsCompiledContents += ",int:ni(\"" + this.formatPath(fileName) + "\")\r\n";
                 }
                 //then set break
-                this.breakPoints.forEach(bp => {
+                this.breakPoints.filter(this.excludeUnwantedFiles).forEach(bp => {
                     var moduleName = path.basename(bp.source.name, ".erl");
                     argsCompiledContents += `,int:break(${moduleName}, ${bp.line})\r\n`;
                 });

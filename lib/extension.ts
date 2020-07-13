@@ -9,7 +9,7 @@ import {
 import * as Adapter from './vscodeAdapter';
 import * as Rebar from './RebarRunner';
 import * as Eunit from './eunitRunner';
-import { ErlangDebugConfigurationProvider } from './ErlangConfigurationProvider';
+import { ErlangDebugConfigurationProvider, configurationChanged, getElangConfigConfiguration } from './ErlangConfigurationProvider';
 import { ErlangDebugAdapterDescriptorFactory, InlineErlangDebugAdapterFactory, ErlangDebugAdapterExecutableFactory } from './ErlangAdapterDescriptorFactory';
 import * as erlangConnection from './erlangConnection';
 
@@ -42,7 +42,8 @@ export function activate(context: ExtensionContext) {
     eunit.activate(context);
 
     disposables.push(debug.registerDebugConfigurationProvider("erlang", new ErlangDebugConfigurationProvider()));
-    let runMode = Workspace.getConfiguration("erlang").debuggerRunMode;
+    disposables.push(Workspace.onDidChangeConfiguration((e) => configurationChanged()));    
+    let runMode = getElangConfigConfiguration().debuggerRunMode;
     let factory: DebugAdapterDescriptorFactory;
     switch (runMode) {
         case 'server':
@@ -64,7 +65,7 @@ export function activate(context: ExtensionContext) {
     disposables.push(debug.registerDebugAdapterDescriptorFactory('erlang', factory));
     if ('dispose' in factory) {
 		disposables.push(factory);
-	}
+    }
     disposables.forEach((disposable => context.subscriptions.push(disposable)));
     LspClient.activate(context);
 

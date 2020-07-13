@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { GenericShell, ILogOutput, IShellOutput } from './GenericShell';
+import { getElangConfigConfiguration } from './ErlangConfigurationProvider';
 
 /**
  * Provides rebar shell commands. Locates appropriate rebar executable based on provided settings.
@@ -10,7 +11,7 @@ export default class RebarShell extends GenericShell {
     protected shellOutput: RebarShellOutput;
 
     constructor(private rebarSearchPaths: string[], private defaultRebarSearchPath: string, outputChannel: ILogOutput) {
-        super(outputChannel, new RebarShellOutput());
+        super(outputChannel, new RebarShellOutput(), getElangConfigConfiguration());
     }
 
     /**

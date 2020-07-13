@@ -81,7 +81,7 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 		
 	protected dispatchRequest(request: DebugProtocol.Request): void {
 		//uncomment to show the calling workflow of debuging session  
-		//this.debug(`dispatch request: ${request.command}(${JSON.stringify(request.arguments) })`);
+		//this.debug(`dispatch request: ${request.command}(${JSON.stringify(request.arguments) })\r\n`);
 		super.dispatchRequest(request);
 	}
 

@@ -4,6 +4,7 @@ import { EventEmitter } from 'events'
 import * as fs from 'fs';
 import * as path from 'path';
 import { fstat } from 'fs';
+import { ErlangSettings } from './erlangSettings';
 
 //inspired from https://github.com/WebFreak001/code-debug/blob/master/src/backend/mi2/mi2.ts for inspiration of an EventEmitter 
 const nonOutput = /^(?:\d*|undefined)[\*\+\=]|[\~\@\&\^]/;
@@ -38,26 +39,29 @@ export class GenericShell extends EventEmitter {
     protected errbuf: string = "";
     public erlangPath: string = null;
 
-    constructor(logOutput?: ILogOutput, shellOutput?: IShellOutput) {
+    //provide IGenericShellConfiguration, in order to avoid dependencies on vscode module (it doesn't works with debugger-adpater)
+    constructor(logOutput?: ILogOutput, shellOutput?: IShellOutput, erlangConfiguration?: ErlangSettings) {
         super();
         this.logOutput = logOutput;
         this.shellOutput = shellOutput;
 
         // Find Erlang 'bin' directory
-        let erlangPath = vscode.workspace.getConfiguration("erlang").get("erlangPath", null);
-        if (erlangPath) {
-            if (erlangPath.match(/^[A-Za-z]:/)) {
-                // Windows absolute path (C:\...) is applicable on Windows only
-                if (process.platform == 'win32') {
-                    this.erlangPath = path.win32.normalize(erlangPath);
-                }
-            } else {
-                erlangPath = path.normalize(erlangPath);
-                if (! fs.existsSync(erlangPath)) {
-                    erlangPath = path.join(vscode.workspace.rootPath, erlangPath);
-                }
-                if (fs.existsSync(erlangPath)) {
-                    this.erlangPath = erlangPath;
+        if (erlangConfiguration) {
+            let erlangPath = erlangConfiguration.erlangPath;
+            if (erlangPath) {
+                if (erlangPath.match(/^[A-Za-z]:/)) {
+                    // Windows absolute path (C:\...) is applicable on Windows only
+                    if (process.platform == 'win32') {
+                        this.erlangPath = path.win32.normalize(erlangPath);
+                    }
+                } else {
+                    erlangPath = path.normalize(erlangPath);
+                    if (! fs.existsSync(erlangPath)) {
+                        erlangPath = path.join(erlangConfiguration.rootPath, erlangPath);// vscode.workspace.rootPath, erlangPath);
+                    }
+                    if (fs.existsSync(erlangPath)) {
+                        this.erlangPath = erlangPath;
+                    }
                 }
             }
         }

@@ -3,8 +3,10 @@ export interface ErlangSettings {
 	rebarPath : string;
 	rebarBuildArgs : string[];
 	includePaths : string[];
-	linting: true;
+	linting: boolean;
 	codeLensEnabled : boolean;
 	verbose: boolean;
 	debuggerRunMode : string;
+	/// workspace.rootPath
+	rootPath: string;
 }
