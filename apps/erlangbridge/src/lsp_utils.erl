@@ -13,17 +13,23 @@ client_range(Line, StartChar, EndChar) ->
         <<"end">> => #{line => Line - 1, character => EndChar - 1}
     }.
 
-file_uri_to_file(Uri) ->
-    re:replace(case Uri of
+file_uri_to_file(Uri) ->    
+    NewUri = re:replace(case Uri of
         <<"file:///", Drive, "%3A", Rest/binary>> -> <<Drive, ":", Rest/binary>>;
         <<"file://", Rest/binary>> -> Rest;
       _ -> Uri
-    end, <<"\\\\">>, <<"/">>, [global, {return, list}]).
+    end, <<"\\\\">>, <<"/">>, [global, {return, list}]),
+    lists:flatten(string:replace(NewUri, "%20", " ")).
 
 file_uri_to_vscode_uri(Uri) ->
-    case Uri of
+    UriWithOutSpace = lists:flatten(string:replace(to_string(Uri), " ", "%20")),
+    EncodeUri = if
+        is_binary(Uri) ->  erlang:list_to_binary(UriWithOutSpace);
+        true -> UriWithOutSpace
+    end,
+    case EncodeUri of
         <<"file://", Drive, ":/", Rest/binary>> -> <<"file:///", Drive, "%3A/", Rest/binary>>;
-      _ -> Uri
+      _ -> EncodeUri
     end.
 
 to_string(X) when is_binary(X) ->
