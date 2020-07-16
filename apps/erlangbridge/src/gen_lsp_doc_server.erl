@@ -72,7 +72,13 @@ handle_call({get_module_file, Module},_From, State) ->
     Files = maps:get(atom_to_list(Module), State#state.project_modules, []),
     File =
         case [F || F<-Files, not lsp_utils:is_path_excluded(F, SearchExclude)] of
-            []          -> undefined;
+            []          -> 
+                %try to find in erlang source files
+                case filelib:wildcard(code:lib_dir()++"/**/" ++ atom_to_list(Module) ++ ".erl") of
+                    [] -> undefined;
+                    [OneFile]   -> OneFile;
+                    [AFile | _] -> AFile
+                end;
             [OneFile]   -> OneFile;
             [AFile | _] -> AFile
         end,
