@@ -10,24 +10,233 @@
 
 -record(state, {modules}).
 
+-include_lib("kernel/include/eep48.hrl").
+
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [],[]).
 
 get_help(Module, Function) -> 
+    gen_lsp_server:lsp_log("get_help for ~p:~p (~p)",[Module,Function, ?OTP_RELEASE]),
     gen_server:call(?SERVER, {get_help, Module, Function}).
 
 init(_Args) ->
     {ok, #state{modules=#{}}}.
 
 handle_call({get_help, Module, Function}, _From, State) ->
-    {Lines, Modules} = get_page_lines(Module, State#state.modules),
-    Reply = case Lines of
-        undefined -> undefined;
-        _ -> markdown(extract_function(Function, Lines))
+    %gen_lsp_server:lsp_log("get_help for ~p:~p",[Module,Function]),
+    {Reply, Modules} = case get_help_otp23(Module, Function) of
+        {error, _} -> 
+            {Lines, Ms} = get_page_lines(Module, State#state.modules),
+            case Lines of
+                undefined -> {undefined, Ms};
+                _ -> { markdown(extract_function(Function, Lines)), Ms}
+            end;
+        Help ->
+            FlattenHelp = list_to_binary(lists:flatten(Help)),
+            %gen_lsp_server:lsp_log("Help:~p",[FlattenHelp]),
+            {FlattenHelp, State#state.modules}
     end,
     {reply, Reply, State#state{modules = Modules}};
+
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
+
+-if(?OTP_RELEASE >= 23).
+    get_help_otp23(Module, Function) ->
+        case code:get_doc(Module) of
+            {ok, HelpModule} -> epp48_render_fun_doc(Module, Function, HelpModule);
+            _ -> {error, doc_unavailable}
+        end.
+-else.
+    get_help_otp23(_Module, _Function) ->
+        %gen_lsp_server:lsp_log("get_help_otp23 notsupported",[]),
+        {error, eep48_not_supported}.
+-endif.
+
+epp48_render_fun_doc(_Module, Function, #docs_v1{ docs = Docs } = D) ->
+    FnDoc = lists:filter(fun({{function, F, _},_Anno,_Sig,_Doc,_Meta}) ->
+                             F =:= Function;
+                        (_) ->
+                             false
+                     end, Docs),
+    render_function(FnDoc, D).
+
+render_function([], _D) ->
+    {error, function_missing};
+render_function(FDocs, #docs_v1{ docs = Docs } = D) ->
+    Grouping =
+        lists:foldl(
+          fun({_Group,_Anno,_Sig,_Doc,#{ equiv := Group }} = Func,Acc) ->
+                  Members = maps:get(Group, Acc, []),
+                  Acc#{ Group => [Func|Members] };
+             ({Group, _Anno, _Sig, _Doc, _Meta} = Func, Acc) ->
+                  Members = maps:get(Group, Acc, []),
+                  Acc#{ Group => [Func|Members] }
+          end, #{}, lists:sort(FDocs)),
+          lists:map(
+      fun({{_,F,A} = Group,Members}) ->
+              Signatures = lists:flatmap(fun render_signature/1,lists:reverse(Members)),
+              case lists:search(fun({_,_,_,Doc,_}) ->
+                                        Doc =/= #{}
+                                end, Members) of
+                  {value, {_,_,_,Doc,_Meta}} ->
+                      render_headers_and_docs(Signatures, get_local_doc({F,A},Doc), D);
+                  false ->
+                      case lists:keyfind(Group, 1, Docs) of
+                          false ->
+                              render_headers_and_docs(Signatures, get_local_doc({F,A},none), D);
+                          {_,_,_,Doc,_} ->
+                              render_headers_and_docs(Signatures, get_local_doc({F,A},Doc), D)
+                      end
+              end
+      end, maps:to_list(Grouping)).
+
+render_signature({{_Type,_F,_A},_Anno,_Sigs,_Docs,#{ signature := Specs } = Meta}) ->
+    lists:flatmap(
+      fun(ASTSpec) ->
+              PPSpec = erl_pp:attribute(ASTSpec,[{encoding,utf8}]),
+              Spec =
+                  case ASTSpec of
+                      {_Attribute, _Line, opaque, _} ->
+                          %% We do not want show the internals of the opaque type
+                          hd(string:split(PPSpec,"::"));
+                      _ ->
+                          PPSpec
+                  end,
+              SplittedSpec = string:replace(Spec, "-spec", "\n\n### -spec", all),
+              BinSpec =
+                  unicode:characters_to_binary(
+                    string:trim(SplittedSpec, both, "\n")),
+              [{p,[],[BinSpec]}|render_meta(Meta)]
+      end, Specs);
+render_signature({{_Type,_F,_A},_Anno,Sigs,_Docs,Meta}) ->
+    lists:flatmap(
+      fun(Sig) ->
+              [{h2,[],[<<"  "/utf8,Sig/binary>>]}|render_meta(Meta)]
+      end, Sigs).
+render_meta(M) ->
+    case render_meta_(M) of
+        [] -> [];
+        Meta ->
+            [[{dl,[],Meta}]]
+    end.
+render_meta_(#{ since := Vsn } = M) ->
+    [{dt,[],<<"Since">>},{dd,[],[Vsn]}
+    | render_meta_(maps:remove(since, M))];
+render_meta_(#{ deprecated := Depr } = M) ->
+    [{dt,[],<<"Deprecated">>},{dd,[],[Depr]}
+    | render_meta_(maps:remove(deprecated, M))];
+render_meta_(_) ->
+    [].
+
+render_headers_and_docs(Headers, DocContents, D) ->
+    ["\n",render_docs(
+       lists:flatmap(
+         fun(Header) ->
+                 [{br,[],[]},Header]
+         end,Headers), 0, D),
+     "\n",
+     render_docs(DocContents,2,D)].
+
+% render_docs(DocContents, D) ->
+%     render_docs(DocContents, 0, D).
+render_docs(DocContents, Ind, D) ->
+        Doc = render_docs(DocContents, [], 0, Ind, D),
+        Doc;
+render_docs(DocContents, Ind, D) ->
+    render_docs(DocContents, Ind, D).
+
+render_docs(Elems,State,Pos,Ind,D) when is_list(Elems) ->
+    lists:flatten(lists:map(fun(Elem) ->
+                           render_docs(Elem,State,Pos,Ind,D)
+                   end,Elems));
+render_docs(Elem,State,Pos,Ind,D) ->
+    render_element(Elem,State,Pos,Ind,D).
+
+%%% render html element to markdown
+render_element({p, _, PContents}, State, Pos,Ind, D) ->
+    "" ++
+    render_elements(PContents, State, Pos, Ind, D)
+    ++"\n";
+
+render_element({code, _, CodeContents}, State, Pos, Ind, D) ->
+    {Tag, TagF} = case State of
+        [] -> {"``", "``"};
+        _ -> case lists:last(State) of
+            pre -> { "```\n", "\n```" };
+                _ -> {"``", "``"}
+            end
+    end,
+    Code = render_elements(CodeContents, State, Pos, Ind, D),
+    Tag ++
+        string:replace(Code, "\n", "\n\n")
+    ++ TagF;
+
+render_element({h2, _, H2Contents}, State, Pos, Ind, D) ->
+    "## " ++
+    render_elements(H2Contents, State, Pos, Ind, D)
+    ++"";
+render_element({h3, _, H2Contents}, State, Pos, Ind, D) ->
+    "### " ++
+    render_elements(H2Contents, State, Pos, Ind, D)
+    ++"";
+render_element({br, _, BrContents}, State, Pos, Ind, D) ->
+    "\n" ++
+    render_elements(BrContents, State, Pos, Ind, D)
+    ++"";
+render_element({ul, _Style, UlContents}, State, Pos, Ind, D) ->
+    % gen_lsp_server:lsp_log("ul element, style:~p", [_Style]),
+    "\n" ++
+    render_elements(UlContents, State, Pos, Ind, D)
+    ++"";
+render_element({li, _Style, []}, _State, _Pos, _Ind, _D) ->
+    "";
+render_element({li, _Style, LiContents}, State, Pos, Ind, D) ->
+    % gen_lsp_server:lsp_log("li element, style:~p, content:~p", [_Style, LiContents]),
+    "\n* " ++
+    render_elements(LiContents, State, Pos, Ind, D)
+    ++"";
+render_element({a, [{href, _},{rel, _}], AContents}, State, Pos, Ind, D) ->
+    "(" ++
+    render_elements(AContents, State, Pos, Ind, D)
+    ++")[todo_link]";
+render_element({em, _Style, EmContent}, State, Pos, Ind, D) ->
+    "*" ++
+    render_element(EmContent, State, Pos, Ind, D)
+    ++ "*";
+render_element({pre, _Style, PreContents}, State, Pos, Ind, D) ->
+    "\n"++
+    render_elements(PreContents, State ++ [pre], Pos, Ind, D)
+    ++ "\n\n";
+
+render_element(Content, _State, _Pos, _Ind, _D) when is_binary(Content) ->
+    binary_to_list(Content);
+
+render_element(Elem,_State,_Pos,_Ind,_D) ->
+    gen_lsp_server:lsp_log("unknown element: ~p", [Elem]),
+   "".
+
+render_elements(Elems, State, Pos, Ind, D) ->
+    lists:flatten(
+        lists:map(fun(X) -> render_element(X, State, Pos, Ind, D) end, Elems)
+    ).
+
+get_local_doc(MissingMod, Docs) when is_atom(MissingMod) ->
+    get_local_doc(atom_to_binary(MissingMod), Docs);
+get_local_doc({F,A}, Docs) ->
+    get_local_doc(unicode:characters_to_binary(io_lib:format("~tp/~p",[F,A])), Docs);
+get_local_doc(_Missing, #{ <<"en">> := Docs }) ->
+    %% English if it exists
+    shell_docs:normalize(Docs);
+get_local_doc(_Missing, ModuleDoc) when map_size(ModuleDoc) > 0 ->
+    %% Otherwise take first alternative found
+    shell_docs:normalize(maps:get(hd(maps:keys(ModuleDoc)), ModuleDoc));
+get_local_doc(Missing, hidden) ->
+    [{p,[],[<<"The documentation for ">>,Missing,
+            <<" is hidden. This probably means that it is internal "
+              "and not to be used by other applications.">>]}];
+get_local_doc(Missing, None) when None =:= none; None =:= #{} ->
+    [{p,[],[<<"There is no documentation for ">>,Missing]}].
 
 set_proxy() ->
     % get proxyUrl configuration

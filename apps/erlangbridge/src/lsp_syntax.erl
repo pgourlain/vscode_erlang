@@ -308,8 +308,8 @@ parse_transform(FileSyntaxTree, Transformers) ->
 
 lint(FileSyntaxTree, File) ->
     %%no lint for erlang file under erlang lib dir
-    LintResult = case string:prefix(File, code:lib_dir()) of
-        nomatch -> erl_lint:module(FileSyntaxTree, File,[ {strong_validation} ]);
+    LintResult = case lsp_utils:is_erlang_lib_file(File) of
+        false -> erl_lint:module(FileSyntaxTree, File,[ {strong_validation} ]);
         _ -> {ok, []}
     end,
     case LintResult of

@@ -5,7 +5,8 @@
          glob_to_regexp/1,
          is_path_excluded/2,
          search_exclude_globs_to_regexps/1,
-         to_string/1]).
+         to_string/1,
+         is_erlang_lib_file/1]).
 
 client_range(Line, StartChar, EndChar) ->
     #{
@@ -172,4 +173,11 @@ do_is_path_excluded(Path, [{RegExp, true} | ExcFilters], PreliminaryAnswer) ->
     case re:run(Path, RegExp) of
         {match, _} -> do_is_path_excluded(Path, ExcFilters, true);
         nomatch    -> do_is_path_excluded(Path, ExcFilters, PreliminaryAnswer)
+    end.
+
+
+is_erlang_lib_file(File) ->
+    case string:prefix(File, code:lib_dir()) of
+        nomatch -> false;
+        _ -> true
     end.

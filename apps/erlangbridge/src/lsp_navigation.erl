@@ -141,7 +141,9 @@ do_scan(Data, ScannedTokens, EndLine, EndColumn, StartLocation) ->
 
 hover_info(File, Line, Column) ->
     Module = list_to_atom(filename:rootname(filename:basename(File))),
-    What = element_at_position(Module, lsp_syntax:file_syntax_tree(File), Line, Column),
+    FileSyntax = lsp_syntax:file_syntax_tree(File),
+    What = element_at_position(Module, FileSyntax, Line, Column),
+    %gen_lsp_server:lsp_log("hover_info What:~p", [What]),
     case What of
         {function_use, FunctionModule, Function, Arity} ->
             #{contents => function_description(FunctionModule, Function, Arity)};
@@ -165,31 +167,37 @@ function_description(Module, Function, Arity) ->
     SyntaxTreeFile = lsp_syntax:module_syntax_tree(Module),                    
     case SyntaxTreeFile of
         {SyntaxTree, File} ->
-            case find_function(SyntaxTree, Function, Arity) of
-                {function, _, _, _, Clauses} ->
-                    DocAsString = try edoc:layout(edoc:get_doc(File, [{hidden, true}, {private, true}]), 
-                        [{layout, hover_doc_layout}, {filter, [{function, {Function, Arity}}]} ]) of
-                            _Any -> _Any
-                        catch
-                            _Err:_Reason -> ""
-                        end,                                                                        
-                    FunctionHeaders = join_strings(lists:map(fun ({clause, _Location, Args, _Guard, _Body}) ->
-                        function_header(Function, Args)
-                    end, Clauses), "  \n") ++ "  \n" ++ DocAsString,
-                    list_to_binary(FunctionHeaders);
-                _ ->
-                    %check if a BIF
-                    case lists:keyfind(Function,1, erlang:module_info(exports)) of
-                        {Function, _} -> gen_lsp_help_server:get_help(erlang, Function);
-                        _  -> <<>>
-                    end
-            end;                                
-        _ ->
-            Help = gen_lsp_help_server:get_help(Module, Function),
-            case Help of
-                undefined -> <<>>;
-                _ -> Help
-            end
+            case lsp_utils:is_erlang_lib_file(File) of
+                false ->
+                case find_function(SyntaxTree, Function, Arity) of
+                    {function, _, _, _, Clauses} ->
+                        DocAsString = try edoc:layout(edoc:get_doc(File, [{hidden, true}, {private, true}]), 
+                            [{layout, hover_doc_layout}, {filter, [{function, {Function, Arity}}]} ]) of
+                                _Any -> _Any
+                            catch
+                                _Err:_Reason -> ""
+                            end,                                                                        
+                        FunctionHeaders = join_strings(lists:map(fun ({clause, _Location, Args, _Guard, _Body}) ->
+                            function_header(Function, Args)
+                        end, Clauses), "  \n") ++ "  \n" ++ DocAsString,
+                        list_to_binary(FunctionHeaders);
+                    _ ->
+                        %check if a BIF
+                        case lists:keyfind(Function,1, erlang:module_info(exports)) of
+                            {Function, _} -> gen_lsp_help_server:get_help(erlang, Function);
+                            _  -> <<>>
+                        end
+                end;
+                _ ->  get_generic_help(Module, Function)
+            end;                              
+        _ -> get_generic_help(Module, Function)
+    end.
+
+get_generic_help(Module, Function) ->
+    Help = gen_lsp_help_server:get_help(Module, Function),
+    case Help of
+        undefined -> <<>>;
+        _ -> Help
     end.
 
 references_info(File, Line, Column) ->
