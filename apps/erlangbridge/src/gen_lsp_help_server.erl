@@ -42,7 +42,7 @@ init(_Args) ->
 
 handle_call({get_help, Module, Function}, _From, State) ->
     %gen_lsp_server:lsp_log("get_help for ~p:~p",[Module,Function]),
-    {Reply, Modules} = case get_help_epp48(Module, Function) of
+    {Reply, Modules} = case get_help_eep48(Module, Function) of
         {error, _} -> 
             {Lines, Ms} = get_page_lines(Module, State#state.modules),
             case Lines of
@@ -61,29 +61,29 @@ handle_call(_Request, _From, State) ->
 
 -ifdef(OTP_RELEASE).
     -if(?OTP_RELEASE >= 23).
-    get_help_epp48(Module, Function) ->
-        case gen_lsp_config_server:epp48_help() of
+    get_help_eep48(Module, Function) ->
+        case gen_lsp_config_server:eep48_help() of
             true ->
                 case code:get_doc(Module) of
-                    {ok, HelpModule} -> epp48_render_fun_doc(Module, Function, HelpModule);
+                    {ok, HelpModule} -> eep48_render_fun_doc(Module, Function, HelpModule);
                     _ -> {error, doc_unavailable}
                 end;
             _ -> 
-                gen_lsp_server:lsp_log("get_help_epp48 not enabled in config",[]),
+                gen_lsp_server:lsp_log("get_help_eep48 not enabled in config",[]),
                 {error, eep48_not_enabled}
         end.
     -else.
-    get_help_epp48(_Module, _Function) ->
-        %gen_lsp_server:lsp_log("get_help_epp48 notsupported",[]),
+    get_help_eep48(_Module, _Function) ->
+        %gen_lsp_server:lsp_log("get_help_eep48 notsupported",[]),
         {error, eep48_not_supported}.
     -endif.
 -else.
-    get_help_epp48(_Module, _Function) ->
-        %gen_lsp_server:lsp_log("get_help_epp48 notsupported",[]),
+    get_help_eep48(_Module, _Function) ->
+        %gen_lsp_server:lsp_log("get_help_eep48 notsupported",[]),
         {error, eep48_not_supported}.
 -endif.
 
-epp48_render_fun_doc(_Module, Function, #docs_v1{ docs = Docs } = D) ->
+eep48_render_fun_doc(_Module, Function, #docs_v1{ docs = Docs } = D) ->
     FnDoc = lists:filter(fun({{function, F, _},_Anno,_Sig,_Doc,_Meta}) ->
                              F =:= Function;
                         (_) ->

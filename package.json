@@ -230,7 +230,7 @@
 						"inline: launch debugadpater in current process"
 					]
 				},
-				"erlang.epp48Help": {
+				"erlang.eep48Help": {
 					"type": "boolean",
 					"default": true,
 					"title": "Enable/Disable Erlang on-line help come with OTP 23",
