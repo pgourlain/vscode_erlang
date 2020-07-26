@@ -130,6 +130,9 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 			args.addEbinsToCodepath = true;
 		}
 		this._LaunchArguments = args;
+		if (this._LaunchArguments.verbose) {
+			this.log(`debugger launchRequest arguments : ${JSON.stringify(args)}`);
+		}
 		this.erlangConnection.Start(this._LaunchArguments.verbose).then(port => {
 			//this.debug("Local webserver for erlang is started");
 			this._port = port;

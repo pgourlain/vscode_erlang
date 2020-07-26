@@ -50,7 +50,7 @@ file_syntax_tree(File) ->
       undefined ->
 	  case epp_parse_file(File, get_include_path(File), get_define_from_rebar_config(File)) of
 	    {ok, FileSyntaxTree} -> FileSyntaxTree;
-	    _ -> throw("Cannot parse file " ++ File)
+	    _Err -> throw("Cannot parse file " ++ File)
 	  end;
       FileSyntaxTree ->
           FileSyntaxTree
@@ -150,7 +150,9 @@ epp_parse_file(File, IncludePath, Defines) ->
 	    Ret = do_epp_parse_file(File, FIO, IncludePath, Defines),
 	    file:close(FIO),
 	    Ret;
-    _ -> {error, file_could_not_opened}
+    _Err -> 
+        gen_lsp_server:lsp_log("epp_parse_file error : ~p", [_Err]),
+        {error, file_could_not_opened}
     end.
 
 do_epp_parse_file(File, FIO, IncludePath, Defines) ->
@@ -305,7 +307,11 @@ parse_transform(FileSyntaxTree, Transformers) ->
 
 
 lint(FileSyntaxTree, File) ->
-    LintResult = erl_lint:module(FileSyntaxTree, File,[ {strong_validation} ]),
+    %%no lint for erlang file under erlang lib dir
+    LintResult = case lsp_utils:is_erlang_lib_file(File) of
+        false -> erl_lint:module(FileSyntaxTree, File,[ {strong_validation} ]);
+        _ -> {ok, []}
+    end,
     case LintResult of
       % nothing wrong
       {ok, []} -> #{parse_result => true};

@@ -5,7 +5,8 @@
          glob_to_regexp/1,
          is_path_excluded/2,
          search_exclude_globs_to_regexps/1,
-         to_string/1]).
+         to_string/1,
+         is_erlang_lib_file/1]).
 
 client_range(Line, StartChar, EndChar) ->
     #{
@@ -13,18 +14,48 @@ client_range(Line, StartChar, EndChar) ->
         <<"end">> => #{line => Line - 1, character => EndChar - 1}
     }.
 
-file_uri_to_file(Uri) ->
-    re:replace(case Uri of
+file_uri_to_file(Uri) ->    
+    NewUri = re:replace(case Uri of
         <<"file:///", Drive, "%3A", Rest/binary>> -> <<Drive, ":", Rest/binary>>;
         <<"file://", Rest/binary>> -> Rest;
       _ -> Uri
-    end, <<"\\\\">>, <<"/">>, [global, {return, list}]).
+    end, <<"\\\\">>, <<"/">>, [global, {return, list}]),
+    lists:flatten(string_replace(NewUri, "%20", " ")).
 
 file_uri_to_vscode_uri(Uri) ->
-    case Uri of
+    UriWithOutSpace = lists:flatten(string_replace(to_string(Uri), " ", "%20")),
+    EncodeUri = if
+        is_binary(Uri) ->  erlang:list_to_binary(UriWithOutSpace);
+        true -> UriWithOutSpace
+    end,
+    case EncodeUri of
         <<"file://", Drive, ":/", Rest/binary>> -> <<"file:///", Drive, "%3A/", Rest/binary>>;
-      _ -> Uri
+      _ -> EncodeUri
     end.
+
+-ifdef(OTP_RELEASE).
+string_replace(String, Pattern, NewString) ->
+    string:replace(String, Pattern, NewString).
+string_prefix(String, Prefix) ->
+    string:prefix(String, Prefix).
+-else.
+string_replace(String, Pattern, NewString) ->
+    case string:str(String, Pattern) of
+        0 -> String;
+        Index -> 
+            S = string:sub_string(String, 1, Index-1),
+            SEnd = string:sub_string(String, Index+length(Pattern)),
+            S ++ NewString ++ string_replace(SEnd, Pattern, NewString) 
+    end.
+
+string_prefix(String, Prefix) ->
+    L = string:left(String, length(Prefix)),
+    if 
+        L =:= Prefix -> string:sub_string(String, length(Prefix)+1);
+        true -> nomatch
+    end.
+
+-endif.
 
 to_string(X) when is_binary(X) ->
     erlang:binary_to_list(X);
@@ -166,4 +197,11 @@ do_is_path_excluded(Path, [{RegExp, true} | ExcFilters], PreliminaryAnswer) ->
     case re:run(Path, RegExp) of
         {match, _} -> do_is_path_excluded(Path, ExcFilters, true);
         nomatch    -> do_is_path_excluded(Path, ExcFilters, PreliminaryAnswer)
+    end.
+
+
+is_erlang_lib_file(File) ->
+    case string_prefix(File, code:lib_dir()) of
+        nomatch -> false;
+        _ -> true
     end.
