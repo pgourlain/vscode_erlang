@@ -35,7 +35,7 @@ file_uri_to_vscode_uri(Uri) ->
 
 -ifdef(OTP_RELEASE).
 string_replace(String, Pattern, NewString) ->
-    string:replace(NewUri, Pattern, NewString).
+    string:replace(String, Pattern, NewString).
 string_prefix(String, Prefix) ->
     string:prefix(String, Prefix).
 -else.

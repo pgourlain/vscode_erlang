@@ -11,9 +11,9 @@
 -record(state, {modules}).
 
 -ifdef(OTP_RELEASE).
+    -record(uri_map, {host, port}).
     -if(?OTP_RELEASE >= 23).
     -include_lib("kernel/include/eep48.hrl").
-    -record(uri_map, {host, port}).
     -else.
     %only to avoid complation error on OTP < 23
     -record(docs_v1, {docs}).
@@ -234,6 +234,17 @@ render_element({pre, _Style, PreContents}, State) ->
     "\n"++
     render_elements(PreContents, State ++ [pre])
     ++ "\n\n";
+
+render_element({dl, _Style, DlContents}, State) ->
+    render_elements(DlContents, State ++ [dl])
+    ;
+render_element({dt, _Style, DtContents}, State) ->
+    render_elements(DtContents, State)
+    ++ "\n";
+render_element({dd, _Style, DtContents}, State) ->
+    "\n\t"++
+    render_elements(DtContents, State)
+    ++ "\n";
 
 render_element(Content, _State) when is_binary(Content) ->
     binary_to_list(Content);
