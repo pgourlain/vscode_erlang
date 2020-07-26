@@ -10,13 +10,31 @@
 
 -record(state, {modules}).
 
--include_lib("kernel/include/eep48.hrl").
+-ifdef(OTP_RELEASE).
+    -if(?OTP_RELEASE >= 23).
+    -include_lib("kernel/include/eep48.hrl").
+    -record(uri_map, {host, port}).
+    -else.
+    %only to avoid complation error on OTP < 23
+    -record(docs_v1, {docs}).
+    %% appear in OTP 23.0
+    atom_to_binary(Atom) ->
+        list_to_binary(atom_to_list(Atom)).
+    -endif.
+-else.
+%only to avoid complation error on OTP < 23
+-record(docs_v1, {docs}).
+%% appear in OTP 23.0
+atom_to_binary(Atom) ->
+    list_to_binary(atom_to_list(Atom)).
+
+-endif.
+
 
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [],[]).
 
 get_help(Module, Function) -> 
-    gen_lsp_server:lsp_log("get_help for ~p:~p (~p)",[Module,Function, ?OTP_RELEASE]),
     gen_server:call(?SERVER, {get_help, Module, Function}).
 
 init(_Args) ->
@@ -24,7 +42,7 @@ init(_Args) ->
 
 handle_call({get_help, Module, Function}, _From, State) ->
     %gen_lsp_server:lsp_log("get_help for ~p:~p",[Module,Function]),
-    {Reply, Modules} = case get_help_otp23(Module, Function) of
+    {Reply, Modules} = case get_help_epp48(Module, Function) of
         {error, _} -> 
             {Lines, Ms} = get_page_lines(Module, State#state.modules),
             case Lines of
@@ -41,15 +59,27 @@ handle_call({get_help, Module, Function}, _From, State) ->
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
--if(?OTP_RELEASE >= 23).
-    get_help_otp23(Module, Function) ->
-        case code:get_doc(Module) of
-            {ok, HelpModule} -> epp48_render_fun_doc(Module, Function, HelpModule);
-            _ -> {error, doc_unavailable}
+-ifdef(OTP_RELEASE).
+    -if(?OTP_RELEASE >= 23).
+    get_help_epp48(Module, Function) ->
+        case gen_lsp_config_server:epp48_help() of
+            true ->
+                case code:get_doc(Module) of
+                    {ok, HelpModule} -> epp48_render_fun_doc(Module, Function, HelpModule);
+                    _ -> {error, doc_unavailable}
+                end;
+            _ -> 
+                gen_lsp_server:lsp_log("get_help_epp48 not enabled in config",[]),
+                {error, eep48_not_enabled}
         end.
+    -else.
+    get_help_epp48(_Module, _Function) ->
+        %gen_lsp_server:lsp_log("get_help_epp48 notsupported",[]),
+        {error, eep48_not_supported}.
+    -endif.
 -else.
-    get_help_otp23(_Module, _Function) ->
-        %gen_lsp_server:lsp_log("get_help_otp23 notsupported",[]),
+    get_help_epp48(_Module, _Function) ->
+        %gen_lsp_server:lsp_log("get_help_epp48 notsupported",[]),
         {error, eep48_not_supported}.
 -endif.
 
@@ -63,7 +93,7 @@ epp48_render_fun_doc(_Module, Function, #docs_v1{ docs = Docs } = D) ->
 
 render_function([], _D) ->
     {error, function_missing};
-render_function(FDocs, #docs_v1{ docs = Docs } = D) ->
+render_function(FDocs, #docs_v1{ docs = Docs } = _D) ->
     Grouping =
         lists:foldl(
           fun({_Group,_Anno,_Sig,_Doc,#{ equiv := Group }} = Func,Acc) ->
@@ -80,13 +110,13 @@ render_function(FDocs, #docs_v1{ docs = Docs } = D) ->
                                         Doc =/= #{}
                                 end, Members) of
                   {value, {_,_,_,Doc,_Meta}} ->
-                      render_headers_and_docs(Signatures, get_local_doc({F,A},Doc), D);
+                      render_headers_and_docs(Signatures, get_local_doc({F,A},Doc));
                   false ->
                       case lists:keyfind(Group, 1, Docs) of
                           false ->
-                              render_headers_and_docs(Signatures, get_local_doc({F,A},none), D);
+                              render_headers_and_docs(Signatures, get_local_doc({F,A},none));
                           {_,_,_,Doc,_} ->
-                              render_headers_and_docs(Signatures, get_local_doc({F,A},Doc), D)
+                              render_headers_and_docs(Signatures, get_local_doc({F,A},Doc))
                       end
               end
       end, maps:to_list(Grouping)).
@@ -129,37 +159,33 @@ render_meta_(#{ deprecated := Depr } = M) ->
 render_meta_(_) ->
     [].
 
-render_headers_and_docs(Headers, DocContents, D) ->
+render_headers_and_docs(Headers, DocContents) ->
     ["\n",render_docs(
        lists:flatmap(
          fun(Header) ->
                  [{br,[],[]},Header]
-         end,Headers), 0, D),
+         end,Headers)),
      "\n",
-     render_docs(DocContents,2,D)].
+     render_docs(DocContents)].
 
-% render_docs(DocContents, D) ->
-%     render_docs(DocContents, 0, D).
-render_docs(DocContents, Ind, D) ->
-        Doc = render_docs(DocContents, [], 0, Ind, D),
-        Doc;
-render_docs(DocContents, Ind, D) ->
-    render_docs(DocContents, Ind, D).
+render_docs(DocContents) ->
+        Doc = render_docs(DocContents, []),
+        Doc.
 
-render_docs(Elems,State,Pos,Ind,D) when is_list(Elems) ->
+render_docs(Elems,State) when is_list(Elems) ->
     lists:flatten(lists:map(fun(Elem) ->
-                           render_docs(Elem,State,Pos,Ind,D)
+                           render_docs(Elem,State)
                    end,Elems));
-render_docs(Elem,State,Pos,Ind,D) ->
-    render_element(Elem,State,Pos,Ind,D).
+render_docs(Elem,State) ->
+    render_element(Elem,State).
 
 %%% render html element to markdown
-render_element({p, _, PContents}, State, Pos,Ind, D) ->
+render_element({p, _, PContents}, State) ->
     "" ++
-    render_elements(PContents, State, Pos, Ind, D)
+    render_elements(PContents, State)
     ++"\n";
 
-render_element({code, _, CodeContents}, State, Pos, Ind, D) ->
+render_element({code, _, CodeContents}, State) ->
     {Tag, TagF} = case State of
         [] -> {"``", "``"};
         _ -> case lists:last(State) of
@@ -167,58 +193,58 @@ render_element({code, _, CodeContents}, State, Pos, Ind, D) ->
                 _ -> {"``", "``"}
             end
     end,
-    Code = render_elements(CodeContents, State, Pos, Ind, D),
+    Code = render_elements(CodeContents, State),
     Tag ++
         string:replace(Code, "\n", "\n\n")
     ++ TagF;
 
-render_element({h2, _, H2Contents}, State, Pos, Ind, D) ->
+render_element({h2, _, H2Contents}, State) ->
     "## " ++
-    render_elements(H2Contents, State, Pos, Ind, D)
+    render_elements(H2Contents, State)
     ++"";
-render_element({h3, _, H2Contents}, State, Pos, Ind, D) ->
+render_element({h3, _, H2Contents}, State) ->
     "### " ++
-    render_elements(H2Contents, State, Pos, Ind, D)
+    render_elements(H2Contents, State)
     ++"";
-render_element({br, _, BrContents}, State, Pos, Ind, D) ->
+render_element({br, _, BrContents}, State) ->
     "\n" ++
-    render_elements(BrContents, State, Pos, Ind, D)
+    render_elements(BrContents, State)
     ++"";
-render_element({ul, _Style, UlContents}, State, Pos, Ind, D) ->
+render_element({ul, _Style, UlContents}, State) ->
     % gen_lsp_server:lsp_log("ul element, style:~p", [_Style]),
     "\n" ++
-    render_elements(UlContents, State, Pos, Ind, D)
+    render_elements(UlContents, State)
     ++"";
-render_element({li, _Style, []}, _State, _Pos, _Ind, _D) ->
+render_element({li, _Style, []}, _State) ->
     "";
-render_element({li, _Style, LiContents}, State, Pos, Ind, D) ->
+render_element({li, _Style, LiContents}, State) ->
     % gen_lsp_server:lsp_log("li element, style:~p, content:~p", [_Style, LiContents]),
     "\n* " ++
-    render_elements(LiContents, State, Pos, Ind, D)
+    render_elements(LiContents, State)
     ++"";
-render_element({a, [{href, _},{rel, _}], AContents}, State, Pos, Ind, D) ->
+render_element({a, [{href, _},{rel, _}], AContents}, State) ->
     "(" ++
-    render_elements(AContents, State, Pos, Ind, D)
+    render_elements(AContents, State)
     ++")[todo_link]";
-render_element({em, _Style, EmContent}, State, Pos, Ind, D) ->
+render_element({em, _Style, EmContent}, State) ->
     "*" ++
-    render_element(EmContent, State, Pos, Ind, D)
+    render_element(EmContent, State)
     ++ "*";
-render_element({pre, _Style, PreContents}, State, Pos, Ind, D) ->
+render_element({pre, _Style, PreContents}, State) ->
     "\n"++
-    render_elements(PreContents, State ++ [pre], Pos, Ind, D)
+    render_elements(PreContents, State ++ [pre])
     ++ "\n\n";
 
-render_element(Content, _State, _Pos, _Ind, _D) when is_binary(Content) ->
+render_element(Content, _State) when is_binary(Content) ->
     binary_to_list(Content);
 
-render_element(Elem,_State,_Pos,_Ind,_D) ->
+render_element(Elem,_State) ->
     gen_lsp_server:lsp_log("unknown element: ~p", [Elem]),
    "".
 
-render_elements(Elems, State, Pos, Ind, D) ->
+render_elements(Elems, State) ->
     lists:flatten(
-        lists:map(fun(X) -> render_element(X, State, Pos, Ind, D) end, Elems)
+        lists:map(fun(X) -> render_element(X, State) end, Elems)
     ).
 
 get_local_doc(MissingMod, Docs) when is_atom(MissingMod) ->
@@ -246,7 +272,7 @@ set_proxy() ->
     %error_logger:info_msg("set_proxy : ~p~n", [ProxyUrl]),
     case length(ProxyUrl) of
     L when L > 0 ->
-        {ok, {_Scheme, _UserInfo, Host, Port, _Path, _Query}} = http_uri:parse(ProxyUrl),
+        {ok, {_Scheme, _UserInfo, Host, Port, _Path, _Query}} = parse_uri(ProxyUrl),
         % if proxy is on localhost, NoProxy should not contains localhost 
         NoProxy = case string:to_lower(Host) of
             "localhost" -> [];
@@ -258,6 +284,16 @@ set_proxy() ->
         proxy_set;
     _ -> noproxy
     end.
+
+-ifdef(OTP_RELEASE).
+parse_uri(Url) ->
+    #uri_map{host = Host, port=Port} = uri_string:parse(Url),
+    {ok, Host, Port}.
+-else.
+parse_uri(Url) ->
+    {ok, {_Scheme, _UserInfo, Host, Port, _Path, _Query}} = http_uri:parse(Url),
+    {ok, Host, Port}.
+-endif.
 
 get_page_lines(Module, Modules) ->
     case Modules of

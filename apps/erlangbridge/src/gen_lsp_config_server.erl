@@ -6,7 +6,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([standard_modules/0, bifs/0]).
 -export([update_config/2, root/0, tmpdir/0, codeLensEnabled/0, includePaths/0, linting/0, 
-        verbose/0, autosave/0, proxy/0, search_exclude/0]).
+        verbose/0, autosave/0, proxy/0, search_exclude/0, epp48_help/0]).
 
 -define(SERVER, ?MODULE).
 
@@ -57,6 +57,9 @@ tmpdir() ->
 
 search_exclude() ->
     get_config_entry(search, exclude, #{}).
+
+epp48_help() ->
+    get_config_entry(erlang, epp48Help, false).
 
 init(_Args) ->
     StandardModules = lists:foldl(fun (Dir, Acc) ->

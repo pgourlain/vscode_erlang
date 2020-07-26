@@ -229,6 +229,12 @@
 						"server: launch debugadapter as a socket based server",
 						"inline: launch debugadpater in current process"
 					]
+				},
+				"erlang.epp48Help": {
+					"type": "boolean",
+					"default": true,
+					"title": "Enable/Disable Erlang on-line help come with OTP 23",
+					"description": "Enable/Disable Erlang help store in beam files before getting from internet. This feature is used only if our erlang OTP runtime >= 23"
 				}
 			}
 		},

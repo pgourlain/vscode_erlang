@@ -20,6 +20,42 @@
 %state
 -record(state, {socket, content_length, contents}).
 
+% because stacktrace is deprecated from OTP 21
+-ifdef(OTP_RELEASE).
+safeApply(Function, Socket, ArgsMap) ->
+    try apply(lsp_handlers, Function, [Socket, ArgsMap]) of
+        Result -> {ok, Result}
+    catch
+        throw:Reason when is_binary(Reason) ->
+            lsp_log("LSP handler returned '~p'", [Reason]),
+            {handler_error, Reason};                    
+        throw:Reason when is_list(Reason) ->
+            lsp_log("LSP handler returned '~p'", [Reason]),
+            {handler_error, list_to_binary(Reason)};
+        Error:Exception:StackTrace ->
+            error_logger:error_msg("LSP handler error ~p:~p while executing lsp_handlers:~p(_, ~p), stacktrace:~p", 
+                    [Error, Exception,Function,ArgsMap, StackTrace]),
+            {handler_error, <<"Handler error">>}
+    end.    
+-else.
+safeApply(Function, Socket, ArgsMap) ->
+    try apply(lsp_handlers, Function, [Socket, ArgsMap]) of
+        Result -> {ok, Result}
+    catch
+        throw:Reason when is_binary(Reason) ->
+            lsp_log("LSP handler returned '~p'", [Reason]),
+            {handler_error, Reason};                    
+        throw:Reason when is_list(Reason) ->
+            lsp_log("LSP handler returned '~p'", [Reason]),
+            {handler_error, list_to_binary(Reason)};
+        Error:Exception ->
+            error_logger:error_msg("LSP handler error ~p:~p while executing lsp_handlers:~p(_, ~p), stacktrace:~p", 
+                    [Error, Exception,Function,ArgsMap, erlang:get_stacktrace()]),
+            {handler_error, <<"Handler error">>}
+    end.
+-endif.
+
+
 start_link(VsCodePort) ->
     start_link(VsCodePort, undefined).
 
@@ -93,20 +129,7 @@ call_handler(Socket, Name, ArgsMap) ->
         {Function, 2} ->
             %uncomment to show commands sent by vscode
             %lsp_log("LSP call_handler lsp_handlers:'~p':~p", [Function, ArgsMap]),
-            try apply(lsp_handlers, Function, [Socket, ArgsMap]) of
-                Result -> {ok, Result}
-            catch
-                throw:Reason when is_binary(Reason) ->
-                    lsp_log("LSP handler returned '~p'", [Reason]),
-                    {handler_error, Reason};                    
-                throw:Reason when is_list(Reason) ->
-                    lsp_log("LSP handler returned '~p'", [Reason]),
-                    {handler_error, list_to_binary(Reason)};
-                Error:Exception ->
-                    error_logger:error_msg("LSP handler error ~p:~p while executing lsp_handlers:~p(_, ~p), stacktrace:~p", 
-                            [Error, Exception,Function,ArgsMap, erlang:get_stacktrace()]),
-                    {handler_error, <<"Handler error">>}
-            end
+            safeApply(Function, Socket, ArgsMap)
     end.
 
 send_response_with_id(Socket, Input, Response) ->

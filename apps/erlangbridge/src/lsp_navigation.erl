@@ -36,15 +36,7 @@ read_and_analyse_from_tokens(File, Module, Line, Column) ->
             {ok, Data} ->
                 Scan = do_scan(lsp_utils:to_string(Data), [], Line, Column,{1,1}),
                 %gen_lsp_server:lsp_log("scan:~p",[Scan]),
-                TargetExport = try case analyse_export(Scan, Module, Line, Column) of
-                    {notfound} -> {notfound};
-                    Other -> Other 
-                end
-                catch
-                    Err:M:STK -> 
-                        gen_lsp_server:lsp_log("read_and_analyse_from_tokens exception:~p,~p,~p",[Err,M,STK]),
-                        {notfound}
-                end,
+                TargetExport = safe_analyse_export(Scan, Module, Line, Column),
                 %gen_lsp_server:lsp_log("read_and_analyse_from_tokens:~p",[TargetExport]),
                 TargetExport;
             _ -> { error, ""}
@@ -54,6 +46,30 @@ read_and_analyse_from_tokens(File, Module, Line, Column) ->
     _ ->
         {error, could_not_open_file, File}
     end.
+
+-ifdef(OTP_RELEASE).
+safe_analyse_export(Scan, Module, Line, Column) ->
+    try case analyse_export(Scan, Module, Line, Column) of
+        {notfound} -> {notfound};
+        Other -> Other 
+    end
+    catch
+        Err:M:STK -> 
+            gen_lsp_server:lsp_log("read_and_analyse_from_tokens exception:~p,~p,~p",[Err,M,STK]),
+            {notfound}
+    end.
+-else.
+safe_analyse_export(Scan, Module, Line, Column) ->
+    try case analyse_export(Scan, Module, Line, Column) of
+        {notfound} -> {notfound};
+        Other -> Other 
+    end
+    catch
+        Err:M -> 
+            gen_lsp_server:lsp_log("read_and_analyse_from_tokens exception:~p,~p,~p",[Err,M,erlang:get_stacktrace()]),
+            {notfound}
+    end.
+-endif.
 
 
 analyse_export(Tokens, Module, Line, Column) ->
