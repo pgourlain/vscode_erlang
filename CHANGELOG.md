@@ -1,6 +1,6 @@
 # Change log
 
-## Version 0.6.4 (July 13, 2020)
+## Version 0.6.4 (July 26, 2020)
 
 * Fix [#146](https://github.com/pgourlain/vscode_erlang/issues/146) : Go to definition doesn't work from the export directive
 * Fix [#138](https://github.com/pgourlain/vscode_erlang/issues/138) : Add support of parse_transform on syntax tree if present in compile attribute
@@ -9,6 +9,8 @@
 * Fix [#148](https://github.com/pgourlain/vscode_erlang/issues/148) : Add rebar plugins path in includepaths to resolve include_lib
 * Migrate to vscode engine 1.46
 * Add 'inline' DebuggerMode in config
+* Allow to goto definition in erlang lib
+* Use help from new feature from OTP 23 (EEP-48)[https://erlang.org/doc/apps/kernel/eep48_chapter.html]
 * Add help.md link in readme.md that provide some tricks about erlang extension configuration.
 
 
