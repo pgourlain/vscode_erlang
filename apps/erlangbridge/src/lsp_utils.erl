@@ -20,10 +20,10 @@ file_uri_to_file(Uri) ->
         <<"file://", Rest/binary>> -> Rest;
       _ -> Uri
     end, <<"\\\\">>, <<"/">>, [global, {return, list}]),
-    lists:flatten(string:replace(NewUri, "%20", " ")).
+    lists:flatten(string_replace(NewUri, "%20", " ")).
 
 file_uri_to_vscode_uri(Uri) ->
-    UriWithOutSpace = lists:flatten(string:replace(to_string(Uri), " ", "%20")),
+    UriWithOutSpace = lists:flatten(string_replace(to_string(Uri), " ", "%20")),
     EncodeUri = if
         is_binary(Uri) ->  erlang:list_to_binary(UriWithOutSpace);
         true -> UriWithOutSpace
@@ -32,6 +32,30 @@ file_uri_to_vscode_uri(Uri) ->
         <<"file://", Drive, ":/", Rest/binary>> -> <<"file:///", Drive, "%3A/", Rest/binary>>;
       _ -> EncodeUri
     end.
+
+-ifdef(OTP_RELEASE).
+string_replace(String, Pattern, NewString) ->
+    string:replace(NewUri, Pattern, NewString).
+string_prefix(String, Prefix) ->
+    string:prefix(String, Prefix).
+-else.
+string_replace(String, Pattern, NewString) ->
+    case string:str(String, Pattern) of
+        0 -> String;
+        Index -> 
+            S = string:sub_string(String, 1, Index-1),
+            SEnd = string:sub_string(String, Index+length(Pattern)),
+            S ++ NewString ++ string_replace(SEnd, Pattern, NewString) 
+    end.
+
+string_prefix(String, Prefix) ->
+    L = string:left(String, length(Prefix)),
+    if 
+        L =:= Prefix -> string:sub_string(String, length(Prefix)+1);
+        true -> nomatch
+    end.
+
+-endif.
 
 to_string(X) when is_binary(X) ->
     erlang:binary_to_list(X);
@@ -177,7 +201,7 @@ do_is_path_excluded(Path, [{RegExp, true} | ExcFilters], PreliminaryAnswer) ->
 
 
 is_erlang_lib_file(File) ->
-    case string:prefix(File, code:lib_dir()) of
+    case string_prefix(File, code:lib_dir()) of
         nomatch -> false;
         _ -> true
     end.
