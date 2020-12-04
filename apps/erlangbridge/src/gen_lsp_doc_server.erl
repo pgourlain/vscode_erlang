@@ -5,7 +5,7 @@
 
 -export([init/1,handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([set_document_attribute/3, remove_document/1, get_document_attribute/2, get_documents/0]).
--export([root_available/0, project_modules/0, add_project_file/1, remove_project_file/1, get_module_file/1]).
+-export([root_available/0, project_modules/0, add_project_file/1, remove_project_file/1, get_module_file/1, get_module_beam/1]).
 
 -define(SERVER, ?MODULE).
 
@@ -40,6 +40,9 @@ remove_project_file(File) ->
 
 get_module_file(Module) ->
     gen_server:call(?SERVER, {get_module_file, Module}).
+
+get_module_beam(Module) ->
+    gen_server:call(?SERVER, {get_module_beam, Module}).
 
 init(_Args) ->
     {ok, #state{opened = #{}, project_modules = #{}}}.
@@ -84,6 +87,33 @@ handle_call({get_module_file, Module},_From, State) ->
         end,
     {reply, File, State};
 
+handle_call({get_module_beam, Module},_From, State) ->
+    %% Get search.exclude setting of Visual Studio Code
+    SearchExcludeConf = gen_lsp_config_server:search_exclude(),
+    SearchExclude = lsp_utils:search_exclude_globs_to_regexps(SearchExcludeConf),
+    %% Select a non-excluded file
+    Files = maps:get(atom_to_list(Module), State#state.project_modules, []),
+    {ExceptExcluded, Excluded} = lists:partition(fun (File) ->
+        not lsp_utils:is_path_excluded(File, SearchExclude)
+    end, Files),
+    BeamFiles = lists:filtermap(fun (File) ->
+        case find_existing_beam(File) of
+            undefined -> false;
+            BeamFile -> {true, BeamFile}
+        end
+    end, ExceptExcluded ++ Excluded),
+    BeamFile = case BeamFiles of
+        [] ->
+            %try to find in erlang source files
+            case filelib:wildcard(code:lib_dir()++"/**/" ++ atom_to_list(Module) ++ ".erl") of
+                [] -> undefined;
+                [AFile | _] -> find_existing_beam(AFile)
+            end;
+        [AFile | _] ->
+            AFile
+    end,
+    {reply, BeamFile, State};
+
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
@@ -125,3 +155,15 @@ do_add_project_file(File, ProjectModules) ->
     Module = filename:rootname(filename:basename(File)),
     UpdatedFiles = [File | maps:get(Module, ProjectModules, [])],
     ProjectModules#{Module => UpdatedFiles}.
+
+find_existing_beam(SourceFile) ->
+    case lists:reverse(filename:split(SourceFile)) of
+        [FilenameErl, "src" | T] ->
+            RootBeamName = filename:join(lists:reverse([filename:rootname(FilenameErl), "ebin" | T])),
+            case filelib:is_regular(RootBeamName ++ ".beam") of
+                true -> RootBeamName;
+                false -> undefined
+            end;
+        _ ->
+            undefined
+    end.
