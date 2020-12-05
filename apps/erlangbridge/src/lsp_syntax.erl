@@ -88,18 +88,13 @@ should_load_behaviour_module(FileSyntaxTree) ->
     end.
 
 load_behaviour_module(BehaviourModule) ->
-    case gen_lsp_doc_server:get_module_file(BehaviourModule) of
+    case gen_lsp_doc_server:get_module_beam(BehaviourModule) of
         undefined -> undefined;
-        SourceFile ->
-        case lists:reverse(filename:split(SourceFile)) of
-            [FilenameErl, "src" | T] ->
-                RootBeamName = filename:join(lists:reverse([filename:rootname(FilenameErl), "ebin" | T])),
-		        case code:load_abs(RootBeamName) of
-		            {module, _} -> BehaviourModule;
-		            _ -> undefined
-		        end;
-	        _ -> undefined
-	    end
+        BeamFile ->
+            case code:load_abs(BeamFile) of
+                {module, _} -> BehaviourModule;
+                _ -> undefined
+            end
     end.
 
 should_load_parse_transform(FileSyntaxTree) ->
