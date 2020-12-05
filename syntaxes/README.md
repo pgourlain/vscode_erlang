@@ -24,10 +24,12 @@ from _Ben Hockley_.
   [plist-yaml-plist](https://github.com/grahampugh/plist-yaml-plist)
   from Github and use below commands: (On Windows use WSL)
 
-      /path/to/plist_yaml.py erlang.tmLanguage erlang.tmLanguage.yaml
+      /path/to/plist_yaml.py erlang.tmLanguage erlang.yaml-tmLanguage
       # Edit YAML file here ... then if you are ready convert back to PLIST
-      /path/to/yaml_plist.py erlang.tmLanguage.yaml erlang.tmLanguage
+      /path/to/yaml_plist.py erlang.yaml-tmLanguage erlang.tmLanguage
 
 ## References
 
 1. Visual Studio Code [Syntax Highlight Guide](https://code.visualstudio.com/api/language-extensions/syntax-highlight-guide)
+2. TextMate [Language Grammars](https://macromates.com/manual/en/language_grammars)
+3. [Writing a TextMate Grammar: Some Lessons Learned](https://www.apeth.com/nonblog/stories/textmatebundle.html)
