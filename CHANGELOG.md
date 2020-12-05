@@ -1,5 +1,14 @@
 # Change log
 
+## Version 0.6.6 (December 5, 2020)
+* Fix [#174](https://github.com/pgourlain/vscode_erlang/issues/174) : Improve syntax highlight
+* Fix [#177](https://github.com/pgourlain/vscode_erlang/issues/177) : Custom behaviours improvement 
+
+Thanks to
+* [Kornel H](https://github.com/sebkm)
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+
+
 
 ## Version 0.6.5 (July 26, 2020)
 * Allow to goto definition in erlang lib
