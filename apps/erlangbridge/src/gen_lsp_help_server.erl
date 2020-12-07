@@ -253,6 +253,9 @@ render_element(Elem,_State) ->
     gen_lsp_server:lsp_log("unknown element: ~p", [Elem]),
    "".
 
+render_elements(Elems, _State) when is_binary(Elems) ->
+    binary_to_list(Elems);
+
 render_elements(Elems, State) ->
     lists:flatten(
         lists:map(fun(X) -> render_element(X, State) end, Elems)
