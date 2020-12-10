@@ -158,19 +158,17 @@
 		],
 		"configuration": {
 			"type": "object",
-			"title": "erlang configuration",
+			"title": "Erlang",
 			"properties": {
 				"erlang.erlangPath": {
 					"type": "string",
 					"default": "",
-					"description": "Directory location of erl/escript.",
-					"title": "Path of erlang binaries"
+					"description": "Directory where erl/escript are located. Leave empty to use default."
 				},
 				"erlang.rebarPath": {
 					"type": "string",
 					"default": "",
-					"description": "Directory location of rebar/rebar3.",
-					"title": "Path of rebar/rebar3"
+					"description": "Directory where rebar/rebar3 are located. Leave empty to use default."
 				},
 				"erlang.rebarBuildArgs": {
 					"type": "array",
@@ -182,8 +180,7 @@
 					"default": [
 						"compile"
 					],
-					"description": "Arguments to provide to rebar/rebar3 build command",
-					"title": "Arguments to provide to rebar/rebar3 build command"
+					"description": "Arguments passed to rebar/rebar3 build command."
 				},
 				"erlang.includePaths": {
 					"type": "array",
@@ -193,48 +190,42 @@
 						"default": ""
 					},
 					"default": [],
-					"description": "Include paths used when extension analyses the sources",
-					"title": "Include paths are read from rebar.config, and also standard set of paths is used. This setting is for special cases when the default behaviour is not enough."
+					"description": "Include paths used when extension analyses the sources. Paths are read from rebar.config, and also standard set of paths is used. This setting is for special cases when the default behaviour is not enough."
 				},
 				"erlang.linting": {
 					"type": "boolean",
 					"default": true,
-					"title": "Enable/Disable Erlang Linting",
-					"description": "Enable/Disable dynamic validation of opened Erlang source files."
+					"description": "Enable/disable dynamic validation of opened Erlang source files."
 				},
 				"erlang.codeLensEnabled": {
 					"type": "boolean",
 					"default": false,
-					"title": "Enable/Disable CodeLens",
-					"description": "Enable/Disable CodeLens on top of each module function."
+					"description": "Enable/disable references CodeLens on functions."
 				},
 				"erlang.verbose": {
 					"type": "boolean",
-					"description": "Activate technical traces",
-					"title": "Activate technical traces for use in the extension development",
+					"description": "Enable/disable technical traces for use in the extension development.",
 					"default": false
 				},
 				"erlang.debuggerRunMode": {
 					"type": "string",
 					"default": "external",
-					"description": "Specifies how run vscode debuggeradpater. Usefull in extension development",
-					"title": "Specifies how run vscode debuggeradpater",
+					"description": "Specifies how to run vscode debugadapter. Useful in extension development.",
 					"enum": [
 						"external",
 						"server",
 						"inline"
 					],
 					"enumDescriptions": [
-						"external : launch debugadapter in separate process",
+						"external : launch debug adapter in separate process",
 						"server: launch debugadapter as a socket based server",
-						"inline: launch debugadpater in current process"
+						"inline: launch debugadapter in current process"
 					]
 				},
 				"erlang.eep48Help": {
 					"type": "boolean",
 					"default": true,
-					"title": "Enable/Disable Erlang on-line help come with OTP 23",
-					"description": "Enable/Disable Erlang help store in beam files before getting from internet. This feature is used only if our erlang OTP runtime >= 23"
+					"description": "Enable/disable help based on Erlang documentation storage added in OTP 23. The setting is ignored in earlier versions."
 				}
 			}
 		},
