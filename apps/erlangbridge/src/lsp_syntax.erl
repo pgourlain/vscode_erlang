@@ -1,12 +1,16 @@
 -module(lsp_syntax).
 
--export([file_syntax_tree/1, module_syntax_tree/1, parse_config_file/2, parse_source_file/2, validate_parsed_source_file/1]).
+-export([file_syntax_tree/1, module_syntax_tree/1, parse_config_file/2, parse_source_file/2, validate_parsed_source_file/1, find_macro_definition/2]).
 
 parse_source_file(File, ContentsFile) ->
     case epp_parse_file(ContentsFile, get_include_path(File), get_define_from_rebar_config(File)) of
         {ok, FileSyntaxTree} ->
             UpdatedSyntaxTree = update_file_in_forms(File, ContentsFile, FileSyntaxTree),
             gen_lsp_doc_server:set_document_attribute(File, syntax_tree, UpdatedSyntaxTree),
+            case epp_dodger:parse_file(ContentsFile) of
+                {ok, Forms} -> gen_lsp_doc_server:set_document_attribute(File, dodged_syntax_tree, Forms);
+                _ -> ok
+            end,
             #{parse_result => true};
         _ ->
             #{parse_result => false, error_message => <<"Cannot open file">>}
@@ -62,6 +66,48 @@ module_syntax_tree(Module) ->
       undefined -> undefined;
       _ -> {file_syntax_tree(File), File}
     end.
+
+find_macro_definition(Macro, File) -> find_macro_definition_in_files(Macro, [File]).
+
+find_macro_definition_in_files(_Macro, []) -> undefined;
+find_macro_definition_in_files(Macro, [File | Tail]) ->
+    Forms = case gen_lsp_doc_server:get_document_attribute(File, dodged_syntax_tree) of
+        undefined ->
+            case epp_dodger:parse_file(File) of
+                {ok, F} -> F;
+                _ -> undefined
+            end;
+        F -> F
+    end,
+    case find_macro_definition(Macro, File, Forms) of
+        undefined ->
+            Included = lists:reverse(find_included_files(Forms, [])),
+            IncludePath = get_include_path(File),
+            case find_macro_definition_in_files(Macro, [filename:join(Path, IncludedFile) || IncludedFile <- Included, Path <- IncludePath]) of
+                undefined -> find_macro_definition_in_files(Macro, Tail);
+                Result -> Result
+            end;
+        Result -> Result
+    end.
+
+find_macro_definition(_Macro, _File, undefined) ->
+    undefined;
+find_macro_definition(_Macro, _File, []) ->
+    undefined;
+find_macro_definition(Macro, File, [{tree, attribute, _, {attribute, {atom, _, define}, [{var, Line, Macro}, _]}} | _]) ->
+    {File, Line, 1};
+find_macro_definition(Macro, File, [{tree, attribute, _, {attribute, {atom, _, define}, [{_, _, _, {_, {var, Line, Macro}, _}}, _]}} | _]) ->
+    {File, Line, 1};
+find_macro_definition(Macro, File, [_ | Tail]) ->
+    find_macro_definition(Macro, File, Tail).
+
+find_included_files(undefined, Acc) -> Acc;
+find_included_files([], Acc) -> Acc;
+find_included_files([{tree, attribute, _, {attribute, {atom, _, include_lib}, [{string, _ , Name}]}} | Tail], Acc) ->
+    find_included_files(Tail, [Name | Acc]);
+find_included_files([{tree, attribute, _, {attribute, {atom, _, include}, [{string, _ , Name}]}} | Tail], Acc) ->
+    find_included_files(Tail, [Name | Acc]);
+find_included_files([_ | Tail], Acc) -> find_included_files(Tail, Acc).
 
 update_file_in_forms(File, File, FileSyntaxTree) ->
     FileSyntaxTree;

@@ -6,7 +6,7 @@
 goto_definition(File, Line, Column) ->
     FileSyntaxTree = lsp_syntax:file_syntax_tree(File),
     Module = list_to_atom(filename:rootname(filename:basename(File))),
-    What = element_at_position(Module, FileSyntaxTree, Line, Column),
+    What = element_at_position(Module, FileSyntaxTree, Line, Column, file_line(File, Line)),
     case find_element(What, FileSyntaxTree, File) of
         {FoundFile, FoundLine, FoundColumn} ->
             #{
@@ -14,151 +14,28 @@ goto_definition(File, Line, Column) ->
                 range => lsp_utils:client_range(FoundLine, FoundColumn, FoundColumn)
             };
         _ ->
-            %try to find if user press F12 in export attribute
-            What1 = read_and_analyse_from_tokens(File, Module, Line, Column), 
-            case find_element(What1, FileSyntaxTree, File) of
-                {FoundFile1, FoundLine1, FoundColumn1} ->
-                    #{
-                        uri => lsp_utils:file_uri_to_vscode_uri(list_to_binary("file://" ++ FoundFile1)),
-                        range => lsp_utils:client_range(FoundLine1, FoundColumn1, FoundColumn1)
-                    };
-                _ ->
-                    throw(<<"Definition not found">>)
-            end
+            throw(<<"Definition not found">>)
     end.
 
-read_and_analyse_from_tokens(File, Module, Line, Column) ->
-    %% parse file to get all tokens with all informations (Line and Column)
-    case file:open(File, [read]) of
-    {ok, FIO} ->
-        FileSize = filelib:file_size(File),
-        Ret = case file:read(FIO, FileSize) of
-            {ok, Data} ->
-                Scan = do_scan(lsp_utils:to_string(Data), [], Line, Column,{1,1}),
-                %gen_lsp_server:lsp_log("scan:~p",[Scan]),
-                TargetExport = safe_analyse_export(Scan, Module, Line, Column),
-                %gen_lsp_server:lsp_log("read_and_analyse_from_tokens:~p",[TargetExport]),
-                TargetExport;
-            _ -> { error, ""}
-        end,
-        file:close(FIO),
-        Ret;
-    _ ->
-        {error, could_not_open_file, File}
-    end.
-
--ifdef(OTP_RELEASE).
-safe_analyse_export(Scan, Module, Line, Column) ->
-    try case analyse_export(Scan, Module, Line, Column) of
-        {notfound} -> {notfound};
-        Other -> Other 
-    end
-    catch
-        Err:M:STK -> 
-            gen_lsp_server:lsp_log("read_and_analyse_from_tokens exception:~p,~p,~p",[Err,M,STK]),
-            {notfound}
-    end.
--else.
-safe_analyse_export(Scan, Module, Line, Column) ->
-    try case analyse_export(Scan, Module, Line, Column) of
-        {notfound} -> {notfound};
-        Other -> Other 
-    end
-    catch
-        Err:M -> 
-            gen_lsp_server:lsp_log("read_and_analyse_from_tokens exception:~p,~p,~p",[Err,M,erlang:get_stacktrace()]),
-            {notfound}
-    end.
--endif.
-
-
-analyse_export(Tokens, Module, Line, Column) ->
-    %first find export attribute
-    {_,_,ExportTokens} = lists:foldl(fun(Token, ExportAcc) -> 
-            {IsAttrStart, ExportFound, Ts} = ExportAcc,
-            case Token of 
-                {'-', _} ->
-                    if 
-                        IsAttrStart andalso ExportFound -> ExportAcc;
-                        true  ->  {true, false,  [Token]}
-                    end;
-                {atom, _, export} -> case IsAttrStart of
-                    true -> {true, true, Ts ++ [Token]};
-                        _ -> {false, false, Ts}
-                    end;
-                _ -> if 
-                    IsAttrStart andalso ExportFound -> {true, true, Ts ++ [Token]};
-                    true -> ExportAcc
-                    end
-            end
-        end, {false, false, []}, Tokens),
-    %{'[',{4,9}},{atom,{4,10},functionA},{'/',{4,19}},{integer,{4,20},0},{',',{4,21}},
-    %{atom,{5,5},function_test},{'/',{5,18}},{integer,{5,19},0},{']',{5,20}},
-     %%keep only export tokens
-    T1 = lists:dropwhile(fun(X) -> 
-            case X of 
-                {'[', _} -> false;
-                _ -> true
-            end
-         end, ExportTokens),
-    T2 = lists:takewhile(fun(X) -> 
-            case X of 
-                {']', _} -> false;
-                _ -> true
-            end
-         end, T1),
-    %%Fns = [{functionA,{4,10},0},{function_test,{5,5},0}]
-    {_,_,Fns} = lists:foldl(fun(Token, Acc) -> 
-            {F,LC, Arr} = Acc,
-            case Token of
-                {atom, {L,C}, FnAtomAme} -> {FnAtomAme, {L,C}, Arr};
-                {integer, _, Arity} -> {1,1, Arr ++ [{F, LC, Arity}]};
-                _ -> Acc
-            end
-        end, {1,1,[]}, T2),
-    %gen_lsp_server:lsp_log("analyse_export fns:~p", [Fns]),
-    %% filter only Fns that are in line and column
-    TargetFns = lists:filter(fun({Atom, {L,C}, _}) ->
-        EndColumn = C + length(atom_to_list(Atom)),
-        if 
-           Line =:= L andalso C =< Column andalso Column =< EndColumn -> true;
-           true -> false
-        end
-        end, Fns),
-    %take the first one
-    TargetToken = lists:nth(1, TargetFns),        
-    %gen_lsp_server:lsp_log("analyse_export TargetToken:~p", [TargetToken]),
-    % %% match tokens sequence for attribute
-    % Export = [{'-', _}, {atom, export, _}], 
-    %{atom,{4,10},functionA}
-    case TargetToken of
-        {FnName, _, Arity} -> 
-            %{L1, C1} = LC,
-            {function_use, Module, FnName, Arity};
-            %{ok, L1, C1};
-        _ -> {notfound}
-    end.
-
-
-%% scan string into tokens until EndLine, EndColumn is reached
-do_scan(Data, ScannedTokens, EndLine, EndColumn, StartLocation) ->
-    case erl_scan:tokens([], lsp_utils:to_string(Data), StartLocation, []) of
-        {done, Result, LeftOverChars} ->
-            case Result of
-                {ok, Tokens, {L,C}} -> 
-                    if
-                        L >= EndLine andalso C >= EndColumn -> ScannedTokens;
-                        true -> do_scan(LeftOverChars, ScannedTokens ++ Tokens, EndLine, EndColumn, {L,C})
-                    end;                    
-                _ -> ScannedTokens
-            end;
-        _ -> ScannedTokens
+file_line(File, Line) ->
+    Contents = case gen_lsp_doc_server:get_document_attribute(File, contents) of
+        undefined ->
+            {ok, FileContents} = file:read_file(File),
+            FileContents;
+        StoredContents ->
+            StoredContents
+    end,
+    Lines = binary:split(Contents, <<"\n">>, [global]),
+    try
+        lists:nth(Line, Lines)
+    catch _:_ ->
+        undefined
     end.
 
 hover_info(File, Line, Column) ->
     Module = list_to_atom(filename:rootname(filename:basename(File))),
     FileSyntax = lsp_syntax:file_syntax_tree(File),
-    What = element_at_position(Module, FileSyntax, Line, Column),
+    What = element_at_position(Module, FileSyntax, Line, Column, file_line(File, Line)),
     %gen_lsp_server:lsp_log("hover_info What:~p", [What]),
     case What of
         {function_use, FunctionModule, Function, Arity} ->
@@ -254,19 +131,22 @@ codelens_info(File) ->
     %filter only defined functions
     MapResult = maps:filter(fun (_K,V) -> maps:is_key(func_name, V) end,
         fold_in_file_syntax_tree(lsp_syntax:file_syntax_tree(File), #{}, fun codelens_analyze/2)),
-    lists:map(fun (V) ->
-        {Line, Column} = maps:get(location, V),
-        Count = maps:get(count, V),
-        FName = list_to_binary(atom_to_list(maps:get(func_name, V))),
-        #{
-            line => Line,
-            character => Column,
-            data => #{
-                count => Count,
-                func_name => FName,
-                exported => maps:get(exported, V, false)
-            }
-        }
+    lists:filtermap(fun (V) ->
+        case maps:get(location, V, undefined) of
+            {Line, Column} ->
+                Count = maps:get(count, V),
+                FName = list_to_binary(atom_to_list(maps:get(func_name, V))),
+                {true, #{
+                    line => Line,
+                    character => Column,
+                    data => #{
+                        count => Count,
+                        func_name => FName,
+                        exported => maps:get(exported, V, false)
+                    }
+                }};
+            undefined -> false
+        end
     end, maps:values(MapResult)).
 
 codelens_analyze(SyntaxTree, Map) ->
@@ -405,7 +285,7 @@ find_in_file_syntax_tree(FileSyntaxTree, Fun) ->
             end
         end).
 
-element_at_position(CurrentModule, FileSyntaxTree, Line, Column) ->
+element_at_position(CurrentModule, FileSyntaxTree, Line, Column, LineContents) ->
     Fun = fun
         ({call, {L, StartColumn}, {atom, {L, StartColumn}, Function}, Args}, _) when L =:= Line andalso StartColumn =< Column ->
             EndColumn = StartColumn + length(atom_to_list(Function)),
@@ -414,9 +294,7 @@ element_at_position(CurrentModule, FileSyntaxTree, Line, Column) ->
                 true -> undefined
             end;
         ({attribute, {L, StartColumn}, export, _Exports}, _) when L =:= Line andalso StartColumn =< Column ->
-            %% return function_use on export
-            %% missing line and column info on exported atoms
-            undefined;
+            export;
         ({call, {_, _}, {remote, {_, _}, {atom, {_, MStartColumn}, Module}, {atom, {L, StartColumn}, Function}}, Args}, _) when L =:= Line andalso MStartColumn =< Column ->
             MEndColumn = MStartColumn + length(atom_to_list(Module)), 
             EndColumn = StartColumn + length(atom_to_list(Module)) + 1 + length(atom_to_list(Function)),
@@ -467,9 +345,44 @@ element_at_position(CurrentModule, FileSyntaxTree, Line, Column) ->
         (_SyntaxTree, _File) ->
             undefined
     end,
-    %gen_lsp_server:lsp_log("element_at_position:~p", [FileSyntaxTree]),
-    {What, _File} = find_in_file_syntax_tree(FileSyntaxTree, Fun),
-    What.
+    case find_macro_use(LineContents, Column) of
+        undefined ->
+            case find_in_file_syntax_tree(FileSyntaxTree, Fun) of
+                {export, _File} -> find_function_in_export(CurrentModule, LineContents, Column);
+                {What, _File} -> What
+            end;
+        MacroUse -> MacroUse
+            
+    end.
+
+find_macro_use(undefined, _Column) ->
+    undefined;
+find_macro_use(LineContents, Column) ->
+    case re:run(LineContents, <<"\\?[A-Z_0-9a-z]+">>, [global]) of
+        {match, Matches} ->
+            case lists:filter(fun ([{Pos, Len}]) -> Column > Pos andalso Column =< Pos + Len end, Matches) of
+                [[{FoundPos, FoundLen}]] -> {macro_use, binary_to_atom(binary:part(LineContents, FoundPos + 1, FoundLen - 1), latin1)};
+                _ -> undefined
+            end;
+        _ ->
+            undefined
+    end.
+
+find_function_in_export(_CurrentModule, undefined, _Column) ->
+    undefined;
+find_function_in_export(CurrentModule, LineContents, Column) ->
+    case re:run(LineContents, <<"([a-z][A-Z_0-9a-z@]*)/([0-9]+)">>, [global]) of
+        {match, Matches} ->
+            case lists:filter(fun ([{Pos, Len}, _, _]) -> Column > Pos andalso Column =< Pos + Len end, Matches) of
+                [[_, {NamePos, NameLen}, {ArityPos, ArityLen}]] ->
+                    Function = binary_to_atom(binary:part(LineContents, NamePos, NameLen), latin1),
+                    Arity = binary_to_integer(binary:part(LineContents, ArityPos, ArityLen)),
+                    {function_use, CurrentModule, Function, Arity};
+                _ -> undefined
+            end;
+        _ ->
+            undefined
+    end.
 
 find_record_field_use(_Record, [], _Column) ->
     undefined;
@@ -532,6 +445,8 @@ find_element({variable, Variable, Line, Column}, CurrentFileSyntaxTree, CurrentF
             [{L, C} | _] = find_variable_occurrences(Variable, lists:last(FunClausesShadowingVariable)),
             {CurrentFile, L, C}
     end;
+find_element({macro_use, Macro}, _CurrentFileSyntaxTree, CurrentFile) ->
+    lsp_syntax:find_macro_definition(Macro, CurrentFile);
 find_element(_, _CurrentFileSyntaxTree, _CurrentFile) ->
     undefined.
 
