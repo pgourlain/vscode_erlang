@@ -103,7 +103,11 @@ decode_request(Data) ->
     {debugger_eval, Body} ->
         [PidString, Sp, Expression] = string:tokens(Body, "\r\n"),
         Bindings = debugger_eval_bindings(PidString, Sp),
-        {ok, Tokens, _} = erl_scan:string(Expression ++ "."),
+        ExpressionWithDot = case Expression =/= [] andalso lists:last(Expression) =:= $. of
+            true -> Expression;
+            false -> Expression ++ "."
+        end,
+        {ok, Tokens, _} = erl_scan:string(ExpressionWithDot),
         case erl_parse:parse_exprs(Tokens) of
             {ok, Exprs} ->
                 try erl_eval:exprs(Exprs, orddict:from_list(Bindings)) of
