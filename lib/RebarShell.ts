@@ -36,6 +36,10 @@ export default class RebarShell extends GenericShell {
         // on Windows but installed on Linux). Let's always run rebar by escript.
         let escript = (process.platform == 'win32' ? 'escript.exe' : 'escript');
         let rebarFileName = this.getRebarFullPath();
+        if (rebarFileName.search(' ') > -1) {
+            //there is space(s) in rebarPath
+            rebarFileName = ('\'' + rebarFileName + '\'');
+        }
         let args = [rebarFileName].concat(commands);
 
         this.shellOutput.clear();

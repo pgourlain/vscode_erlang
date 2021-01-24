@@ -1,5 +1,8 @@
 # Change log
 
+## Version 0.6.7 (January 24, 2021)
+* [#182](https://github.com/pgourlain/vscode_erlang/issues/182) : Spaces Are Not Escaped in the Path to Rebar3 .
+
 ## Version 0.6.7 (December 20, 2020)
 * [#178](https://github.com/pgourlain/vscode_erlang/issues/178) : Finds exports and macros definitions. Bug fix in Help. Settings texts improved.
 * [#178](https://github.com/pgourlain/vscode_erlang/issues/179) : Dot optional in Debug Console.
