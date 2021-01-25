@@ -1,8 +1,11 @@
 # Change log
 
 ## Version 0.6.9 (January 25, 2021)
-* [#182](https://github.com/pgourlain/vscode_erlang/issues/182) : Spaces Are Not Escaped in the Path to Rebar3. On Windows, we must use double quotes instead of
+* [#184](https://github.com/pgourlain/vscode_erlang/issues/184) : Spaces Are Not Escaped in the Path to Rebar3. On Windows, we must use double quotes instead of
 single quotes.
+
+Thanks to
+* [WHemanth V. Alluri](https://github.com/Hypro999)
 
 ## Version 0.6.8 (January 24, 2021)
 * [#182](https://github.com/pgourlain/vscode_erlang/issues/182) : Spaces Are Not Escaped in the Path to Rebar3 .
