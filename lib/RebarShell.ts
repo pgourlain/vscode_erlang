@@ -37,8 +37,10 @@ export default class RebarShell extends GenericShell {
         let escript = (process.platform == 'win32' ? 'escript.exe' : 'escript');
         let rebarFileName = this.getRebarFullPath();
         if (rebarFileName.search(' ') > -1) {
-            //there is space(s) in rebarPath
-            rebarFileName = ('\'' + rebarFileName + '\'');
+            // There is at least one space in rebarPath. Use double quotes
+            // instead of single quotes for cross-operability between
+            // Unix shells (e.g. bash) and the Windows shell.
+            rebarFileName = ('"' + rebarFileName + '"');
         }
         let args = [rebarFileName].concat(commands);
 

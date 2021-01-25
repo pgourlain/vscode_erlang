@@ -1,6 +1,8 @@
 out
 node_modules
 .DS_Store
+rebar.lock
+*.vsix
 *.beam
 *.dump
 _build/
