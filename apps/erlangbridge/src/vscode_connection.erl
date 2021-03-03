@@ -217,6 +217,8 @@ set_temp_breakpoint([#{module := Module, line := Line} | T]) ->
 set_temp_breakpoint(_) ->
     false.
 
+type_of_binding([_ | T]) when not is_list(T) ->
+    unknown;
 type_of_binding(Value) when is_list(Value) ->
     case lists:all(fun(X) when X >= 32, X < 127 -> true; (_) -> false end, Value) of
         true -> string;
@@ -243,7 +245,7 @@ map_bindings({Name, Value}) ->
     },
     V = case T of
         list -> 
-            IndexedValue = lists:zip(lists:seq(1, length(Value)), Value),
+            IndexedValue = index_list(Value, 1),
             #{children => lists:map(fun map_bindings_nested/1, IndexedValue)};
         tuple ->
             List = tuple_to_list(Value),
@@ -255,6 +257,13 @@ map_bindings({Name, Value}) ->
             #{}
     end,
     maps:merge(V, H).
+
+index_list([], _) ->
+    [];
+index_list([H | T], Index) when is_list(T) ->
+    [{Index, H} | index_list(T, Index + 1)];
+index_list(ImproperList, Index) ->
+    [{Index, ImproperList}].
 
 map_bindings_nested({Name, Value}) ->
     map_bindings({iolist_to_binary(io_lib:format("~p", [Name])), Value}).
