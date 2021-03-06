@@ -55,6 +55,12 @@ The modified code may be automatically build before debugger is started. To set 
 
 Then, before debugging is started, modified files will be recompiled automatically.
 
+## Using this extension in Erlang Docker instance
+
+Clone this repo, and try it.
+- [RemoteHostDocker](https://github.com/pgourlain/vscode-remote-try-erlang)
+- [setup vscode for containers](https://code.visualstudio.com/docs/containers/overview) and [remote container documentation](https://code.visualstudio.com/docs/remote/containers)
+
 ## Available commands
 
 Support for Erlang tools, including rebar3, EUnit and Dialyzer
