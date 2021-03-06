@@ -57,8 +57,10 @@ Then, before debugging is started, modified files will be recompiled automatical
 
 ## Using this extension in Erlang Docker instance
 
-Clone this repo, and try it.
-- [RemoteHostDocker](https://github.com/pgourlain/vscode-remote-try-erlang)
+Clone this repo, and try it :
+- [vscode-remote-try-erlang](https://github.com/pgourlain/vscode-remote-try-erlang)
+
+For more informaiton about vscode and containers :
 - [setup vscode for containers](https://code.visualstudio.com/docs/containers/overview) and [remote container documentation](https://code.visualstudio.com/docs/remote/containers)
 
 ## Available commands
