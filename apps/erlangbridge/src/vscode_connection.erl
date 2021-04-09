@@ -101,7 +101,8 @@ decode_request(Data) ->
             Breakpoints),
         #{}; 
     {debugger_eval, Body} ->
-        [PidString, Sp, Expression] = string:tokens(Body, "\r\n"),
+        [PidString, Sp | Expression1] = string:tokens(Body, "\r\n"),
+        Expression = lists:concat(Expression1),
         Bindings = debugger_eval_bindings(PidString, Sp),
         ExpressionWithDot = case Expression =/= [] andalso lists:last(Expression) =:= $. of
             true -> Expression;

@@ -293,8 +293,32 @@ element_at_position(CurrentModule, FileSyntaxTree, Line, Column, LineContents) -
                 Column =< EndColumn -> {function_use, CurrentModule, Function, length(Args)};
                 true -> undefined
             end;
-        ({attribute, {L, StartColumn}, export, _Exports}, _) when L =:= Line andalso StartColumn =< Column ->
-            export;
+        ({attribute, {_L, _StartColumn}, export, _Exports}, _) ->
+            find_function_in_export(CurrentModule, LineContents, Column);
+        ({attribute, _, file, {HrlFile, _}}, _) ->
+            Size = byte_size(LineContents),
+            Size1 = Size - 14,
+            Size2 = Size - 18,
+            BaseName = list_to_binary(filename:basename(HrlFile)),
+            case LineContents of
+                <<"-include(\"", BaseName:Size1/binary, "\").\r">> when Column > 10, Column =< 10 + Size1 ->
+                    {hrl, HrlFile};
+                <<"-include_lib(\"", LongName:Size2/binary, "\").\r">> when Column > 14, Column =< 14 + Size2 ->
+                    case filename:split(binary_to_list(LongName)) of
+                        [LibName|Remain] ->
+                            case code:lib_dir(LibName) of
+                                {error,bad_name} -> undefined;
+                                AbsLib ->
+                                    NativeName = filename:nativename(HrlFile),
+                                    case filename:nativename(string:join([AbsLib|Remain], "/")) of
+                                        NativeName -> {hrl, HrlFile};
+                                        _ -> undefined
+                                    end
+                            end;
+                        _ -> undefined
+                    end;
+                _ -> undefined
+            end;
         ({call, {_, _}, {remote, {_, _}, {atom, {_, MStartColumn}, Module}, {atom, {L, StartColumn}, Function}}, Args}, _) when L =:= Line andalso MStartColumn =< Column ->
             MEndColumn = MStartColumn + length(atom_to_list(Module)), 
             EndColumn = StartColumn + length(atom_to_list(Module)) + 1 + length(atom_to_list(Function)),
@@ -342,13 +366,20 @@ element_at_position(CurrentModule, FileSyntaxTree, Line, Column, LineContents) -
                 Column < FieldEndColumn -> {field, Record, Field};
                 true -> undefined
             end;
+        ({record_index, {L, RecordSttartColumn}, Record, {atom, {L, FieldStartColumn}, Field}}, _) when L =:= Line andalso RecordSttartColumn =< Column ->
+            FieldEndColumn = FieldStartColumn + length(atom_to_list(Field)),
+            if
+                Column < FieldStartColumn -> {record, Record};
+                Column < FieldEndColumn -> {field, Record, Field};
+                true -> undefined
+            end;
         (_SyntaxTree, _File) ->
             undefined
     end,
     case find_macro_use(LineContents, Column) of
         undefined ->
             case find_in_file_syntax_tree(FileSyntaxTree, Fun) of
-                {export, _File} -> find_function_in_export(CurrentModule, LineContents, Column);
+                {{function_use, _, _, _} = Export, _File} -> Export;
                 {What, _File} -> What
             end;
         MacroUse -> MacroUse
@@ -399,6 +430,8 @@ find_element({module_use, Module}, _CurrentFileSyntaxTree, _CurrentFile) ->
         {attribute, {Line, Column}, _} -> {File, Line, Column};
         _ -> undefined
     end;
+find_element({hrl, HrlFile}, _CurrentFileSyntaxTree, _CurrentFile) ->
+    {HrlFile, 1, 1};
 find_element({function_use, Module, Function, Arity}, _CurrentFileSyntaxTree, _CurrentFile) ->
     {SyntaxTree, File} = lsp_syntax:module_syntax_tree(Module),
     case find_function(SyntaxTree, Function, Arity) of
@@ -529,7 +562,13 @@ find_record(FileSyntaxTree, Record) ->
 
 find_record_field(_Field, [], _CurrentFile) ->
     undefined;
+find_record_field(Field, [{typed_record_field, {record_field, _, {atom, {Line, Column}, Field}}, _} | _], CurrentFile) ->
+    {CurrentFile, Line, Column};
+find_record_field(Field, [{typed_record_field, {record_field, _, {atom, {Line, Column}, Field}, _}, _} | _], CurrentFile) ->
+    {CurrentFile, Line, Column};
 find_record_field(Field, [{record_field, _, {atom, {Line, Column}, Field}} | _], CurrentFile) ->
+    {CurrentFile, Line, Column};
+find_record_field(Field, [{record_field, _, {atom, {Line, Column}, Field}, _} | _], CurrentFile) ->
     {CurrentFile, Line, Column};
 find_record_field(Field, [_ | Tail], CurrentFile) ->
     find_record_field(Field, Tail, CurrentFile).

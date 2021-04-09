@@ -94,9 +94,9 @@ find_macro_definition(_Macro, _File, undefined) ->
     undefined;
 find_macro_definition(_Macro, _File, []) ->
     undefined;
-find_macro_definition(Macro, File, [{tree, attribute, _, {attribute, {atom, _, define}, [{var, Line, Macro}, _]}} | _]) ->
+find_macro_definition(Macro, File, [{tree, attribute, _, {attribute, {atom, _, define}, [{_, Line, Macro}, _]}} | _]) ->
     {File, Line, 1};
-find_macro_definition(Macro, File, [{tree, attribute, _, {attribute, {atom, _, define}, [{_, _, _, {_, {var, Line, Macro}, _}}, _]}} | _]) ->
+find_macro_definition(Macro, File, [{tree, attribute, _, {attribute, {atom, _, define}, [{_, _, _, {_, {_, Line, Macro}, _}}, _]}} | _]) ->
     {File, Line, 1};
 find_macro_definition(Macro, File, [_ | Tail]) ->
     find_macro_definition(Macro, File, Tail).
