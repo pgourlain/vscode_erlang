@@ -1,6 +1,6 @@
 # Change log
 
-## Version 0.7.1 (April 9, 2021)
+## Version 0.7.1 (April 10, 2021)
 * [#189](https://github.com/pgourlain/vscode_erlang/issues/189) : Hope go to definition support for record item.
 * [#146](https://github.com/pgourlain/vscode_erlang/issues/146) : Go to definition doesn't work from the export directive.
 * [#120](https://github.com/pgourlain/vscode_erlang/issues/120) : Support go to defiinition for Macro.

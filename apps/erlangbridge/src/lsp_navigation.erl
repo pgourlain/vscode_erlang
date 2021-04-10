@@ -411,7 +411,6 @@ resolve_include_file_path(File, IncludeFileName) ->
     Candidates = [filename:join(Path, IncludeFileName) || Path <- IncludePaths],
     case lists:filter(fun filelib:is_file/1, Candidates) of
         [First|_] -> First;
-        [First] -> First;
         _ -> IncludeFileName
     end.
 find_libdir(IncludeFileName) ->
