@@ -270,8 +270,12 @@ fold_in_file_syntax_tree(FileSyntaxTree, StartAcc, Fun) ->
         erl_syntax_lib:fold(Fun, Acc, TopLevelSyntaxTree)
         end, StartAcc, FileSyntaxTree).
 
-find_in_file_syntax_tree(FileSyntaxTree, Fun) ->
-    fold_in_file_syntax_tree(FileSyntaxTree, {undefined, undefined}, 
+find_in_file_syntax_tree(FileSyntaxTree, Fun1) ->
+    DefaultVal = case Fun1 of
+        {function, Fun} -> {{undefined, undefined}, undefined};
+        Fun -> {undefined, undefined}
+    end,
+    fold_in_file_syntax_tree(FileSyntaxTree, DefaultVal, 
         fun (SyntaxTree, {SingleAcc, CurrentFile}) ->
             UpdatedFile = case SyntaxTree of
                 {attribute, _, file, {FileName, _}} -> FileName;
@@ -280,6 +284,8 @@ find_in_file_syntax_tree(FileSyntaxTree, Fun) ->
             case SingleAcc of
                 undefined ->
                     {Fun(SyntaxTree, UpdatedFile), UpdatedFile};
+                {undefined, DefaultTree} ->
+                    {Fun(SyntaxTree, DefaultTree, UpdatedFile), UpdatedFile};
                 _ ->
                     {SingleAcc, CurrentFile}
             end
@@ -287,11 +293,13 @@ find_in_file_syntax_tree(FileSyntaxTree, Fun) ->
 
 element_at_position(CurrentModule, FileSyntaxTree, Line, Column, LineContents) ->
     Fun = fun
-        ({call, {L, StartColumn}, {atom, {L, StartColumn}, Function}, Args}, _) when L =:= Line andalso StartColumn =< Column ->
+        ({tuple, {L, StartTuple}, Args}, _) when L =:= Line, Column > StartTuple ->
+            find_definition_in_args(Args, Column, Line);
+        ({call, {L, StartColumn}, {atom, {L, StartColumn}, Function}, Args}, _) ->
             EndColumn = StartColumn + length(atom_to_list(Function)),
             if
-                Column =< EndColumn -> {function_use, CurrentModule, Function, length(Args)};
-                true -> undefined
+                L =:= Line, StartColumn =< Column, Column =< EndColumn -> {function_use, CurrentModule, Function, length(Args)};
+                true -> find_definition_in_args(Args, Column, Line)
             end;
         ({attribute, {_L, _StartColumn}, export, _Exports}, _) ->
             find_function_in_export(CurrentModule, LineContents, Column);
@@ -301,9 +309,9 @@ element_at_position(CurrentModule, FileSyntaxTree, Line, Column, LineContents) -
             Size2 = Size - 18,
             BaseName = list_to_binary(filename:basename(HrlFile)),
             case LineContents of
-                <<"-include(\"", BaseName:Size1/binary, "\").\r">> when Column > 10, Column =< 10 + Size1 ->
+                <<"-include(\"", BaseName:Size1/binary, "\").\r">> when Column > 10, Column =< 6 + Size1 ->
                     {hrl, HrlFile};
-                <<"-include_lib(\"", LongName:Size2/binary, "\").\r">> when Column > 14, Column =< 14 + Size2 ->
+                <<"-include_lib(\"", LongName:Size2/binary, "\").\r">> when Column > 14, Column =< 10 + Size2 ->
                     case filename:split(binary_to_list(LongName)) of
                         [LibName|Remain] ->
                             case code:lib_dir(LibName) of
@@ -319,14 +327,14 @@ element_at_position(CurrentModule, FileSyntaxTree, Line, Column, LineContents) -
                     end;
                 _ -> undefined
             end;
-        ({call, {_, _}, {remote, {_, _}, {atom, {_, MStartColumn}, Module}, {atom, {L, StartColumn}, Function}}, Args}, _) when L =:= Line andalso MStartColumn =< Column ->
+        ({call, {_, _}, {remote, {_, _}, {atom, {_, MStartColumn}, Module}, {atom, {L, StartColumn}, Function}}, Args}, _) ->
             MEndColumn = MStartColumn + length(atom_to_list(Module)), 
-            EndColumn = StartColumn + length(atom_to_list(Module)) + 1 + length(atom_to_list(Function)),
+            EndColumn = StartColumn + length(atom_to_list(Function)),
             if 
-                Column =< MEndColumn -> {module_use, Module};
+                L =:= Line, MStartColumn =< Column, Column =< MEndColumn -> {module_use, Module};
                 true -> if 
-                            Column =< EndColumn -> {function_use, Module, Function, length(Args)};
-                            true -> undefined
+                            L =:= Line, StartColumn =< Column, Column =< EndColumn -> {function_use, Module, Function, length(Args)};
+                            true -> find_definition_in_args(Args, Column, Line)
                         end
             end;
         ({'fun',{L, StartColumn}, {function, Function, Arity}}, _) when L =:= Line andalso StartColumn =< Column ->
@@ -347,17 +355,17 @@ element_at_position(CurrentModule, FileSyntaxTree, Line, Column, LineContents) -
                 Column =< EndColumn -> {variable, Variable, L, StartColumn};
                 true -> undefined
             end;
-        ({record, {L, StartColumn}, Record, Fields}, _) when L =:= Line andalso StartColumn =< Column ->
-            EndColumn = StartColumn + length(atom_to_list(Record)) + 1,
+        ({record, {L, StartColumn}, Record, Fields}, _) ->
+            EndColumn = StartColumn + length(atom_to_list(Record)),
             if
-                Column =< EndColumn -> {record, Record};
-                true -> find_record_field_use(Record, Fields, Column)
+                L =:= Line, StartColumn =< Column, Column =< EndColumn -> {record, Record};
+                true -> find_record_field_use(Record, Fields, Column, Line)
             end;
-        ({record, {L, StartColumn}, _, Record, Fields}, _) when L =:= Line andalso StartColumn =< Column ->
-            EndColumn = StartColumn + length(atom_to_list(Record)) + 1,
+        ({record, {L, StartColumn}, _, Record, Fields}, _) ->
+            EndColumn = StartColumn + length(atom_to_list(Record)),
             if
-                Column =< EndColumn -> {record, Record};
-                true -> find_record_field_use(Record, Fields, Column)
+                L =:= Line, StartColumn =< Column, Column =< EndColumn -> {record, Record};
+                true -> find_record_field_use(Record, Fields, Column, Line)
             end;
         ({record_field, {L, RecordSttartColumn}, _, Record, {atom, {L, FieldStartColumn}, Field}}, _) when L =:= Line andalso RecordSttartColumn =< Column ->
             FieldEndColumn = FieldStartColumn + length(atom_to_list(Field)),
@@ -399,6 +407,40 @@ find_macro_use(LineContents, Column) ->
             undefined
     end.
 
+find_definition_in_args([{atom, {ModLine, StartMod}, Module}, {atom, {ColumnLine, StartColumn}, Function}, ArityTuple | _] = [_ | Tail], Column, Line) ->
+    EndMod = StartMod + length(atom_to_list(Module)),
+    EndColumn = StartColumn + length(atom_to_list(Function)),
+    case Line of
+        ModLine when StartMod =< Column, Column =< EndMod ->
+            case parse_arity_tuple(ArityTuple, 0) of
+                false -> find_definition_in_args(Tail, Column, Line);
+                _Arity -> {module_use, Module}
+            end;
+        ColumnLine when StartColumn =< Column, Column =< EndColumn ->
+            case parse_arity_tuple(ArityTuple, 0) of
+                false -> find_definition_in_args(Tail, Column, Line);
+                Arity -> {function_use, Module, Function, Arity}
+            end;
+        _ -> find_definition_in_args(Tail, Column, Line)
+    end;
+find_definition_in_args([_ | Tail], Column, Line) when length(Tail) > 2 ->
+    find_definition_in_args(Tail, Column, Line);
+find_definition_in_args([{atom, {ModLine, StartMod}, Module}, {atom, {ColumnLine, StartColumn}, Function}], Column, Line)  ->
+    EndMod = StartMod + length(atom_to_list(Module)),
+    EndColumn = StartColumn + length(atom_to_list(Function)),
+    case Line of
+        ModLine when StartMod =< Column, Column =< EndMod ->
+            {module_use, Module};
+        ColumnLine when StartColumn =< Column, Column =< EndColumn ->
+            {function_use, Module, Function, 1}
+    end;
+find_definition_in_args(_, _Column, _Line) -> undefined.
+
+parse_arity_tuple({cons, _, _, ArityTuple}, Num) ->
+    parse_arity_tuple(ArityTuple, Num + 1);
+parse_arity_tuple({nil, _}, Num) -> Num;
+parse_arity_tuple(_, _) -> false.
+
 find_function_in_export(_CurrentModule, undefined, _Column) ->
     undefined;
 find_function_in_export(CurrentModule, LineContents, Column) ->
@@ -415,28 +457,34 @@ find_function_in_export(CurrentModule, LineContents, Column) ->
             undefined
     end.
 
-find_record_field_use(_Record, [], _Column) ->
+find_record_field_use(_Record, [], _Column, _Line) ->
     undefined;
-find_record_field_use(Record, [{record_field, _, {atom, {_, StartColumn}, Field}, _} | Tail], Column) ->
+find_record_field_use(Record, [{record_field, _, {atom, {L, StartColumn}, Field}, _} | Tail], Column, Line) ->
     EndColumn = StartColumn + length(atom_to_list(Field)),
     if
-        StartColumn =< Column andalso Column =< EndColumn -> {field, Record, Field};
-        true -> find_record_field_use(Record, Tail, Column)
+        L =:= Line, StartColumn =< Column, Column =< EndColumn -> {field, Record, Field};
+        true -> find_record_field_use(Record, Tail, Column, Line)
     end.
 
 find_element({module_use, Module}, _CurrentFileSyntaxTree, _CurrentFile) ->
-    {SyntaxTree, File} = lsp_syntax:module_syntax_tree(Module),
-    case find_module(SyntaxTree, Module) of
-        {attribute, {Line, Column}, _} -> {File, Line, Column};
-        _ -> undefined
+    case lsp_syntax:module_syntax_tree(Module) of
+        undefined -> undefined;
+        {SyntaxTree, File} ->
+            case find_module(SyntaxTree, Module) of
+                {attribute, {Line, Column}, _} -> {File, Line, Column};
+                _ -> undefined
+            end
     end;
 find_element({hrl, HrlFile}, _CurrentFileSyntaxTree, _CurrentFile) ->
     {HrlFile, 1, 1};
 find_element({function_use, Module, Function, Arity}, _CurrentFileSyntaxTree, _CurrentFile) ->
-    {SyntaxTree, File} = lsp_syntax:module_syntax_tree(Module),
-    case find_function(SyntaxTree, Function, Arity) of
-        {function, {Line, Column}, _Function, _Arity, _Clauses} -> {File, Line, Column};
-        _ -> undefined
+    case lsp_syntax:module_syntax_tree(Module) of
+        undefined -> undefined;
+        {SyntaxTree, File} ->
+            case find_function(SyntaxTree, Function, Arity) of
+                {function, {Line, Column}, _Function, _Arity, _Clauses} -> {File, Line, Column};
+                _ -> undefined
+            end
     end;
 find_element({record, Record}, CurrentFileSyntaxTree, _CurrentFile) ->
     case find_record(CurrentFileSyntaxTree, Record) of
@@ -534,15 +582,22 @@ get_function_arities(Module, Function) ->
     end.
 
 find_function(FileSyntaxTree, Function, Arity) ->
-    Fun = fun (SyntaxTree, _File) ->
+    Fun = fun (SyntaxTree, DefaultTree, _File) ->
         case SyntaxTree of 
-        {function, _Position, FoundFunction, FoundArity, _Clauses} when FoundFunction =:= Function andalso FoundArity =:= Arity ->
-            SyntaxTree;
+        {function, _Position, FoundFunction, FoundArity, _Clauses} when FoundFunction =:= Function ->
+            case FoundArity of
+                Arity -> {SyntaxTree, undefined};
+                _ -> {undefined, SyntaxTree}
+            end;
         _ ->
-            undefined
+            {undefined, DefaultTree}
         end
     end,
-    {SyntaxTree, _File} = find_in_file_syntax_tree(FileSyntaxTree, Fun),
+    {SyntaxTree1, _File} = find_in_file_syntax_tree(FileSyntaxTree, {function, Fun}),
+    case SyntaxTree1 of
+        {undefined, SyntaxTree} -> skip;
+        {SyntaxTree, _} -> skip
+    end,
     SyntaxTree.
 
 find_module(FileSyntaxTree, Module) ->
