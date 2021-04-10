@@ -1,10 +1,11 @@
 # Change log
 
 ## Version 0.7.1 (April 10, 2021)
-* [#189](https://github.com/pgourlain/vscode_erlang/issues/189) : Hope go to definition support for record item.
-* [#146](https://github.com/pgourlain/vscode_erlang/issues/146) : Go to definition doesn't work from the export directive.
-* [#120](https://github.com/pgourlain/vscode_erlang/issues/120) : Support go to defiinition for Macro.
-* [#191](https://github.com/pgourlain/vscode_erlang/issues/191) : Goto include and include_lib
+* [#189](https://github.com/pgourlain/vscode_erlang/issues/189) : Hope goto definition support for record item.
+* [#146](https://github.com/pgourlain/vscode_erlang/issues/146) : Goto definition doesn't work from the export directive.
+* [#120](https://github.com/pgourlain/vscode_erlang/issues/120) : Support goto definition for Macro.
+* [#191](https://github.com/pgourlain/vscode_erlang/issues/191) : Goto definition on include and include_lib
+* [#193](https://github.com/pgourlain/vscode_erlang/issues/193) : Support goto definition, on tuple, and so on..
 
 Thanks to
 * [shuying2244](https://github.com/shuying2244)
