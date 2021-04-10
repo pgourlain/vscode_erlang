@@ -304,29 +304,7 @@ element_at_position(CurrentModule, FileSyntaxTree, Line, Column, LineContents) -
         ({attribute, {_L, _StartColumn}, export, _Exports}, _) ->
             find_function_in_export(CurrentModule, LineContents, Column);
         ({attribute, _, file, {HrlFile, _}}, _) ->
-            Size = byte_size(LineContents),
-            Size1 = Size - 14,
-            Size2 = Size - 18,
-            BaseName = list_to_binary(filename:basename(HrlFile)),
-            case LineContents of
-                <<"-include(\"", BaseName:Size1/binary, "\").\r">> when Column > 10, Column =< 6 + Size1 ->
-                    {hrl, HrlFile};
-                <<"-include_lib(\"", LongName:Size2/binary, "\").\r">> when Column > 14, Column =< 10 + Size2 ->
-                    case filename:split(binary_to_list(LongName)) of
-                        [LibName|Remain] ->
-                            case code:lib_dir(LibName) of
-                                {error,bad_name} -> undefined;
-                                AbsLib ->
-                                    NativeName = filename:nativename(HrlFile),
-                                    case filename:nativename(string:join([AbsLib|Remain], "/")) of
-                                        NativeName -> {hrl, HrlFile};
-                                        _ -> undefined
-                                    end
-                            end;
-                        _ -> undefined
-                    end;
-                _ -> undefined
-            end;
+            process_hrl_filename(HrlFile, LineContents, Column);
         ({call, {_, _}, {remote, {_, _}, {atom, {_, MStartColumn}, Module}, {atom, {L, StartColumn}, Function}}, Args}, _) ->
             MEndColumn = MStartColumn + length(atom_to_list(Module)), 
             EndColumn = StartColumn + length(atom_to_list(Function)),
@@ -394,6 +372,59 @@ element_at_position(CurrentModule, FileSyntaxTree, Line, Column, LineContents) -
             
     end.
 
+process_hrl_filename(File, LineContents, Column) ->
+    MatchResult = find_include_filename(LineContents, Column),
+    case MatchResult of
+        {include, IncludeFileName, true} ->
+            %gen_lsp_server:lsp_log("attr hrl match include", []),
+            {hrl, resolve_include_file_path(File, IncludeFileName)};
+        {include_lib, IncludeFileName, true} ->
+            %gen_lsp_server:lsp_log("attr hrl match include_lib", []),            
+            find_libdir(IncludeFileName);
+        _ -> undefined
+    end.
+
+resolve_include_file_path(File, IncludeFileName) ->
+    IncludePaths = lsp_syntax:get_include_path(File),
+    Candidates = [filename:join(Path, IncludeFileName) || Path <- IncludePaths],
+    case lists:filter(fun filelib:is_file/1, Candidates) of
+        [First|_] -> First;
+        _ -> IncludeFileName
+    end.
+find_libdir(IncludeFileName) ->
+    case filename:split(IncludeFileName) of
+        [LibName|Remain] ->
+            case code:lib_dir(LibName) of
+                {error,bad_name} -> undefined;
+                AbsLib -> {hrl, filename:nativename(string:join([AbsLib|Remain], "/")) }
+            end;
+        _ -> undefined
+    end.
+
+find_include_filename(LineContents, Column) ->
+    % regular expression, intead of binaries matching. Because a comment can be exists at the end of include line
+    case re:run(LineContents, <<"^-include(?<alib>|_lib)\\(\"(?<grp>.+)\"\\)">>, [global,{capture, all_names}]) of
+        {match, Matches} ->
+            case lists:nth(1,Matches) of
+                [{_,0},{Pos,Len}] -> %include
+                    IncludeFile =binary_to_list(binary:part(LineContents, Pos, Len)), 
+                    %gen_lsp_server:lsp_log("include found: ~p", [IncludeFile]),
+                    {include, IncludeFile, is_between(Column, 1, 10+Pos+Len)};
+                [{_,_},{Pos,Len}] -> %include_lib
+                    IncludeFile = binary_to_list(binary:part(LineContents, Pos, Len)),
+                    %gen_lsp_server:lsp_log("include_lib found: ~p", [IncludeFile]),
+                    {include_lib, IncludeFile, is_between(Column, 1, 14+Pos+Len)};                  
+                _ -> 
+                    undefined
+            end;
+        _ -> undefined
+    end.
+
+is_between(C, Start, End) ->
+    case C of
+    X when X >= Start andalso X =< End -> true;
+    _ -> false
+    end.
 find_macro_use(undefined, _Column) ->
     undefined;
 find_macro_use(LineContents, Column) ->

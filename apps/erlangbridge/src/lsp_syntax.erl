@@ -1,6 +1,7 @@
 -module(lsp_syntax).
 
--export([file_syntax_tree/1, module_syntax_tree/1, parse_config_file/2, parse_source_file/2, validate_parsed_source_file/1, find_macro_definition/2]).
+-export([file_syntax_tree/1, module_syntax_tree/1, parse_config_file/2, parse_source_file/2, 
+    validate_parsed_source_file/1, find_macro_definition/2, get_include_path/1]).
 
 parse_source_file(File, ContentsFile) ->
     case epp_parse_file(ContentsFile, get_include_path(File), get_define_from_rebar_config(File)) of
