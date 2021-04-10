@@ -1,5 +1,22 @@
 # Change log
 
+## Version 0.7.1 (April 9, 2021)
+* [#189](https://github.com/pgourlain/vscode_erlang/issues/189) : Hope go to definition support for record item.
+* [#146](https://github.com/pgourlain/vscode_erlang/issues/146) : Go to definition doesn't work from the export directive.
+* [#120](https://github.com/pgourlain/vscode_erlang/issues/120) : Support go to defiinition for Macro.
+* [#191](https://github.com/pgourlain/vscode_erlang/issues/191) : Goto include and include_lib
+
+Thanks to
+* [shuying2244](https://github.com/shuying2244)
+
+
+## Version 0.7.0 (March 6, 2021)
+* [#184](https://github.com/pgourlain/vscode_erlang/issues/188) :  Fix improper list handling on debugger mapping.
+
+Thanks to
+* [Zsolt Laky](https://github.com/zsoci)
+
+
 ## Version 0.6.9 (January 25, 2021)
 * [#184](https://github.com/pgourlain/vscode_erlang/issues/184) : Spaces Are Not Escaped in the Path to Rebar3. On Windows, we must use double quotes instead of
 single quotes.
