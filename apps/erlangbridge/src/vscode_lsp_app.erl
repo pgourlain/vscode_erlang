@@ -8,7 +8,7 @@
 get_port() ->
     case init:get_argument(vscode_port) of
     {ok, [[P]]} -> P;
-    _ -> 0
+    _ -> "0"
     end.
     
 

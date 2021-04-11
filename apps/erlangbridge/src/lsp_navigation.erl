@@ -3,10 +3,20 @@
 -export([goto_definition/3, hover_info/3, function_description/2, function_description/3, references_info/3, codelens_info/1,
     find_function_with_line/2, get_function_arities/2, find_record/2, symbol_info/2]).
 
+-define(LOG(S),
+	begin
+        gen_lsp_server:lsp_log("~p", [S])
+	end).
+-define(LOG(Fmt, Args),
+	begin
+        gen_lsp_server:lsp_log(Fmt, Args)
+	end).
+
 goto_definition(File, Line, Column) ->
     FileSyntaxTree = lsp_syntax:file_syntax_tree(File),
     Module = list_to_atom(filename:rootname(filename:basename(File))),
     What = element_at_position(Module, FileSyntaxTree, Line, Column, file_line(File, Line)),
+    ?LOG("element_at_position : ~p", [What]),
     case find_element(What, FileSyntaxTree, File) of
         {FoundFile, FoundLine, FoundColumn} ->
             #{
