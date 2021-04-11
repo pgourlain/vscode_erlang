@@ -542,6 +542,8 @@ find_element({variable, Variable, Line, Column}, CurrentFileSyntaxTree, CurrentF
                         _ -> FunClauseAcc
                     end
                 end, SingleAcc, Clauses);
+            {function, _, _, _, ClausesList} ->
+                matched_fun_clause(lists:reverse(ClausesList), Line);
             _ ->
                 SingleAcc
         end
@@ -562,6 +564,10 @@ find_element({macro_use, Macro}, _CurrentFileSyntaxTree, CurrentFile) ->
     lsp_syntax:find_macro_definition(Macro, CurrentFile);
 find_element(_, _CurrentFileSyntaxTree, _CurrentFile) ->
     undefined.
+
+matched_fun_clause([{clause, {ClauseLine, _}, _, _, _} = Clause | _], Line) when ClauseLine =< Line -> [Clause];
+matched_fun_clause([_ | Tail], Line) -> matched_fun_clause(Tail, Line);
+matched_fun_clause([], _line) -> [].
 
 find_function_with_line(FileSyntaxTree, Line) ->
     AllFunctionsInReverseOrder = lists:foldl(fun (TopLevelSyntaxTree, Acc) ->
