@@ -294,12 +294,12 @@ find_in_file_syntax_tree(FileSyntaxTree, Fun1) ->
 element_at_position(CurrentModule, FileSyntaxTree, Line, Column, LineContents) ->
     Fun = fun
         ({tuple, {L, StartTuple}, Args}, _) when L =:= Line, Column > StartTuple ->
-            find_definition_in_args(Args, Column, Line);
+            find_definition_in_args(Args, Column, Line, CurrentModule);
         ({call, {L, StartColumn}, {atom, {L, StartColumn}, Function}, Args}, _) ->
             EndColumn = StartColumn + length(atom_to_list(Function)),
             if
                 L =:= Line, StartColumn =< Column, Column =< EndColumn -> {function_use, CurrentModule, Function, length(Args)};
-                true -> find_definition_in_args(Args, Column, Line)
+                true -> find_definition_in_args(Args, Column, Line, CurrentModule)
             end;
         ({attribute, {_L, _StartColumn}, export, _Exports}, _) ->
             find_function_in_export(CurrentModule, LineContents, Column);
@@ -312,7 +312,7 @@ element_at_position(CurrentModule, FileSyntaxTree, Line, Column, LineContents) -
                 L =:= Line, MStartColumn =< Column, Column =< MEndColumn -> {module_use, Module};
                 true -> if 
                             L =:= Line, StartColumn =< Column, Column =< EndColumn -> {function_use, Module, Function, length(Args)};
-                            true -> find_definition_in_args(Args, Column, Line)
+                            true -> find_definition_in_args(Args, Column, Line, CurrentModule)
                         end
             end;
         ({'fun',{L, StartColumn}, {function, Function, Arity}}, _) when L =:= Line andalso StartColumn =< Column ->
@@ -438,35 +438,35 @@ find_macro_use(LineContents, Column) ->
             undefined
     end.
 
-find_definition_in_args([{atom, {ModLine, StartMod}, Module}, {atom, {ColumnLine, StartColumn}, Function}, ArityTuple | _] = [_ | Tail], Column, Line) ->
+find_definition_in_args([{atom, {ModLine, StartMod}, Module}, {atom, {ColumnLine, StartColumn}, Function}, ArityTuple | _] = [_ | Tail], Column, Line, CurrentModule) ->
     EndMod = StartMod + length(atom_to_list(Module)),
     EndColumn = StartColumn + length(atom_to_list(Function)),
     case Line of
-        ModLine when StartMod =< Column, Column =< EndMod ->
+        ModLine when StartMod =< Column, Column =< EndMod, Module =/= CurrentModule ->
             case parse_arity_tuple(ArityTuple, 0) of
-                false -> find_definition_in_args(Tail, Column, Line);
+                false -> find_definition_in_args(Tail, Column, Line, CurrentModule);
                 _Arity -> {module_use, Module}
             end;
         ColumnLine when StartColumn =< Column, Column =< EndColumn ->
             case parse_arity_tuple(ArityTuple, 0) of
-                false -> find_definition_in_args(Tail, Column, Line);
+                false -> find_definition_in_args(Tail, Column, Line, CurrentModule);
                 Arity -> {function_use, Module, Function, Arity}
             end;
-        _ -> find_definition_in_args(Tail, Column, Line)
+        _ -> find_definition_in_args(Tail, Column, Line, CurrentModule)
     end;
-find_definition_in_args([_ | Tail], Column, Line) when length(Tail) > 2 ->
-    find_definition_in_args(Tail, Column, Line);
-find_definition_in_args([{atom, {ModLine, StartMod}, Module}, {atom, {ColumnLine, StartColumn}, Function}], Column, Line)  ->
+find_definition_in_args([_ | Tail], Column, Line, CurrentModule) when length(Tail) > 2 ->
+    find_definition_in_args(Tail, Column, Line, CurrentModule);
+find_definition_in_args([{atom, {ModLine, StartMod}, Module}, {atom, {ColumnLine, StartColumn}, Function}], Column, Line, CurrentModule)  ->
     EndMod = StartMod + length(atom_to_list(Module)),
     EndColumn = StartColumn + length(atom_to_list(Function)),
     case Line of
-        ModLine when StartMod =< Column, Column =< EndMod ->
+        ModLine when StartMod =< Column, Column =< EndMod, Module =/= CurrentModule ->
             {module_use, Module};
         ColumnLine when StartColumn =< Column, Column =< EndColumn ->
             {function_use, Module, Function, 1};
         _ -> undefined
     end;
-find_definition_in_args(_, _Column, _Line) -> undefined.
+find_definition_in_args(_, _Column, _Line, _CurrentModule) -> undefined.
 
 parse_arity_tuple({cons, _, _, ArityTuple}, Num) ->
     parse_arity_tuple(ArityTuple, Num + 1);
