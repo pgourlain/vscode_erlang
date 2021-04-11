@@ -311,7 +311,7 @@ element_at_position(CurrentModule, FileSyntaxTree, Line, Column, LineContents) -
             if 
                 L =:= Line, MStartColumn =< Column, Column =< MEndColumn -> {module_use, Module};
                 true -> if 
-                            L =:= Line, StartColumn =< Column, Column =< EndColumn -> {function_use, Module, Function, length(Args)};
+                            L =:= Line, StartColumn =< Column, Column =< EndColumn -> {function_use, Module, Function, length(Args), Args};
                             true -> find_definition_in_args(Args, Column, Line, CurrentModule)
                         end
             end;
@@ -471,6 +471,7 @@ find_definition_in_args(_, _Column, _Line, _CurrentModule) -> undefined.
 parse_arity_tuple({cons, _, _, ArityTuple}, Num) ->
     parse_arity_tuple(ArityTuple, Num + 1);
 parse_arity_tuple({nil, _}, Num) -> Num;
+parse_arity_tuple({var, _, _}, _Num) -> 1;
 parse_arity_tuple(_, _) -> false.
 
 find_function_in_export(_CurrentModule, undefined, _Column) ->
@@ -515,6 +516,19 @@ find_element({function_use, Module, Function, Arity}, _CurrentFileSyntaxTree, _C
         {SyntaxTree, File} ->
             case find_function(SyntaxTree, Function, Arity) of
                 {function, {Line, Column}, _Function, _Arity, _Clauses} -> {File, Line, Column};
+                _ -> undefined
+            end
+    end;
+find_element({function_use, Module, Function, Arity, Args}, _CurrentFileSyntaxTree, _CurrentFile) ->
+    case lsp_syntax:module_syntax_tree(Module) of
+        undefined -> undefined;
+        {SyntaxTree, File} ->
+            case find_function(SyntaxTree, Function, Arity) of
+                {function, {Line, Column}, _Function, _Arity, Clauses} ->
+                    case find_clause_location(Clauses, Args) of
+                        false -> {File, Line, Column};
+                        {ClauseLine, ClauseColumn} -> {File, ClauseLine, ClauseColumn}
+                    end;
                 _ -> undefined
             end
     end;
@@ -568,6 +582,18 @@ find_element(_, _CurrentFileSyntaxTree, _CurrentFile) ->
 matched_fun_clause([{clause, {ClauseLine, _}, _, _, _} = Clause | _], Line) when ClauseLine =< Line -> [Clause];
 matched_fun_clause([_ | Tail], Line) -> matched_fun_clause(Tail, Line);
 matched_fun_clause([], _line) -> [].
+
+find_clause_location([{clause, Location, ClauseArgs, _, _} | TailClauses], Args) ->
+    case comparison_args(ClauseArgs, Args) of
+        false -> find_clause_location(TailClauses, Args);
+        true -> Location
+    end;
+find_clause_location([], _Args) -> false.
+
+comparison_args([{Type, _, Value} | T1], [{Type, _, Value} | T2]) ->
+    comparison_args(T1, T2);
+comparison_args([], []) -> true;
+comparison_args(_, _) -> false.
 
 find_function_with_line(FileSyntaxTree, Line) ->
     AllFunctionsInReverseOrder = lists:foldl(fun (TopLevelSyntaxTree, Acc) ->
