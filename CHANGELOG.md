@@ -1,5 +1,8 @@
 # Change log
 
+## Version 0.7.2 (April 11, 2021)
+ * Quick fix on unhandled case in goto definition feature
+
 ## Version 0.7.1 (April 10, 2021)
 * [#189](https://github.com/pgourlain/vscode_erlang/issues/189) : Hope goto definition support for record item.
 * [#146](https://github.com/pgourlain/vscode_erlang/issues/146) : Goto definition doesn't work from the export directive.

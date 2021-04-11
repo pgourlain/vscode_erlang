@@ -463,7 +463,8 @@ find_definition_in_args([{atom, {ModLine, StartMod}, Module}, {atom, {ColumnLine
         ModLine when StartMod =< Column, Column =< EndMod ->
             {module_use, Module};
         ColumnLine when StartColumn =< Column, Column =< EndColumn ->
-            {function_use, Module, Function, 1}
+            {function_use, Module, Function, 1};
+        _ -> undefined
     end;
 find_definition_in_args(_, _Column, _Line) -> undefined.
 
