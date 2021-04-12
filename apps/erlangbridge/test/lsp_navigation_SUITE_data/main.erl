@@ -17,3 +17,9 @@ start_local() ->
 
 functionA(_)->
     ok.
+
+-define(GOODS_ID, 3).
+
+start() ->
+    data_goods:get(?GOODS_ID),
+    ok.
