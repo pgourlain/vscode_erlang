@@ -8,11 +8,14 @@ const path = require('path');
 const config = {
   target: 'node', // vscode extensions run in a Node.js-context 📖 -> https://webpack.js.org/configuration/node/
 
-  entry: './lib/extension.ts', // the entry point of this extension, 📖 -> https://webpack.js.org/configuration/entry-context/
+  entry: {
+        extension: './lib/extension.ts', // the entry point of this extension, 📖 -> https://webpack.js.org/configuration/entry-context/
+        erlangDebug: './lib/erlangDebug.ts'
+    },
   output: {
     // the bundle is stored in the 'dist' folder (check package.json), 📖 -> https://webpack.js.org/configuration/output/
-    path: path.resolve(__dirname, 'dist'),
-    filename: 'extension.js',
+    path: path.resolve(__dirname, 'out/lib'),
+    filename: '[name].js',
     libraryTarget: 'commonjs2',
     devtoolModuleFilenameTemplate: '../[resource-path]'
   },
