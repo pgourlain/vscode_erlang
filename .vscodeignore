@@ -12,3 +12,4 @@ vsc-extension-quickstart.md
 **/sample_forms.txt
 syntaxes/test/**
 _build/**
+apps/erlangbridge/test/**

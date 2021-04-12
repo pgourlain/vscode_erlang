@@ -18,6 +18,16 @@ Build the extension and create a VSIX package for manual distributing:
 
 In _"Run"_ sidbar choose _"Launch Extension"_.
 
+
+## Run unit tests
+
+In _"Terminal"_ menu choose _"New Terminal"_.
+then
+
+```bash
+./rebar3 ct
+```
+
 ## Language syntax file
 
 See [syntaxes/README.md](syntaxes/README.md).
