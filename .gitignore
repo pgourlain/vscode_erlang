@@ -8,3 +8,5 @@ rebar.lock
 _build/
 /syntaxes/*.yaml
 /syntaxes/*.yaml-tmLanguage
+dist
+
