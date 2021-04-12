@@ -98,7 +98,7 @@
 			{
 				"language": "erlang",
 				"scopeName": "source.erlang",
-				"path": "./syntaxes/erlang.tmLanguage"
+				"path": "./grammar/erlang.plist"
 			}
 		],
 		"commands": [
