@@ -111,13 +111,15 @@ dotestfile(_FilePath, []) ->
     ok.
 
 navigation_datatests() ->
-    % Format : [{InputFile, [{Line, Column, ResultLine, ResultColumn} ,...]} ,...]
+    % Format : [{InputFile, [{Line, Column, ResultLine, ResultColumn, ResultModule} ,...]} ,...]
     % Line and Column are should be one index based
     % ResultLine and ResultColumn should be zero index based
     [{"main.erl",[
         {16, 10, 17, 0},
         {8, 28, 3, 6},
-        {6, 37, 3, 0, "mod_test.erl"}
+        {6, 37, 3, 0, "mod_test.erl"},
+        {24, 18, 7, 0, "data_goods.erl"},
+        {24, 24, 20, 0}
         ]
     }
     ].
