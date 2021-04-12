@@ -304,12 +304,12 @@ find_in_file_syntax_tree(FileSyntaxTree, Fun1) ->
 element_at_position(CurrentModule, FileSyntaxTree, Line, Column, LineContents) ->
     Fun = fun
         ({tuple, {L, StartTuple}, Args}, _) when L =:= Line, Column > StartTuple ->
-            find_definition_in_args(Args, Column, Line);
+            find_definition_in_args(Args, Column, Line, CurrentModule);
         ({call, {L, StartColumn}, {atom, {L, StartColumn}, Function}, Args}, _) ->
             EndColumn = StartColumn + length(atom_to_list(Function)),
             if
                 L =:= Line, StartColumn =< Column, Column =< EndColumn -> {function_use, CurrentModule, Function, length(Args)};
-                true -> find_definition_in_args(Args, Column, Line)
+                true -> find_definition_in_args(Args, Column, Line, CurrentModule)
             end;
         ({attribute, {_L, _StartColumn}, export, _Exports}, _) ->
             find_function_in_export(CurrentModule, LineContents, Column);
@@ -321,8 +321,8 @@ element_at_position(CurrentModule, FileSyntaxTree, Line, Column, LineContents) -
             if 
                 L =:= Line, MStartColumn =< Column, Column =< MEndColumn -> {module_use, Module};
                 true -> if 
-                            L =:= Line, StartColumn =< Column, Column =< EndColumn -> {function_use, Module, Function, length(Args)};
-                            true -> find_definition_in_args(Args, Column, Line)
+                            L =:= Line, StartColumn =< Column, Column =< EndColumn -> {function_use, Module, Function, length(Args), Args};
+                            true -> find_definition_in_args(Args, Column, Line, CurrentModule)
                         end
             end;
         ({'fun',{L, StartColumn}, {function, Function, Arity}}, _) when L =:= Line andalso StartColumn =< Column ->
@@ -448,39 +448,40 @@ find_macro_use(LineContents, Column) ->
             undefined
     end.
 
-find_definition_in_args([{atom, {ModLine, StartMod}, Module}, {atom, {ColumnLine, StartColumn}, Function}, ArityTuple | _] = [_ | Tail], Column, Line) ->
+find_definition_in_args([{atom, {ModLine, StartMod}, Module}, {atom, {ColumnLine, StartColumn}, Function}, ArityTuple | _] = [_ | Tail], Column, Line, CurrentModule) ->
     EndMod = StartMod + length(atom_to_list(Module)),
     EndColumn = StartColumn + length(atom_to_list(Function)),
     case Line of
-        ModLine when StartMod =< Column, Column =< EndMod ->
+        ModLine when StartMod =< Column, Column =< EndMod, Module =/= CurrentModule ->
             case parse_arity_tuple(ArityTuple, 0) of
-                false -> find_definition_in_args(Tail, Column, Line);
+                false -> find_definition_in_args(Tail, Column, Line, CurrentModule);
                 _Arity -> {module_use, Module}
             end;
         ColumnLine when StartColumn =< Column, Column =< EndColumn ->
             case parse_arity_tuple(ArityTuple, 0) of
-                false -> find_definition_in_args(Tail, Column, Line);
+                false -> find_definition_in_args(Tail, Column, Line, CurrentModule);
                 Arity -> {function_use, Module, Function, Arity}
             end;
-        _ -> find_definition_in_args(Tail, Column, Line)
+        _ -> find_definition_in_args(Tail, Column, Line, CurrentModule)
     end;
-find_definition_in_args([_ | Tail], Column, Line) when length(Tail) > 2 ->
-    find_definition_in_args(Tail, Column, Line);
-find_definition_in_args([{atom, {ModLine, StartMod}, Module}, {atom, {ColumnLine, StartColumn}, Function}], Column, Line)  ->
+find_definition_in_args([_ | Tail], Column, Line, CurrentModule) when length(Tail) > 2 ->
+    find_definition_in_args(Tail, Column, Line, CurrentModule);
+find_definition_in_args([{atom, {ModLine, StartMod}, Module}, {atom, {ColumnLine, StartColumn}, Function}], Column, Line, CurrentModule)  ->
     EndMod = StartMod + length(atom_to_list(Module)),
     EndColumn = StartColumn + length(atom_to_list(Function)),
     case Line of
-        ModLine when StartMod =< Column, Column =< EndMod ->
+        ModLine when StartMod =< Column, Column =< EndMod, Module =/= CurrentModule ->
             {module_use, Module};
         ColumnLine when StartColumn =< Column, Column =< EndColumn ->
             {function_use, Module, Function, 1};
         _ -> undefined
     end;
-find_definition_in_args(_, _Column, _Line) -> undefined.
+find_definition_in_args(_, _Column, _Line, _CurrentModule) -> undefined.
 
 parse_arity_tuple({cons, _, _, ArityTuple}, Num) ->
     parse_arity_tuple(ArityTuple, Num + 1);
 parse_arity_tuple({nil, _}, Num) -> Num;
+parse_arity_tuple({var, _, _}, _Num) -> 1;
 parse_arity_tuple(_, _) -> false.
 
 find_function_in_export(_CurrentModule, undefined, _Column) ->
@@ -528,6 +529,19 @@ find_element({function_use, Module, Function, Arity}, _CurrentFileSyntaxTree, _C
                 _ -> undefined
             end
     end;
+find_element({function_use, Module, Function, Arity, Args}, _CurrentFileSyntaxTree, _CurrentFile) ->
+    case lsp_syntax:module_syntax_tree(Module) of
+        undefined -> undefined;
+        {SyntaxTree, File} ->
+            case find_function(SyntaxTree, Function, Arity) of
+                {function, {Line, Column}, _Function, _Arity, Clauses} ->
+                    case find_clause_location(Clauses, Args) of
+                        false -> {File, Line, Column};
+                        {ClauseLine, ClauseColumn} -> {File, ClauseLine, ClauseColumn}
+                    end;
+                _ -> undefined
+            end
+    end;
 find_element({record, Record}, CurrentFileSyntaxTree, _CurrentFile) ->
     case find_record(CurrentFileSyntaxTree, Record) of
         {{attribute, {Line, Column}, record, {Record, _}}, File} -> {File, Line, Column};
@@ -552,6 +566,8 @@ find_element({variable, Variable, Line, Column}, CurrentFileSyntaxTree, CurrentF
                         _ -> FunClauseAcc
                     end
                 end, SingleAcc, Clauses);
+            {function, _, _, _, ClausesList} ->
+                matched_fun_clause(lists:reverse(ClausesList), Line);
             _ ->
                 SingleAcc
         end
@@ -572,6 +588,22 @@ find_element({macro_use, Macro}, _CurrentFileSyntaxTree, CurrentFile) ->
     lsp_syntax:find_macro_definition(Macro, CurrentFile);
 find_element(_, _CurrentFileSyntaxTree, _CurrentFile) ->
     undefined.
+
+matched_fun_clause([{clause, {ClauseLine, _}, _, _, _} = Clause | _], Line) when ClauseLine =< Line -> [Clause];
+matched_fun_clause([_ | Tail], Line) -> matched_fun_clause(Tail, Line);
+matched_fun_clause([], _line) -> [].
+
+find_clause_location([{clause, Location, ClauseArgs, _, _} | TailClauses], Args) ->
+    case comparison_args(ClauseArgs, Args) of
+        false -> find_clause_location(TailClauses, Args);
+        true -> Location
+    end;
+find_clause_location([], _Args) -> false.
+
+comparison_args([{Type, _, Value} | T1], [{Type, _, Value} | T2]) ->
+    comparison_args(T1, T2);
+comparison_args([], []) -> true;
+comparison_args(_, _) -> false.
 
 find_function_with_line(FileSyntaxTree, Line) ->
     AllFunctionsInReverseOrder = lists:foldl(fun (TopLevelSyntaxTree, Acc) ->
