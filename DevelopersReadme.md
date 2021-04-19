@@ -28,6 +28,11 @@ then
 ./rebar3 ct
 ```
 
+## build package
+
+- vsce package : 'vscode:prepublish' is executed
+
+
 ## Language syntax file
 
 See [syntaxes/README.md](syntaxes/README.md).

@@ -1,7 +1,7 @@
 # Change log
 
 ## Version 0.7.3 (April 19, 2021)
- * Use webpack to build extension
+ * [#200](https://github.com/pgourlain/vscode_erlang/issues/200) : Use webpack to build extension
  * [#199](https://github.com/pgourlain/vscode_erlang/issues/199) : Add unit tests ossature and navigation unit tests. see DevelopersReadme.md for more details
 
 ## Version 0.7.2 (April 11, 2021)
