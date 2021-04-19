@@ -13,3 +13,8 @@ vsc-extension-quickstart.md
 syntaxes/test/**
 _build/**
 apps/erlangbridge/test/**
+.vscode
+node_modules
+src/
+tsconfig.json
+webpack.config.js
