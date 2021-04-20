@@ -1,5 +1,8 @@
 # Change log
 
+## Version 0.7.4 (April 20, 2021)
+* Fix casing file erlang.plist
+
 ## Version 0.7.3 (April 19, 2021)
  * [#200](https://github.com/pgourlain/vscode_erlang/issues/200) : Use webpack to build extension
  * [#199](https://github.com/pgourlain/vscode_erlang/issues/199) : Add unit tests ossature and navigation unit tests. see DevelopersReadme.md for more details
