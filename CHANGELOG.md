@@ -1,5 +1,8 @@
 # Change log
 
+## Version 0.7.5 (April 21, 2021)
+* Fix debugger launch
+
 ## Version 0.7.4 (April 20, 2021)
 * Fix casing file erlang.plist
 
