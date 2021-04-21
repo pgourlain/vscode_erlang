@@ -8,11 +8,9 @@ import { ErlangShellForDebugging, LaunchRequestArguments, FunctionBreakpoint } f
 import { ILogOutput } from './GenericShell';
 import * as path from 'path';
 import * as fs from 'fs';
-import { EventEmitter } from 'events'
-import * as http from 'http';
-import * as erlang from './ErlangShell';
-import { erlangBridgePath } from './erlangConnection';
+import { erlangBridgePath, setExtensionPath } from './erlangConnection';
 import { ErlangDebugConnection } from './erlangDebugConnection';
+
 
 interface DebugVariable {
 	name: string;
@@ -36,7 +34,7 @@ class ConditionalBreakpoint {
 /** this class is entry point of debugger  */
 export class ErlangDebugSession extends DebugSession implements ILogOutput {
 
-	protected threadIDs: { [processName: string]: {thid: number, stack:any, vscode: boolean}};
+	protected threadIDs: { [processName: string]: { thid: number, stack: any, vscode: boolean } };
 	erlDebugger: ErlangShellForDebugging;
 	erlangConnection: ErlangDebugConnection;
 	quit: boolean;
@@ -78,11 +76,23 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 		};
 		this.sendResponse(response);
 	}
-		
+
 	protected dispatchRequest(request: DebugProtocol.Request): void {
 		//uncomment to show the calling workflow of debuging session  
 		//this.debug(`dispatch request: ${request.command}(${JSON.stringify(request.arguments) })\r\n`);
 		super.dispatchRequest(request);
+	}
+
+
+	resolveExtensionPath(): void {
+		//due to webPack setExtensionPath is not shared with extension bundle
+		if (process.argv?.length > 0) {
+			if (!path.isAbsolute(erlangBridgePath)) {
+				//process.argv[1] contains full path of erlangDebug.js, so extensionPath is 2 level up
+				const extPath = path.join(path.dirname(process.argv[1]), "..", "..");
+				setExtensionPath(extPath);
+			}
+		}
 	}
 
 	protected initializeRequest(response: DebugProtocol.InitializeResponse, args: DebugProtocol.InitializeRequestArguments): void {
@@ -91,6 +101,9 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 		this.erlDebugger.on('close', (exitCode) => {
 			this.quitEvent(exitCode);
 		})
+
+		this.resolveExtensionPath();
+
 		this.erlangConnection = new ErlangDebugConnection(this);
 		this.erlangConnection.on("listen", (msg) => this.onStartListening(msg));
 		this.erlangConnection.on("new_module", (arg) => this.onNewModule(arg));
@@ -120,11 +133,11 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 	protected launchRequest(response: DebugProtocol.LaunchResponse, args: LaunchRequestArguments): void {
 		//store launch arguments in order to start erlang when configuration is done
 		if (!args.erlpath) {
-				args.erlpath = "erl";
+			args.erlpath = "erl";
 		} else if (!fs.existsSync(args.erlpath)) {
-				this.log("The specified erlPath in your launch.json is invalid. Please fix !")
-				this.sendErrorResponse(response, 3000, `The specified erlPath is invalid : check your launch configuration.`);
-				return;
+			this.log("The specified erlPath in your launch.json is invalid. Please fix !")
+			this.sendErrorResponse(response, 3000, `The specified erlPath is invalid : check your launch configuration.`);
+			return;
 		}
 		if (typeof args.addEbinsToCodepath === "undefined") {
 			args.addEbinsToCodepath = true;
@@ -133,13 +146,14 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 		if (this._LaunchArguments.verbose) {
 			this.log(`debugger launchRequest arguments : ${JSON.stringify(args)}`);
 		}
+		// Based on JS output path, not TS path
 		this.erlangConnection.Start(this._LaunchArguments.verbose).then(port => {
 			//this.debug("Local webserver for erlang is started");
 			this._port = port;
 			//Initialize the workflow only when webserver is started
 			this.sendEvent(new InitializedEvent());
 			this.sendResponse(response);
-		}).catch(reason =>{
+		}).catch(reason => {
 			this.sendErrorResponse(response, 3000, `Launching debugger throw an error : ${reason}`);
 		});
 	}
@@ -156,11 +170,11 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 		var bridgeBinPath = path.normalize(path.join(erlangBridgePath, "..", "ebin"))
 		this.erlDebugger.Start(args.erlpath, args.cwd, this._port, bridgeBinPath, args).then(r => {
 			this.sendResponse(response);
-		}).catch(reason =>{
+		}).catch(reason => {
 			this.sendErrorResponse(response, 3000, `Launching application throw an error : ${reason}`);
 		});
 	}
-		
+
 
 	protected disconnectRequest(response: DebugProtocol.DisconnectResponse, args: DebugProtocol.DisconnectArguments): void {
 		//this.debug("disconnectRequest");
@@ -222,7 +236,7 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 		this.sendResponse(response);
 	}
 
-	private _setAllBreakpoints(moduleName : string) {
+	private _setAllBreakpoints(moduleName: string) {
 		let modulebreakpoints = this._breakPoints.filter((bp) => bp.source.name == moduleName);
 		let moduleFunctionBreakpoints = this._functionBreakPoints.has(moduleName) ? this._functionBreakPoints.get(moduleName) : [];
 		if (this.erlangConnection.isConnected) {
@@ -234,7 +248,7 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 		}
 	}
 
-	private _updateBreakPoints(moduleName : string, bps : Breakpoint[]) {
+	private _updateBreakPoints(moduleName: string, bps: Breakpoint[]) {
 		let newBps = this._breakPoints.filter((bp) => bp.source.name != moduleName);
 		this._breakPoints = newBps.concat(bps);
 	}
@@ -276,7 +290,7 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 		this.sendResponse(response);
 	}
 
-	private doProcessUserRequest(threadId : number, response: DebugProtocol.Response, fn: (pid : string) => Promise<boolean>) {
+	private doProcessUserRequest(threadId: number, response: DebugProtocol.Response, fn: (pid: string) => Promise<boolean>) {
 		this.sendResponse(response);
 		fn(this.thread_id_to_pid(threadId)).then(
 			() => {
@@ -291,23 +305,23 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 
 	protected continueRequest(response: DebugProtocol.ContinueResponse, args: DebugProtocol.ContinueArguments): void {
 		response.body = { allThreadsContinued: false };
-		this.doProcessUserRequest(args.threadId, response, (pid:string) => this.erlangConnection.debuggerContinue(pid));
+		this.doProcessUserRequest(args.threadId, response, (pid: string) => this.erlangConnection.debuggerContinue(pid));
 	}
 
 	protected nextRequest(response: DebugProtocol.NextResponse, args: DebugProtocol.NextArguments): void {
-		this.doProcessUserRequest(args.threadId, response, (pid:string) => this.erlangConnection.debuggerNext(pid));
+		this.doProcessUserRequest(args.threadId, response, (pid: string) => this.erlangConnection.debuggerNext(pid));
 	}
 	protected stepInRequest(response: DebugProtocol.StepInResponse, args: DebugProtocol.StepInArguments): void {
-		this.doProcessUserRequest(args.threadId, response, (pid:string) => this.erlangConnection.debuggerStepIn(pid));
+		this.doProcessUserRequest(args.threadId, response, (pid: string) => this.erlangConnection.debuggerStepIn(pid));
 	}
 	protected stepOutRequest(response: DebugProtocol.StepOutResponse, args: DebugProtocol.StepOutArguments): void {
 		var processName = this.thread_id_to_pid(args.threadId);
 		var thread = this.threadIDs[processName];
 		if (thread && thread.stack && thread.stack.length == 1) {
-			this.doProcessUserRequest(args.threadId, response, (pid:string) => this.erlangConnection.debuggerContinue(pid));	
+			this.doProcessUserRequest(args.threadId, response, (pid: string) => this.erlangConnection.debuggerContinue(pid));
 		}
 		else {
-			this.doProcessUserRequest(args.threadId, response, (pid:string) => this.erlangConnection.debuggerStepOut(pid));
+			this.doProcessUserRequest(args.threadId, response, (pid: string) => this.erlangConnection.debuggerStepOut(pid));
 		}
 	}
 
@@ -331,8 +345,8 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 		//this.debug(`${threadId} : ${frameId}`);
 		var processName = this.thread_id_to_pid(threadId);
 		var that = this;
-		this.erlangConnection.debuggerBindings(processName, frameId.toString()).then( v => {
-		vars = v.map((el: any) => this.mapRawVariables(el));
+		this.erlangConnection.debuggerBindings(processName, frameId.toString()).then(v => {
+			vars = v.map((el: any) => this.mapRawVariables(el));
 			var scopes = new Array<Scope>();
 			var localVariables: DebugVariable = {
 				name: 'Local',
@@ -355,7 +369,7 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 		response.body = {
 			variables: variables
 		};
-		this.sendResponse(response);		
+		this.sendResponse(response);
 	}
 
 
@@ -461,16 +475,16 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 
 	private mapRawVariables(v: any): DebugVariable {
 		var handler: number = 0;
-		if (v.children) { 
+		if (v.children) {
 			handler = this._variableHandles.create({
 				name: v.name,
 				value: v.value,
 				type: v["type"],
 				variablesReference: 0,
-				children: <Array<Variable>> v.children.map((el: any) => this.mapRawVariables(el))
+				children: <Array<Variable>>v.children.map((el: any) => this.mapRawVariables(el))
 			})
 		}
-		return <DebugVariable> {
+		return <DebugVariable>{
 			name: v.name,
 			type: v["type"],
 			value: v.value,
@@ -520,7 +534,7 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 		if (this._LaunchArguments.verbose)
 			this.debug(message);
 	}
-	
+
 	private onNewModule(moduleName: string): void {
 		//this.debug("OnNewModule : " + moduleName);
 		this.sendEvent(new ModuleEvent("new", new Module(moduleName, moduleName)))
@@ -540,7 +554,7 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 		//each process in erlang is mapped to one 'thread'
 		//this.debug("OnNewProcess : " + processName);
 		var thid = this.pid_to_number(processName);
-		this.threadIDs[processName] = {thid:thid, stack:null, vscode: false};
+		this.threadIDs[processName] = { thid: thid, stack: null, vscode: false };
 		var that = this;
 		setTimeout(function () {
 			that.sendThreadStartedEventIfNeeded(processName);
@@ -562,7 +576,7 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 		return "";
 	}
 
-	private findConditionalBreakpoint(module: string, line: string) : ConditionalBreakpoint {
+	private findConditionalBreakpoint(module: string, line: string): ConditionalBreakpoint {
 		if (this._conditionalBreakPoints.has(module)) {
 			var moduleConditionalBreakpoints = this._conditionalBreakPoints.get(module);
 			var lineNo = parseInt(line);
@@ -582,7 +596,7 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 				this.sendEvent(new StoppedEvent(this.breakReason(module, line), thid));
 			}
 			else {
-				this.erlangConnection.debuggerContinue(processName);				
+				this.erlangConnection.debuggerContinue(processName);
 			}
 		}
 	}
@@ -607,16 +621,16 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 					});
 				}
 				else {
-					this.conditionalBreakpointHit(cbp, processName, module, line, currentThread.thid);					
+					this.conditionalBreakpointHit(cbp, processName, module, line, currentThread.thid);
 				}
 			}
 			else {
-				this.sendEvent(new StoppedEvent(this.breakReason(module, line), currentThread.thid));				
+				this.sendEvent(new StoppedEvent(this.breakReason(module, line), currentThread.thid));
 			}
 		}
 	}
 
-	private isOnBreakPoint(module: string, line : string) : boolean {
+	private isOnBreakPoint(module: string, line: string): boolean {
 		var nLine = Number(line);
 		var candidates = this._breakPoints.filter(bp => {
 			return bp.line == nLine && bp.source.name == module;
@@ -636,7 +650,7 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 				if (currentThread.vscode) {
 					that.sendEvent(new ThreadEvent("exited", currentThread.thid));
 				}
-				var thCount = that.threadCount(); 
+				var thCount = that.threadCount();
 				if (thCount == 0) {
 					that.sendEvent(new TerminatedEvent());
 				} else {
@@ -646,14 +660,14 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 		}
 	}
 
-	private onFbpVerified(moduleName: string, functionName:string, arity:number) {
+	private onFbpVerified(moduleName: string, functionName: string, arity: number) {
 		if (this._functionBreakPoints.has(moduleName)) {
 			this._functionBreakPoints.get(moduleName).forEach((fbp) => {
-					if (fbp.functionName === functionName && fbp.arity === arity) {
-						fbp.verified = true;
-						this.sendEvent(new BreakpointEvent("changed", fbp));
-					}
+				if (fbp.functionName === functionName && fbp.arity === arity) {
+					fbp.verified = true;
+					this.sendEvent(new BreakpointEvent("changed", fbp));
 				}
+			}
 			);
 		}
 	}

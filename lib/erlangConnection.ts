@@ -1,12 +1,9 @@
 
 import { EventEmitter } from 'events'
 import * as http from 'http';
-import { DebugProtocol } from 'vscode-debugprotocol';
-import { Variable } from 'vscode-debugadapter';
 import * as path from 'path';
 import { ErlangShellForDebugging } from './ErlangShellDebugger';
 import { ILogOutput } from './GenericShell';
-import * as Adapter from './vscodeAdapter';
 import * as fs from 'fs';
 import { AddressInfo } from 'net';
 
@@ -86,12 +83,13 @@ export abstract class ErlangConnection extends EventEmitter {
 
     private compile_erlang_connection(): Promise<number> {
         return new Promise<number>((a, r) => {
-            //TODO: #if DEBUG
+            const ebinDir = path.join(erlangBridgePath, '..', 'ebin');
+            this.log(`compiling erlang bridge to '${ebinDir}'`);
+
             var compiler = new ErlangShellForDebugging(this.verbose ? this._output : null);
             var erlFiles = this.get_ErlangFiles();
             //create dir if not exists
             //compile erlang_connection in specifc diretory to avoid that the target can access to lspxxx.beam at debug time            
-            const ebinDir = path.join(erlangBridgePath, '..', 'ebin');
             if (!fs.existsSync(ebinDir)) {
                 fs.mkdirSync(ebinDir);
             }
