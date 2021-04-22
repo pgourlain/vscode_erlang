@@ -305,6 +305,9 @@ element_at_position(CurrentModule, FileSyntaxTree, Line, Column, LineContents) -
     Fun = fun
         ({tuple, {L, StartTuple}, Args}, _) when L =:= Line, Column > StartTuple ->
             find_definition_in_args(Args, Column, Line, CurrentModule);
+        ({cons, {L, StartCons}, _, _} = Cons, _) when L =:= Line, Column > StartCons ->
+            Args = cons_to_list(Cons, []),
+            find_definition_in_args(Args, Column, Line, CurrentModule);
         ({call, {L, StartColumn}, {atom, {L, StartColumn}, Function}, Args}, _) ->
             EndColumn = StartColumn + length(atom_to_list(Function)),
             if
@@ -318,12 +321,10 @@ element_at_position(CurrentModule, FileSyntaxTree, Line, Column, LineContents) -
         ({call, {_, _}, {remote, {_, _}, {atom, {_, MStartColumn}, Module}, {atom, {L, StartColumn}, Function}}, Args}, _) ->
             MEndColumn = MStartColumn + length(atom_to_list(Module)), 
             EndColumn = StartColumn + length(atom_to_list(Function)),
-            if 
+            if
                 L =:= Line, MStartColumn =< Column, Column =< MEndColumn -> {module_use, Module};
-                true -> if 
-                            L =:= Line, StartColumn =< Column, Column =< EndColumn -> {function_use, Module, Function, length(Args), Args};
-                            true -> find_definition_in_args(Args, Column, Line, CurrentModule)
-                        end
+                L =:= Line, StartColumn =< Column, Column =< EndColumn -> {function_use, Module, Function, length(Args), Args};
+                true -> find_definition_in_args(Args, Column, Line, CurrentModule)
             end;
         ({'fun',{L, StartColumn}, {function, Function, Arity}}, _) when L =:= Line andalso StartColumn =< Column ->
             EndColumn = StartColumn + 4 + length(atom_to_list(Function)),
@@ -381,6 +382,10 @@ element_at_position(CurrentModule, FileSyntaxTree, Line, Column, LineContents) -
         MacroUse -> MacroUse
             
     end.
+
+cons_to_list({nil,_}, List) -> lists:reverse(List);
+cons_to_list({cons, _, Data, Cons}, List) ->
+    cons_to_list(Cons, [Data|List]).
 
 process_hrl_filename(File, LineContents, Column) ->
     MatchResult = find_include_filename(LineContents, Column),
