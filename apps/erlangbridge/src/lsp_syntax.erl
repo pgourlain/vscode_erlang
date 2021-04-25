@@ -187,15 +187,30 @@ code_delete([Module | Modules]) ->
 code_delete([]) -> ok.
 
 epp_parse_file(File, IncludePath, Defines) ->
-    case file:open(File, [read]) of
-    {ok, FIO} ->
-	    Ret = do_epp_parse_file(File, FIO, IncludePath, Defines),
-	    file:close(FIO),
-	    Ret;
-    _Err -> 
-        gen_lsp_server:lsp_log("epp_parse_file error : ~p", [_Err]),
-        {error, file_could_not_opened}
+    case otp_24_or_newer() of
+        true ->
+            case epp:parse_file(as_string(File), [{includes, IncludePath}, {macros, Defines}, {location, {1, 1}}]) of
+                {ok, Result} ->
+                    {ok, Result};
+                _Err -> 
+                    gen_lsp_server:lsp_log("epp_parse_file error : ~p", [_Err]),
+                    {error, file_could_not_parsed}
+            end;
+        false ->
+            case file:open(File, [read]) of
+                {ok, FIO} ->
+                    Ret = do_epp_parse_file(File, FIO, IncludePath, Defines),
+                    file:close(FIO),
+                    Ret;
+                _Err -> 
+                    gen_lsp_server:lsp_log("epp_parse_file error : ~p", [_Err]),
+                    {error, file_could_not_opened}
+            end
     end.
+
+otp_24_or_newer() ->
+    VersionNumber = (catch list_to_integer(erlang:system_info(otp_release))),
+    is_integer(VersionNumber) andalso VersionNumber >= 24.
 
 do_epp_parse_file(File, FIO, IncludePath, Defines) ->
     case epp:open(as_string(File), FIO, {1,1}, IncludePath, Defines) of
