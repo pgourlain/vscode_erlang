@@ -318,13 +318,38 @@ element_at_position(CurrentModule, FileSyntaxTree, Line, Column, LineContents) -
             find_function_in_export(CurrentModule, LineContents, Column);
         ({attribute, _, file, {HrlFile, _}}, _) ->
             process_hrl_filename(HrlFile, LineContents, Column);
-        ({call, {_, _}, {remote, {_, _}, {atom, {_, MStartColumn}, Module}, {atom, {L, StartColumn}, Function}}, Args}, _) ->
+        ({call, {_, _}, {remote, {_, _}, {atom, {_, MStartColumn}, Module}, {atom, {L, StartColumn}, Function} = Prefix}, Args}, _) ->
             MEndColumn = MStartColumn + length(atom_to_list(Module)), 
             EndColumn = StartColumn + length(atom_to_list(Function)),
             if
                 L =:= Line, MStartColumn =< Column, Column =< MEndColumn -> {module_use, Module};
                 L =:= Line, StartColumn =< Column, Column =< EndColumn -> {function_use, Module, Function, length(Args), Args};
-                true -> find_definition_in_args(Args, Column, Line, CurrentModule)
+                true ->
+                    GenFun = fun(GenMsgLine, GenMsgColumn, AtomMsg, GenMsg) ->
+                        GEndColumn = GenMsgColumn + length(atom_to_list(AtomMsg)),
+                        case Line =:= GenMsgLine andalso GenMsgColumn =< Column andalso Column =< GEndColumn of
+                            true when Module == gen_server -> {gen_msg_use, [GenMsg]};
+                            true when Module == gen_statem ->
+                                PreMsg = case Function of
+                                    call ->
+                                        {tuple, {0, 0}, [Prefix, {var, {0, 0}, 'From'}]};
+                                    _ -> Prefix
+                                end,
+                                {gen_msg_use, [PreMsg, GenMsg]};
+                            _ -> false
+                        end
+                    end,
+                    GenResult = case Args of
+                        [_, {atom, {GenMsgLine, GenMsgColumn}, AtomMsg} = GenMsg | _] ->
+                            GenFun(GenMsgLine, GenMsgColumn, AtomMsg, GenMsg);
+                        [_, {tuple, _, [{atom, {GenMsgLine, GenMsgColumn}, AtomMsg} | _]} = GenMsg | _] ->
+                            GenFun(GenMsgLine, GenMsgColumn, AtomMsg, GenMsg);
+                        _ -> false
+                    end,
+                    case GenResult of
+                        false -> find_definition_in_args(Args, Column, Line, CurrentModule);
+                        _ -> GenResult
+                    end
             end;
         ({'fun',{L, StartColumn}, {function, Function, Arity}}, _) when L =:= Line andalso StartColumn =< Column ->
             EndColumn = StartColumn + 4 + length(atom_to_list(Function)),
@@ -534,6 +559,11 @@ find_element({function_use, Module, Function, Arity}, _CurrentFileSyntaxTree, _C
                 _ -> undefined
             end
     end;
+find_element({gen_msg_use, GenMsg}, SyntaxTree, File) ->
+    case match_gen_msg(SyntaxTree, GenMsg) of
+        undefined -> undefined;
+        {ClauseLine, ClauseColumn} -> {File, ClauseLine, ClauseColumn}
+    end;
 find_element({function_use, Module, Function, Arity, Args}, _CurrentFileSyntaxTree, _CurrentFile) ->
     case lsp_syntax:module_syntax_tree(Module) of
         undefined -> undefined;
@@ -541,7 +571,7 @@ find_element({function_use, Module, Function, Arity, Args}, _CurrentFileSyntaxTr
             case find_function(SyntaxTree, Function, Arity) of
                 {function, {Line, Column}, _Function, _Arity, Clauses} ->
                     case find_clause_location(Clauses, Args) of
-                        false -> {File, Line, Column};
+                        undefined -> {File, Line, Column};
                         {ClauseLine, ClauseColumn} -> {File, ClauseLine, ClauseColumn}
                     end;
                 _ -> undefined
@@ -603,11 +633,20 @@ find_clause_location([{clause, Location, ClauseArgs, _, _} | TailClauses], Args)
         false -> find_clause_location(TailClauses, Args);
         true -> Location
     end;
-find_clause_location([], _Args) -> false.
+find_clause_location([], _Args) -> undefined.
 
+comparison_args([{Type, _, Value1} | T1], [{Type, _, Value2} | T2]) when is_list(Value1), is_list(Value2) ->
+    case comparison_args(Value1, Value2) of
+        true -> comparison_args(T1, T2);
+        false -> false
+    end;
+comparison_args([{var, _, _} | T1], [{var, _, _} | T2]) ->
+    comparison_args(T1, T2);
+comparison_args([{cons, _, _, _} | T1], [{var, _, _} | T2]) ->
+    comparison_args(T1, T2);
 comparison_args([{Type, _, Value} | T1], [{Type, _, Value} | T2]) ->
     comparison_args(T1, T2);
-comparison_args([], []) -> true;
+comparison_args(_, []) -> true;
 comparison_args(_, _) -> false.
 
 find_function_with_line(FileSyntaxTree, Line) ->
@@ -659,6 +698,17 @@ get_function_arities(Module, Function) ->
         _ ->
             []
     end.
+
+match_gen_msg(FileSyntaxTree, GenMsg) ->
+    Fun = fun(SyntaxTree, _File) ->
+        case SyntaxTree of 
+            {function, _Position, _FoundFunction, _FoundArity, Clauses} ->
+                find_clause_location(Clauses, GenMsg);
+            _ -> undefined
+        end
+    end,
+    {Location, _File} = find_in_file_syntax_tree(FileSyntaxTree, Fun),
+    Location.
 
 find_function(FileSyntaxTree, Function, Arity) ->
     Fun = fun (SyntaxTree, DefaultTree, _File) ->
