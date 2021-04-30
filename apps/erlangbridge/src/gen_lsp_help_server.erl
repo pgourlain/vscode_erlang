@@ -23,6 +23,7 @@
     -endif.
 -else.
 %only to avoid complation error on OTP < 23
+-export([eep48_render_fun_doc/3]).
 -record(docs_v1, {docs}).
 %% appear in OTP 23.0
 atom_to_binary(Atom) ->

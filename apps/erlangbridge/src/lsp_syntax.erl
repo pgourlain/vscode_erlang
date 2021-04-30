@@ -120,6 +120,7 @@ update_file_in_forms(File, ContentsFile, FileSyntaxTree) ->
               Form
 	      end, FileSyntaxTree).
 
+should_load_behaviour_module(undefined) -> undefined;
 should_load_behaviour_module(FileSyntaxTree) ->
     BehaviourModule = lists:foldl(fun 
         ({attribute, _, behaviour, Module}, undefined) -> Module;
@@ -144,6 +145,7 @@ load_behaviour_module(BehaviourModule) ->
             end
     end.
 
+should_load_parse_transform(undefined) -> undefined;
 should_load_parse_transform(FileSyntaxTree) ->
     PasreTransform = lists:filtermap(fun (X) ->
             case X of
@@ -354,6 +356,7 @@ abspath(BaseDir, Path) ->
     end.
 
 
+parse_transform(FileSyntaxTree, undefined) -> FileSyntaxTree;
 parse_transform(FileSyntaxTree, Transformers) ->
     lists:foldl(fun(M, Syntax) -> 
             %call transform/2 on 'Transformer' module
@@ -366,7 +369,8 @@ parse_transform(FileSyntaxTree, Transformers) ->
 lint(FileSyntaxTree, File) ->
     %%no lint for erlang file under erlang lib dir
     LintResult = case lsp_utils:is_erlang_lib_file(File) of
-        false -> erl_lint:module(FileSyntaxTree, File,[ {strong_validation} ]);
+        false when FileSyntaxTree /= undefined ->
+            erl_lint:module(FileSyntaxTree, File,[ {strong_validation} ]);
         _ -> {ok, []}
     end,
     case LintResult of
@@ -406,7 +410,8 @@ filter_unused_functions({File, Warnings}) ->
         lists:filter(fun (X) ->
                 case X of
                     {_, _, {unused_function, {FuncName,_}}} -> 
-                        FindResult = string:find(atom_to_list(FuncName), "_test", trailing) =/= "_test",
+                        FuncNameStr = atom_to_list(FuncName),
+                        FindResult = string:substr(FuncNameStr, length(FuncNameStr)-4) =/= "_test",
                         %gen_lsp_server:lsp_log("FuncName:~p, ~p",[FuncName, FindResult]),
                         FindResult;
                     _ -> true 

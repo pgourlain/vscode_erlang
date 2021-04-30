@@ -13,7 +13,7 @@
 -export([start_link/1, start_link/2]).
 
 %export for gen_server
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, code_change/3]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([lsp_log/2, send_to_client/2]).
 
 -define(SERVER, ?MODULE).
@@ -186,6 +186,9 @@ handle_tcp_data(Socket, Contents, State) ->
                 binary:part(StateWithLength#state.contents, ContentLength, byte_size(StateWithLength#state.contents) - ContentLength),
                 StateWithLength#state{contents = <<"">>, content_length = undefined})
     end.
+
+terminate(_Reason, _State) ->
+    ok.
 
 code_change(_OldVersion, State, _Extra) ->
     {ok, State}.

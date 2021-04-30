@@ -306,8 +306,10 @@ element_at_position(CurrentModule, FileSyntaxTree, Line, Column, LineContents) -
         ({tuple, {L, StartTuple}, Args}, _) when L =:= Line, Column > StartTuple ->
             find_definition_in_args(Args, Column, Line, CurrentModule);
         ({cons, {L, StartCons}, _, _} = Cons, _) when L =:= Line, Column > StartCons ->
-            Args = cons_to_list(Cons, []),
-            find_definition_in_args(Args, Column, Line, CurrentModule);
+            case cons_to_list(Cons, []) of
+                false -> undefined;
+                Args -> find_definition_in_args(Args, Column, Line, CurrentModule)
+            end;
         ({call, {L, StartColumn}, {atom, {L, StartColumn}, Function}, Args}, _) ->
             EndColumn = StartColumn + length(atom_to_list(Function)),
             if
@@ -410,7 +412,8 @@ element_at_position(CurrentModule, FileSyntaxTree, Line, Column, LineContents) -
 
 cons_to_list({nil,_}, List) -> lists:reverse(List);
 cons_to_list({cons, _, Data, Cons}, List) ->
-    cons_to_list(Cons, [Data|List]).
+    cons_to_list(Cons, [Data|List]);
+cons_to_list(_, _List) -> false.
 
 process_hrl_filename(File, LineContents, Column) ->
     MatchResult = find_include_filename(LineContents, Column),
@@ -559,11 +562,6 @@ find_element({function_use, Module, Function, Arity}, _CurrentFileSyntaxTree, _C
                 _ -> undefined
             end
     end;
-find_element({gen_msg_use, GenMsg}, SyntaxTree, File) ->
-    case match_gen_msg(SyntaxTree, GenMsg) of
-        undefined -> undefined;
-        {ClauseLine, ClauseColumn} -> {File, ClauseLine, ClauseColumn}
-    end;
 find_element({function_use, Module, Function, Arity, Args}, _CurrentFileSyntaxTree, _CurrentFile) ->
     case lsp_syntax:module_syntax_tree(Module) of
         undefined -> undefined;
@@ -576,6 +574,11 @@ find_element({function_use, Module, Function, Arity, Args}, _CurrentFileSyntaxTr
                     end;
                 _ -> undefined
             end
+    end;
+find_element({gen_msg_use, GenMsg}, SyntaxTree, File) ->
+    case match_gen_msg(SyntaxTree, GenMsg) of
+        undefined -> undefined;
+        {ClauseLine, ClauseColumn} -> {File, ClauseLine, ClauseColumn}
     end;
 find_element({record, Record}, CurrentFileSyntaxTree, _CurrentFile) ->
     case find_record(CurrentFileSyntaxTree, Record) of
@@ -629,7 +632,7 @@ matched_fun_clause([_ | Tail], Line) -> matched_fun_clause(Tail, Line);
 matched_fun_clause([], _line) -> [].
 
 find_clause_location([{clause, Location, ClauseArgs, _, _} | TailClauses], Args) ->
-    case comparison_args(ClauseArgs, Args) of
+    case comparison_args(Args, ClauseArgs) of
         false -> find_clause_location(TailClauses, Args);
         true -> Location
     end;
@@ -640,13 +643,17 @@ comparison_args([{Type, _, Value1} | T1], [{Type, _, Value2} | T2]) when is_list
         true -> comparison_args(T1, T2);
         false -> false
     end;
-comparison_args([{var, _, _} | T1], [{var, _, _} | T2]) ->
+comparison_args([{var, _, _} | T1], [_ | T2]) ->
     comparison_args(T1, T2);
-comparison_args([{cons, _, _, _} | T1], [{var, _, _} | T2]) ->
+comparison_args([{cons, _, _, _} | T1], [_ | T2]) ->
+    comparison_args(T1, T2);
+comparison_args([{nil, _} | T1], [_ | T2]) ->
+    comparison_args(T1, T2);
+comparison_args([{record, _, _, _, _} | T1], [_ | T2]) ->
     comparison_args(T1, T2);
 comparison_args([{Type, _, Value} | T1], [{Type, _, Value} | T2]) ->
     comparison_args(T1, T2);
-comparison_args(_, []) -> true;
+comparison_args([], _) -> true;
 comparison_args(_, _) -> false.
 
 find_function_with_line(FileSyntaxTree, Line) ->
