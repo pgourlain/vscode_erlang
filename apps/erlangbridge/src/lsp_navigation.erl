@@ -20,7 +20,7 @@ goto_definition(File, Line, Column) ->
     case find_element(What, FileSyntaxTree, File) of
         {FoundFile, FoundLine, FoundColumn} ->
             #{
-                uri => lsp_utils:file_uri_to_vscode_uri(list_to_binary("file://" ++ FoundFile)),
+                uri => lsp_utils:file_uri_to_vscode_uri(lsp_utils:file_to_file_uri(FoundFile)),
                 range => lsp_utils:client_range(FoundLine, FoundColumn, FoundColumn)
             };
         _ ->
@@ -113,7 +113,7 @@ references_info(File, Line, Column) ->
         undefined -> #{result => <<"ko">>};
         RefKey -> 
             Result = lists:map(fun ({_, {L,C}}) -> 
-                #{uri => list_to_binary("file://" ++ File), line => L, character => C}
+                #{uri => lsp_utils:file_to_file_uri(File), line => L, character => C}
             end, lists:filter(fun ({K,_L}) -> K =:= RefKey end, References)),
             #{result => <<"ok">>, references => Result}
     end.
