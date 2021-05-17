@@ -264,11 +264,10 @@ request_configuration(Socket) ->
     }).
 
 send_diagnostics(Socket, File, Diagnostics) ->
-    BinFile = list_to_binary(File),
     gen_lsp_server:send_to_client(Socket, #{
         method => <<"textDocument/publishDiagnostics">>,
         params => #{
-            uri => lsp_utils:file_uri_to_vscode_uri(<<"file://", BinFile/binary>>),
+            uri => lsp_utils:file_uri_to_vscode_uri(lsp_utils:file_to_file_uri(File)),
             diagnostics => lists:map(fun (Diagnostic) ->
                 Info = maps:get(info, Diagnostic),
                 #{

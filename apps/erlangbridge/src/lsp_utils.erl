@@ -1,7 +1,7 @@
 -module(lsp_utils).
 
 -export([client_range/3,
-         file_uri_to_file/1, file_uri_to_vscode_uri/1,
+         file_uri_to_file/1, file_uri_to_vscode_uri/1, file_to_file_uri/1,
          glob_to_regexp/1,
          is_path_excluded/2,
          search_exclude_globs_to_regexps/1,
@@ -17,7 +17,8 @@ client_range(Line, StartChar, EndChar) ->
 file_uri_to_file(Uri) ->    
     NewUri = re:replace(case Uri of
         <<"file:///", Drive, "%3A", Rest/binary>> -> <<Drive, ":", Rest/binary>>;
-        <<"file://", Rest/binary>> -> Rest;
+        <<"file:///", Rest/binary>> -> <<"/", Rest/binary>>;
+        <<"file://", Rest/binary>> -> <<"//", Rest/binary>>;
       _ -> Uri
     end, <<"\\\\">>, <<"/">>, [global, {return, list}]),
     lists:flatten(string_replace(NewUri, "%20", " ")).
@@ -32,6 +33,13 @@ file_uri_to_vscode_uri(Uri) ->
         <<"file://", Drive, ":/", Rest/binary>> -> <<"file:///", Drive, "%3A/", Rest/binary>>;
       _ -> EncodeUri
     end.
+
+file_to_file_uri("//" ++ File) ->
+    BinFile = list_to_binary(File),
+    <<"file://", BinFile/binary>>;
+file_to_file_uri(File) ->
+    BinFile = list_to_binary(File),
+    <<"file://", BinFile/binary>>.
 
 -ifdef(OTP_RELEASE).
 string_replace(String, Pattern, NewString) ->
