@@ -1,5 +1,21 @@
 # Change log
 
+
+## Version 0.7.7 (May 17, 2021)
+ * [#205](https://github.com/pgourlain/vscode_erlang/issues/205) : Fix handling of UNC paths on Windows
+ * [#203](https://github.com/pgourlain/vscode_erlang/pull/203) : Optimize the jump experience
+Thanks to
+* [Chi Lambda](https://github.com/chi-lambda)
+* [shuying2244](https://github.com/shuying2244)
+
+
+## Version 0.7.6 (April 26, 2021)
+ * [#202](https://github.com/pgourlain/vscode_erlang/issues/202) : OTP 24 compatibility
+
+Thanks to
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+
+
 ## Version 0.7.5 (April 21, 2021)
 * Fix debugger launch
 
