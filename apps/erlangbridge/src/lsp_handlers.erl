@@ -7,7 +7,12 @@
     textDocument_formatting/2, textDocument_codeLens/2, textDocument_documentSymbol/2]).
 
 initialize(_Socket, Params) ->
-    gen_lsp_config_server:update_config(root, binary_to_list(maps:get(rootPath, Params))),
+    % usefull when file is open instead of folder
+    RootPath = case maps:get(rootPath, Params) of
+        null -> <<"">>;
+        Other -> Other
+    end,
+    gen_lsp_config_server:update_config(root, binary_to_list(RootPath)),
     gen_lsp_doc_server:root_available(),
     #{capabilities => #{
         textDocumentSync => 1, % Full
