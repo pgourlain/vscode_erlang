@@ -153,7 +153,11 @@ code_change(_OldVersion, State, _Extra) ->
 
 do_add_project_file(File, ProjectModules) ->
     Module = filename:rootname(filename:basename(File)),
-    UpdatedFiles = [File | maps:get(Module, ProjectModules, [])],
+    UpdatedFiles =
+        case lists:member("_build", filename:split(File)) of
+            true  -> maps:get(Module, ProjectModules, []) ++ [File];
+            false -> [File | maps:get(Module, ProjectModules, [])]
+        end,
     ProjectModules#{Module => UpdatedFiles}.
 
 find_existing_beam(SourceFile) ->
