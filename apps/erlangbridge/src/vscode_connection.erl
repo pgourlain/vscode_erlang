@@ -237,12 +237,24 @@ type_of_binding(basic, Value) when is_tuple(Value) -> tuple;
 type_of_binding(basic, Value) when is_function(Value) -> function;
 type_of_binding(basic, _) -> unknown.
 
+check_format(<<>>) -> true;
+check_format(<<V, Res/binary>>) ->
+    case V of
+        _ when V > 127 -> false;
+        _ -> check_format(Res)
+    end.
+
 map_bindings({Name, Value}) ->
     T = type_of_binding(Value),
+    Pval = iolist_to_binary(io_lib:format("~p", [Value])),
+    Bval = case check_format(Pval) of
+        true -> Pval;
+        _ -> iolist_to_binary(io_lib:format("~w", [Value]))
+    end,
     H = #{
         name => Name,
         type => T,
-        value => iolist_to_binary(io_lib:format("~p", [Value]))
+        value => Bval
     },
     V = case T of
         list -> 
