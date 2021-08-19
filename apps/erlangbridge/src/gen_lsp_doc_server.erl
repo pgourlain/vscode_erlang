@@ -125,12 +125,15 @@ handle_cast(stop, State) ->
     {stop, normal, State};
 
 handle_cast(root_available, State) ->
-    ProjectModules = filelib:fold_files(gen_lsp_config_server:root(), ".erl$", true,
-                                        fun do_add_project_file/2, #{}),
+    BuildDir = get_build_dir(),
+    Fun = fun(File, ProjectModules) ->
+        do_add_project_file(File, ProjectModules, BuildDir)
+    end,
+    ProjectModules = filelib:fold_files(gen_lsp_config_server:root(), ".erl$", true, Fun, #{}),
     {noreply, State#state{project_modules = ProjectModules}};
 
 handle_cast({add_project_file, File}, State) ->
-    UpdatedProjectModules = do_add_project_file(File, State#state.project_modules),
+    UpdatedProjectModules = do_add_project_file(File, State#state.project_modules, get_build_dir()),
     {noreply, State#state{project_modules = UpdatedProjectModules}};
 
 handle_cast({remove_project_file, File}, State) ->
@@ -151,14 +154,18 @@ terminate(_Reason, _State) ->
 code_change(_OldVersion, State, _Extra) ->
     {ok, State}.
 
-do_add_project_file(File, ProjectModules) ->
+do_add_project_file(File, ProjectModules, BuildDir) ->
     Module = filename:rootname(filename:basename(File)),
-    UpdatedFiles =
-        case lists:member("_build", filename:split(File)) of
-            true  -> maps:get(Module, ProjectModules, []) ++ [File];
-            false -> [File | maps:get(Module, ProjectModules, [])]
-        end,
+    UpdatedFiles = concat_project_files(File, maps:get(Module, ProjectModules, []), BuildDir),
     ProjectModules#{Module => UpdatedFiles}.
+
+concat_project_files(File, OldFiles, undefined) ->
+    [File | OldFiles];
+concat_project_files(File, OldFiles, BuildDir) ->
+    case lists:member(BuildDir, filename:split(File)) of
+        true  -> OldFiles ++ [File];
+        false -> [File | OldFiles]
+    end.
 
 find_existing_beam(SourceFile) ->
     case lists:reverse(filename:split(SourceFile)) of
@@ -169,5 +176,21 @@ find_existing_beam(SourceFile) ->
                 false -> undefined
             end;
         _ ->
+            undefined
+    end.
+
+-spec get_build_dir() -> string() | undefined.
+get_build_dir() ->
+    ConfigFilename = filename:join([gen_lsp_config_server:root(), "rebar.config"]),
+    case filelib:is_file(ConfigFilename) of
+        true ->
+            Default = "_build",
+            case file:consult(ConfigFilename) of
+                {ok, Config} ->
+                    proplists:get_value(base_dir, Config, Default);
+                {error, _} ->
+                    Default
+            end;
+        false ->
             undefined
     end.
