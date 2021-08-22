@@ -515,6 +515,7 @@ parse_arity_tuple({cons, _, _, ArityTuple}, Num) ->
     parse_arity_tuple(ArityTuple, Num + 1);
 parse_arity_tuple({nil, _}, Num) -> Num;
 parse_arity_tuple({var, _, _}, _Num) -> 1;
+parse_arity_tuple({tuple, _, _}, _Num) -> 1;
 parse_arity_tuple(_, _) -> false.
 
 find_function_in_export(_CurrentModule, undefined, _Column) ->

@@ -127,5 +127,71 @@
             ""
         ],
         "description" : "generate an empty gen_fsm"
+    },
+
+    "erlang gen_event behavior" : {
+        "prefix" : "erl-gen_event-behavior",
+        "body"  : [
+            "-behaviour(gen_event).",
+            "",
+            "-export([init/1, handle_event/2, handle_call/2, handle_info/2, terminate/2, code_change/3]).",
+            "",
+            "init(_Args) ->",
+            "    {ok, []}.",
+            "",
+            "handle_event(_Event, State) ->",
+            "    {ok, State}.",
+            "",
+            "handle_call(_Request, State) ->",
+            "    {ok, no_reply, State}.",
+            "",
+            "handle_info(_Info, State) ->",
+            "    {ok, State}.",
+            "",
+            "terminate(_Args, _State) ->",
+            "    ok.",
+            "",
+            "code_change(_OldVsn, State, _Extra) ->",
+            "    {ok, State}.",
+            ""
+        ],
+        "description" : "generate an empty gen_event"
+    },
+
+    "erlang gen_statem behavior" : {
+        "prefix" : "erl-gen_statem-behavior",
+        "body"  : [
+            "-behaviour(gen_statem).",
+            "",
+            "-export([stop/0, start_link/0]).",
+            "-export([init/1, callback_mode/0, handle_event/4, terminate/3, code_change/4]).",
+            "",
+            "stop() ->",
+            "    gen_statem:stop(?MODULE).",
+            "",
+            "start_link() ->",
+            "    gen_statem:start_link({local, ?MODULE}, ?MODULE, [], []).",
+            "",
+            "init(_Args) ->",
+            "    {ok, state, []}.",
+            "",
+            "%% state_functions | handle_event_function | [_, state_enter].",
+            "callback_mode() ->",
+            "    handle_event_function.",
+            "",
+            "handle_event(enter, _OldState, _State, _Data) ->",
+            "    keep_state_and_data;",
+            "",
+            "handle_event(_EventType, _EventContent, _State, _Data) ->",
+            "    keep_state_and_data.",
+            "",
+            "terminate(_Reason, _State, _Data) ->",
+            "    ok.",
+            "",
+            "code_change(_OldVsn, State, Data, _Extra) ->",
+            "    {ok, State, Data}.",
+            ""
+        ],
+        "description" : "generate an empty gen_statem"
     }
 }
