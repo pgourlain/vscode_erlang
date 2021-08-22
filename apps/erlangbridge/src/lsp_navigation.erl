@@ -540,7 +540,10 @@ find_record_field_use(Record, [{record_field, _, {atom, {L, StartColumn}, Field}
     if
         L =:= Line, StartColumn =< Column, Column =< EndColumn -> {field, Record, Field};
         true -> find_record_field_use(Record, Tail, Column, Line)
-    end.
+    end;
+%% Non-atom record field, e.g. #rec{a = 1, _ = '_'} pattern or match spec
+find_record_field_use(Record, [_Head | Tail], Column, Line) ->
+    find_record_field_use(Record, Tail, Column, Line).
 
 find_element({module_use, Module}, _CurrentFileSyntaxTree, _CurrentFile) ->
     case lsp_syntax:module_syntax_tree(Module) of
@@ -582,13 +585,17 @@ find_element({gen_msg_use, GenMsg}, SyntaxTree, File) ->
     end;
 find_element({record, Record}, CurrentFileSyntaxTree, _CurrentFile) ->
     case find_record(CurrentFileSyntaxTree, Record) of
-        {{attribute, {Line, Column}, record, {Record, _}}, File} -> {File, Line, Column};
-        undefined -> undefined
+        {{attribute, {Line, Column}, record, {Record, _}}, File} ->
+            {lsp_utils:to_string(File), Line, Column};
+        undefined ->
+            undefined
     end;
 find_element({field, Record, Field}, CurrentFileSyntaxTree, _CurrentFile) ->
     case find_record(CurrentFileSyntaxTree, Record) of
-        {{attribute, _, record, {Record, Fields}}, File} -> find_record_field(Field, Fields, File);
-        undefined -> undefined
+        {{attribute, _, record, {Record, Fields}}, File} ->
+            find_record_field(Field, Fields, lsp_utils:to_string(File));
+        undefined ->
+            undefined
     end;
 find_element({variable, Variable, Line, Column}, CurrentFileSyntaxTree, CurrentFile) ->
     FunctionWithVariable = find_function_with_line(CurrentFileSyntaxTree, Line),
