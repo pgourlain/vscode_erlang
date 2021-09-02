@@ -291,12 +291,12 @@ severity(_) -> 1.
 
 auto_complete(File, Line, Text) ->
     RegexList = [
-        {"[^a-zA-Z0-9_@]([a-z][a-zA-Z0-9_@]*):((?:[a-z][a-zA-Z0-9_@]*)?)$", module_function},
-        {"#((?:[a-z][a-zA-Z0-9_@]*)?)$", record},
-        {"#([a-z][a-zA-Z0-9_@]*)\.((?:[a-z][a-zA-Z0-9_@]*)?)$", field},
-        {"[^a-zA-Z0-9_@]([A-Z][a-zA-Z0-9_@]*)$", variable},
-        {"^-([a-z]*)$", attribute},
-        {"([a-z][a-zA-Z0-9_@]*)$", atom}
+        {"[^a-zA-Z0-9_@]([a-z][a-zA-Z0-9_@]*):((?:[a-z][a-zA-Z0-9_@]*)?)\r?$", module_function},
+        {"#((?:[a-z][a-zA-Z0-9_@]*)?)\r?$", record},
+        {"#([a-z][a-zA-Z0-9_@]*)\.((?:[a-z][a-zA-Z0-9_@]*)?)\r?$", field},
+        {"[^a-zA-Z0-9_@]([A-Z][a-zA-Z0-9_@]*)\r?$", variable},
+        {"^-([a-z]*)\r?$", attribute},
+        {"([a-z][a-zA-Z0-9_@]*)\r?$", atom}
     ],
     case match_regex(Text, RegexList) of
         {module_function, [Module, Function]} ->
