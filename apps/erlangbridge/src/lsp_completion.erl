@@ -1,6 +1,11 @@
 -module(lsp_completion).
 
--export([module_function/2, record/2, field/3, variable/3, atom/2, attribute/1]).
+-export([disable_completion/0, module_function/2, record/2, field/3, variable/3, atom/2, attribute/1]).
+
+disable_completion() ->
+    [#{
+        label => <<>>
+    }].
 
 module_function(Module, Prefix) ->
     SyntaxTreeFile = lsp_syntax:module_syntax_tree(Module),
