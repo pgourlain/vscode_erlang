@@ -291,7 +291,7 @@ severity(_) -> 1.
 
 auto_complete(File, Line, Text) ->
     RegexList = [
-        {"[^a-zA-Z0-9_@](case)[^a-zA-Z0-9_@].*of\r?$", case_of},
+        {"[^a-zA-Z0-9_@](case)[^a-zA-Z0-9_@].*\sof?\r?$", case_of},
         {"[^a-zA-Z0-9_@]([a-z][a-zA-Z0-9_@]*):((?:[a-z][a-zA-Z0-9_@]*)?)\r?$", module_function},
         {"#((?:[a-z][a-zA-Z0-9_@]*)?)\r?$", record},
         {"#([a-z][a-zA-Z0-9_@]*)\.((?:[a-z][a-zA-Z0-9_@]*)?)\r?$", field},
