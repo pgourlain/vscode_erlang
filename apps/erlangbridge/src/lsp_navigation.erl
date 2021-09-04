@@ -50,6 +50,8 @@ hover_info(File, Line, Column) ->
     case What of
         {function_use, FunctionModule, Function, Arity} ->
             #{contents => function_description(FunctionModule, Function, Arity)};
+        {function_use, FunctionModule, Function, Arity, _Args} ->
+            #{contents => function_description(FunctionModule, Function, Arity)};
         _ ->
             #{contents => <<>>}
     end.
@@ -404,6 +406,7 @@ element_at_position(CurrentModule, FileSyntaxTree, Line, Column, LineContents) -
         undefined ->
             case find_in_file_syntax_tree(FileSyntaxTree, Fun) of
                 {{function_use, _, _, _} = Export, _File} -> Export;
+                {{function_use, _, _, _, _} = Export, _File} -> Export;
                 {What, _File} -> What
             end;
         MacroUse -> MacroUse

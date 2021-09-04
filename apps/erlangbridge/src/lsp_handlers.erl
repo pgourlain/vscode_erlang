@@ -291,14 +291,17 @@ severity(_) -> 1.
 
 auto_complete(File, Line, Text) ->
     RegexList = [
-        {"[^a-zA-Z0-9_@]([a-z][a-zA-Z0-9_@]*):((?:[a-z][a-zA-Z0-9_@]*)?)$", module_function},
-        {"#((?:[a-z][a-zA-Z0-9_@]*)?)$", record},
-        {"#([a-z][a-zA-Z0-9_@]*)\.((?:[a-z][a-zA-Z0-9_@]*)?)$", field},
-        {"[^a-zA-Z0-9_@]([A-Z][a-zA-Z0-9_@]*)$", variable},
-        {"^-([a-z]*)$", attribute},
-        {"([a-z][a-zA-Z0-9_@]*)$", atom}
+        {"[^a-zA-Z0-9_@](case)[^a-zA-Z0-9_@].*\sof?\r?$", case_of},
+        {"[^a-zA-Z0-9_@]([a-z][a-zA-Z0-9_@]*):((?:[a-z][a-zA-Z0-9_@]*)?)\r?$", module_function},
+        {"#((?:[a-z][a-zA-Z0-9_@]*)?)\r?$", record},
+        {"#([a-z][a-zA-Z0-9_@]*)\.((?:[a-z][a-zA-Z0-9_@]*)?)\r?$", field},
+        {"[^a-zA-Z0-9_@]([A-Z][a-zA-Z0-9_@]*)\r?$", variable},
+        {"^-([a-z]*)\r?$", attribute},
+        {"([a-z][a-zA-Z0-9_@]*)\r?$", atom}
     ],
     case match_regex(Text, RegexList) of
+        {case_of, [_]} ->
+            lsp_completion:disable_completion();
         {module_function, [Module, Function]} ->
             lsp_completion:module_function(list_to_atom(binary_to_list(Module)), binary_to_list(Function));
         {record, [Record]} ->
@@ -315,7 +318,7 @@ auto_complete(File, Line, Text) ->
             -> []
     end.
   
- match_regex(Str, [{Pattern, Result} | T]) ->
+match_regex(Str, [{Pattern, Result} | T]) ->
     case re:run(Str, Pattern) of
         {match, MatchList} ->
             {Result, lists:map(fun (Part) ->
@@ -324,7 +327,7 @@ auto_complete(File, Line, Text) ->
         nomatch ->
             match_regex(Str, T)
     end;
- match_regex(_, []) ->
+match_regex(_, []) ->
     {nomatch, []}.
 
 mapmapget(Key1, Key2, Map) ->
