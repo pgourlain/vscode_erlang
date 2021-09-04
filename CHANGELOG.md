@@ -1,5 +1,20 @@
 # Change log
 
+## Version 0.7.9 (September 4, 2021)
+[215](https://github.com/pgourlain/vscode_erlang/issues/215) : Fix autocomplete and hover
+
+Thanks to
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+* [Sergei Shuvatov](https://github.com/Yozhig)
+
+## Version 0.7.8 (August 22, 2021)
+* [209](https://github.com/pgourlain/vscode_erlang/issues/209) : Fix parsing record match spec and go to record
+* [210](https://github.com/pgourlain/vscode_erlang/issues/210) : Fix can't jump in some cases when func in tuple
+* [212](https://github.com/pgourlain/vscode_erlang/issues/212) : Add files from _build directory to end of project modules lists
+Thanks to
+* [Kornel H](https://github.com/KornelH)
+* [shuying2244](https://github.com/shuying2244)
+* [Sergei Shuvatov](https://github.com/Yozhig)
 
 ## Version 0.7.7 (May 17, 2021)
  * [#205](https://github.com/pgourlain/vscode_erlang/issues/205) : Fix handling of UNC paths on Windows
