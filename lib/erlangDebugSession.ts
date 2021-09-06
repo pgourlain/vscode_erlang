@@ -24,10 +24,12 @@ class ConditionalBreakpoint {
 	condition: string;
 	hitCount: number;
 	actualHitCount: number;
-	constructor(condition: string, hitCondition: string) {
+	logMessage: string;
+	constructor(condition: string, hitCondition: string, logMessage: string) {
 		this.condition = condition;
 		this.hitCount = parseInt(hitCondition);
 		this.actualHitCount = 0;
+		this.logMessage = logMessage;
 	}
 }
 
@@ -116,6 +118,7 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 		response.body.supportsConfigurationDoneRequest = true;
 		response.body.supportsConditionalBreakpoints = true;
 		response.body.supportsHitConditionalBreakpoints = true;
+		response.body.supportsLogPoints = true;
 		response.body.supportsFunctionBreakpoints = true;
 		response.body.supportsEvaluateForHovers = false;
 		response.body.supportsSetVariable = false;
@@ -222,11 +225,11 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 		this._conditionalBreakPoints.delete(targetModuleName);
 		args.breakpoints.forEach(bp => {
 			vscodeBreakpoints.push(new Breakpoint(true, bp.line, 1, new Source(targetModuleName, args.source.path)));
-			if (bp.condition || bp.hitCondition) {
+			if (bp.condition || bp.hitCondition || bp.logMessage) {
 				if (!this._conditionalBreakPoints.has(targetModuleName)) {
 					this._conditionalBreakPoints.set(targetModuleName, new Map());
 				}
-				var cbp = new ConditionalBreakpoint(bp.condition, bp.hitCondition);
+				var cbp = new ConditionalBreakpoint(bp.condition, bp.hitCondition, bp.logMessage);
 				this._conditionalBreakPoints.get(targetModuleName).set(bp.line, cbp);
 			}
 		});
@@ -587,17 +590,38 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 		return null;
 	}
 
-	private conditionalBreakpointHit(cbp: ConditionalBreakpoint, processName: string, module: string, line: string, thid: number) {
-		if (isNaN(cbp.hitCount)) {
-			this.sendEvent(new StoppedEvent(this.breakReason(module, line), thid));
-		}
-		else {
+	private conditionalBreakpointHit(cbp: ConditionalBreakpoint, processName: string, module: string, line: string, sp: any, thid: number) {
+		var hit = isNaN(cbp.hitCount);
+		if (!hit) {
 			if (++cbp.actualHitCount == cbp.hitCount) {
-				this.sendEvent(new StoppedEvent(this.breakReason(module, line), thid));
+				hit = true;
+			}
+		}
+		if (hit) {
+			if (cbp.logMessage) {
+				this.handleBracesInLogMessage(processName, sp, cbp.logMessage).then(str => {
+					this.log(str as string);
+					this.erlangConnection.debuggerContinue(processName);
+				});
 			}
 			else {
-				this.erlangConnection.debuggerContinue(processName);
+				this.sendEvent(new StoppedEvent(this.breakReason(module, line), thid));
 			}
+		}
+		else {
+			this.erlangConnection.debuggerContinue(processName);
+		}
+	}
+
+	private handleBracesInLogMessage(processName: string, sp: any, str: string): Promise<string | void> {
+		const match = str.match(/^([^{]*){([^}]+)}(.*)$/);
+		if (match) {
+			const replacer = this.erlangConnection.debuggerEval(processName, sp, match[2]);
+			const rest = this.handleBracesInLogMessage(processName, sp, match[3]);
+			return Promise.all([replacer, rest]).then(([replacervalue, restvalue]) => match[1] + replacervalue.value + restvalue);
+		}
+		else {
+			return Promise.resolve(str);
 		}
 	}
 
@@ -609,11 +633,11 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 			currentThread.stack = stacktrace;
 			var cbp = this.findConditionalBreakpoint(module, line);
 			if (cbp) {
+				var sp = stacktrace && stacktrace.length > 0 ? stacktrace[0].sp : -1;
 				if (cbp.condition) {
-					var sp = stacktrace && stacktrace.length > 0 ? stacktrace[0].sp : -1;
 					this.erlangConnection.debuggerEval(processName, sp, cbp.condition).then((res) => {
 						if (res.value == "true") {
-							this.conditionalBreakpointHit(cbp, processName, module, line, currentThread.thid);
+							this.conditionalBreakpointHit(cbp, processName, module, line, sp, currentThread.thid);
 						}
 						else {
 							this.erlangConnection.debuggerContinue(processName);
@@ -621,7 +645,7 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 					});
 				}
 				else {
-					this.conditionalBreakpointHit(cbp, processName, module, line, currentThread.thid);
+					this.conditionalBreakpointHit(cbp, processName, module, line, sp, currentThread.thid);
 				}
 			}
 			else {
