@@ -411,7 +411,8 @@ filter_unused_functions({File, Warnings}) ->
                 case X of
                     {_, _, {unused_function, {FuncName,_}}} -> 
                         FuncNameStr = atom_to_list(FuncName),
-                        FindResult = string:substr(FuncNameStr, length(FuncNameStr)-4) =/= "_test",
+                        FuncNameStrLen = length(FuncNameStr),
+                        FindResult = FuncNameStrLen =< 4 orelse string:substr(FuncNameStr, FuncNameStrLen-4) =/= "_test",
                         %gen_lsp_server:lsp_log("FuncName:~p, ~p",[FuncName, FindResult]),
                         FindResult;
                     _ -> true 
