@@ -1,7 +1,21 @@
 # Change log
 
+## Version 0.8.1 (October 2, 2021)
+* [218](https://github.com/pgourlain/vscode_erlang/issues/218) : Bump submodule 'grammar' to the latest version
+* [219](https://github.com/pgourlain/vscode_erlang/issues/219) : FIX: unused functions of names < 5 chars caused syntax checker crash
+
+Thanks to
+* [Kornel H](https://github.com/KornelH)
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+
+## Version 0.8.0 (September 8, 2021)
+* [207](https://github.com/pgourlain/vscode_erlang/issues/207) : The debugger supports log breakpoints
+
+Thanks to
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+
 ## Version 0.7.9 (September 4, 2021)
-[215](https://github.com/pgourlain/vscode_erlang/issues/215) : Fix autocomplete and hover
+* [215](https://github.com/pgourlain/vscode_erlang/issues/215) : Fix autocomplete and hover
 
 Thanks to
 * [Wojtek Surowka](https://github.com/wojteksurowka)
