@@ -1,5 +1,12 @@
 # Change log
 
+## Version 0.8.2 (November 28, 2021)
+* [222](https://github.com/pgourlain/vscode_erlang/issues/222) : Remove erlang.org help support
+
+Thanks to
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+
+
 ## Version 0.8.1 (October 2, 2021)
 * [218](https://github.com/pgourlain/vscode_erlang/issues/218) : Bump submodule 'grammar' to the latest version
 * [219](https://github.com/pgourlain/vscode_erlang/issues/219) : FIX: unused functions of names < 5 chars caused syntax checker crash
