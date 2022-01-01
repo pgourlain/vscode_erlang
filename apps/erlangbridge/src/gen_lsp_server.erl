@@ -122,8 +122,7 @@ do_contents(Socket, #{id := Id} = Input) ->
     end.
 
 call_handler(Socket, Name, ArgsMap) ->
-    Handler = list_to_atom(binary_to_list(binary:replace(Name, <<"/">>, <<"_">>))),
-    case lists:keyfind(Handler, 1, lsp_handlers:module_info(exports)) of
+    case lists:keyfind(handler_name(Name), 1, lsp_handlers:module_info(exports)) of
         false ->
             handler_not_found;
         {Function, 2} ->
@@ -131,6 +130,11 @@ call_handler(Socket, Name, ArgsMap) ->
             %lsp_log("LSP call_handler lsp_handlers:'~p':~p", [Function, ArgsMap]),
             safeApply(Function, Socket, ArgsMap)
     end.
+
+handler_name(<<"$/cancelRequest">>) ->
+    cancelRequest;
+handler_name(Name) ->
+    list_to_atom(binary_to_list(binary:replace(Name, <<"/">>, <<"_">>))).
 
 send_response_with_id(Socket, Input, Response) ->
     case maps:get(id, Input, undefined) of

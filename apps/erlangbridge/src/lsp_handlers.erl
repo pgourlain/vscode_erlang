@@ -1,6 +1,6 @@
 -module(lsp_handlers).
 
--export([initialize/2, initialized/2, shutdown/2, exit/2, configuration/2,
+-export([initialize/2, initialized/2, shutdown/2, exit/2, cancelRequest/2, configuration/2,
     workspace_didChangeConfiguration/2, workspace_didChangeWatchedFiles/2,
     textDocument_didOpen/2, textDocument_didClose/2, textDocument_didSave/2, textDocument_didChange/2,
     textDocument_definition/2, textDocument_references/2, textDocument_hover/2, textDocument_completion/2,
@@ -33,6 +33,9 @@ shutdown(_Socket, _) ->
 
 exit(_Socket, _) ->
     init:stop().
+
+cancelRequest(_Socket, _Params) ->
+    ok.
 
 configuration(Socket, [ErlangSection, ComputedSecton, HttpSection, SearchSection]) ->
     Documents = gen_lsp_doc_server:get_documents(),
