@@ -226,6 +226,11 @@
 					"type": "boolean",
 					"default": true,
 					"description": "Enable/disable help based on Erlang documentation storage added in OTP 23. The setting is ignored in earlier versions."
+				},
+				"erlang.formattingLineLength": {
+					"type": "number",
+					"default": 100,
+					"description": "Maximum line length for document formatting."
 				}
 			}
 		},

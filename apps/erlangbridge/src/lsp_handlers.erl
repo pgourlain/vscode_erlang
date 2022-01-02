@@ -18,8 +18,8 @@ initialize(_Socket, Params) ->
         textDocumentSync => 1, % Full
         definitionProvider => true,
         documentFormattingProvider => true,
-        referencesProvider => true,
-        hoverProvider => true,
+        referencesProvider => true,
+        hoverProvider => true,
         completionProvider => #{triggerCharacters => <<":#.">>},
         codeLensProvider => true,
         documentSymbolProvider => true
@@ -157,13 +157,7 @@ textDocument_formatting(_Socket, Params) ->
         StoredContents ->
             StoredContents
     end,
-    TempFile = mktemp(Contents),
-    erl_tidy:file(binary_to_list(TempFile), [
-        {backups, false},
-        {idem, true}
-    ]),
-    {ok, UpdatedContents} = file:read_file(TempFile),
-    file:delete(TempFile),
+    UpdatedContents = formatting(Contents),
     [
         #{range =>
             #{
@@ -253,6 +247,43 @@ validate_parsed_source_file(Socket, File) ->
 validate_config_file(Socket, File, ContentsFile) ->
     ErrorsWarnings = lsp_syntax:parse_config_file(File, ContentsFile),
     send_diagnostics(Socket, File, maps:get(errors_warnings, ErrorsWarnings, [])).
+
+-ifdef(OTP_RELEASE).
+    -if(?OTP_RELEASE >= 21).
+
+formatting(Contents) ->
+    case vscode_erlfmt:format_string(binary_to_list(Contents), [{print_width, gen_lsp_config_server:formatting_line_length()}]) of
+        {ok, UpdatedContents, _} -> list_to_binary(UpdatedContents);
+        {ok, UpdatedContents} -> list_to_binary(UpdatedContents);
+        _ -> Contents
+    end.
+
+    -else.
+
+formatting(Contents) ->
+    TempFile = mktemp(Contents),
+    erl_tidy:file(binary_to_list(TempFile), [
+        {backups, false},
+        {idem, true}
+    ]),
+    {ok, UpdatedContents} = file:read_file(TempFile),
+    file:delete(TempFile),
+    UpdatedContents.
+
+    -endif
+-else
+
+formatting(Contents) ->
+    TempFile = mktemp(Contents),
+    erl_tidy:file(binary_to_list(TempFile), [
+        {backups, false},
+        {idem, true}
+    ]),
+    {ok, UpdatedContents} = file:read_file(TempFile),
+    file:delete(TempFile),
+    UpdatedContents.
+
+-endif.
 
 mktemp(Contents) ->
     Rand = integer_to_list(binary:decode_unsigned(crypto:strong_rand_bytes(8)), 36) ++ ".erl",
