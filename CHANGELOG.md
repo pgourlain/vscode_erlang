@@ -1,5 +1,13 @@
 # Change log
 
+## Version 0.8.3 (January 2, 2022)
+* [224](https://github.com/pgourlain/vscode_erlang/issues/224) : Formatting uses erlfmt, some fixes
+  - erlfmt used for document formatting
+  - Debugger hover was not working for S in <<A:S
+
+Thanks to
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+
 ## Version 0.8.2 (November 28, 2021)
 * [222](https://github.com/pgourlain/vscode_erlang/issues/222) : Remove erlang.org help support
 
