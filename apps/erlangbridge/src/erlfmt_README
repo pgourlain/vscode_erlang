@@ -1,0 +1,5 @@
+The files vscode_erlfmt... have been copied from https://github.com/WhatsApp/erlfmt
+in order to keep the extension self contained. The files have been update with new
+module names (vscode_erlfmt instead of elrfmt) and functions to provide escript and
+rebar plugin functionality have been removed. The license of the original files
+is in erlfmt_LICENSE.

@@ -8,5 +8,6 @@ rebar.lock
 _build/
 /syntaxes/*.yaml
 /syntaxes/*.yaml-tmLanguage
+apps/erlangbridge/src/vscode_erlfmt_parse.erl
 dist
 

@@ -120,7 +120,7 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 		response.body.supportsHitConditionalBreakpoints = true;
 		response.body.supportsLogPoints = true;
 		response.body.supportsFunctionBreakpoints = true;
-		response.body.supportsEvaluateForHovers = false;
+		response.body.supportsEvaluateForHovers = true;
 		response.body.supportsSetVariable = false;
 		response.body.supportsStepBack = false;
 		response.body.exceptionBreakpointFilters = [];
@@ -203,7 +203,14 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 			var frameId = Math.floor(args.frameId / 100000);
 			var threadId = (args.frameId - frameId * 100000);
 			var processName = this.thread_id_to_pid(threadId);
-			this.erlangConnection.debuggerEval(processName, frameId.toString(), args.expression).then((res) => {
+			var expression = args.expression;
+			if (args.context === "hover") {
+				var splitByColon = expression.split(':');
+				if (splitByColon.length === 2) {
+					expression = splitByColon[1];
+				}
+			}
+			this.erlangConnection.debuggerEval(processName, frameId.toString(), expression).then((res) => {
 				var result = this.mapRawVariables(res);
 				response.body = {
 					result: result.value,
