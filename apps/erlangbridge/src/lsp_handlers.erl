@@ -270,8 +270,8 @@ formatting(Contents) ->
     file:delete(TempFile),
     UpdatedContents.
 
-    -endif
--else
+    -endif.
+-else.
 
 formatting(Contents) ->
     TempFile = mktemp(Contents),
