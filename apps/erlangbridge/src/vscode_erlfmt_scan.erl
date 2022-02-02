@@ -347,9 +347,9 @@ get_inner_end_line(Anno) ->
     element(1, get_anno(inner_end_location, Anno, get_anno(end_location, Anno))).
 
 get_anno(Key, Anno) when is_map(Anno) ->
-    map_get(Key, Anno);
+    maps:get(Key, Anno);
 get_anno(Key, Node) when is_tuple(Node) ->
-    map_get(Key, element(2, Node)).
+    maps:get(Key, element(2, Node)).
 
 get_anno(Key, Anno, Default) when is_map(Anno) ->
     maps:get(Key, Anno, Default);
@@ -357,7 +357,7 @@ get_anno(Key, Node, Default) when is_tuple(Node) ->
     maps:get(Key, element(2, Node), Default).
 
 update_anno(Key, Fun, Anno) when is_map(Anno) ->
-    Anno#{Key => Fun(map_get(Key, Anno))};
+    Anno#{Key => Fun(maps:get(Key, Anno))};
 update_anno(Key, Fun, Node) when is_tuple(Node) ->
     setelement(2, Node, update_anno(Key, Fun, element(2, Node))).
 
