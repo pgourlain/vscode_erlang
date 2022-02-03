@@ -1005,13 +1005,13 @@ Erlang code.
 -define(val(Tok), element(1, Tok)).
 
 -define(range_anno(Tok1, Tok2), #{
-    location => map_get(location, ?anno(Tok1)),
-    end_location => map_get(end_location, ?anno(Tok2))
+    location => maps:get(location, ?anno(Tok1)),
+    end_location => maps:get(end_location, ?anno(Tok2))
 }).
 
 -define(range_upto_anno(Tok1, Tok2), #{
-    location => map_get(location, ?anno(Tok1)),
-    end_location => decrement_location(map_get(location, ?anno(Tok2)))
+    location => maps:get(location, ?anno(Tok1)),
+    end_location => decrement_location(maps:get(location, ?anno(Tok2)))
 }).
 
 %% Entry points compatible to old erl_parse.

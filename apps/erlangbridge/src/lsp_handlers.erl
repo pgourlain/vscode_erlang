@@ -89,7 +89,9 @@ textDocument_didChange(Socket, Params) ->
     case filename:extension(File) of
         ".erl" ->
             [ContentChange] = maps:get(contentChanges, Params),
-            
+            gen_lsp_doc_server:set_document_attribute(File, contents, maps:get(text, ContentChange));
+        ".hrl" ->
+            [ContentChange] = maps:get(contentChanges, Params),
             gen_lsp_doc_server:set_document_attribute(File, contents, maps:get(text, ContentChange));
         _ ->
             ok
@@ -270,8 +272,8 @@ formatting(Contents) ->
     file:delete(TempFile),
     UpdatedContents.
 
-    -endif
--else
+    -endif.
+-else.
 
 formatting(Contents) ->
     TempFile = mktemp(Contents),
