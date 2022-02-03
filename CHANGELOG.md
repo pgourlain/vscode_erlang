@@ -1,5 +1,14 @@
 # Change log
 
+## Version 0.8.4 (February 3, 2022)
+* [223](https://github.com/pgourlain/vscode_erlang/issues/223) : Formating a *.erl file will cause error
+* [225](https://github.com/pgourlain/vscode_erlang/issues/225) : go to function definition stopped working
+* [226](https://github.com/pgourlain/vscode_erlang/issues/226) : lsp_handlers.erl:160: function formatting/1 undefined
+
+Thanks to
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+
+
 ## Version 0.8.3 (January 2, 2022)
 * [224](https://github.com/pgourlain/vscode_erlang/issues/224) : Formatting uses erlfmt, some fixes
   - erlfmt used for document formatting
