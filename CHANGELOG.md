@@ -1,5 +1,16 @@
 # Change log
 
+## Version 0.8.5 (August 9, 2022)
+
+* [227](https://github.com/pgourlain/vscode_erlang/issues/227) : Bug fixes on previous 223/225/226 PRs
+* [232](https://github.com/pgourlain/vscode_erlang/issues/232) : Use single binary closing pair
+* [235](https://github.com/pgourlain/vscode_erlang/issues/235) : rebar3 upgrade
+
+
+Thanks to
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+* [William Fank Thomé](https://github.com/williamthome)
+
 ## Version 0.8.4 (February 3, 2022)
 * [223](https://github.com/pgourlain/vscode_erlang/issues/223) : Formating a *.erl file will cause error
 * [225](https://github.com/pgourlain/vscode_erlang/issues/225) : go to function definition stopped working
