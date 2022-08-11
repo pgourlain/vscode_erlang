@@ -1,5 +1,12 @@
 # Change log
 
+## Version 0.8.6 (August 11, 2022)
+
+* [237](https://github.com/pgourlain/vscode_erlang/issues/237) : Use rebar3 path from Settings
+  - by default embbeded rebar is working only for OTP 24 and after. So to use oldest rebar3, set "Rebar path settings"
+  ![rebar-path-settings](images/vscode-erlang-rebarpath-settings.png)
+
+
 ## Version 0.8.5 (August 9, 2022)
 
 * [227](https://github.com/pgourlain/vscode_erlang/issues/227) : Bug fixes on previous 223/225/226 PRs
