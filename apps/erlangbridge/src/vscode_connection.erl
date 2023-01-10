@@ -24,7 +24,7 @@ compile_argumentsfile() ->
         %compile file to interpret int:ni(..), list of breapoints int:break(...)
          case compile:file(FileName, [binary]) of
             {ok, ModuleName, Binary} -> 
-                io:format("Compile result: sucess ~n", []),
+                io:format("Compile result: success ~n", []),
                 case code:load_binary(ModuleName, lists:flatten(io_lib:format("~p.beam", [ModuleName])), Binary) of
                     {module, _} -> 
                        io:format("Module ~p loaded~n", [ModuleName]),
