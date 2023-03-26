@@ -279,7 +279,7 @@
 		"@typescript-eslint/parser": "^3.0.2",
 		"eslint": "^7.1.0",
 		"glob": "^7.1.4",
-		"mocha": "^6.1.4",
+		"mocha": "^10.2.0",
 		"source-map-support": "^0.5.12",
 		"ts-loader": "^8.1.0",
 		"typescript": "^3.9.4",
