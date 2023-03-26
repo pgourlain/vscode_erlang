@@ -1,5 +1,9 @@
 # Change log
 
+## Version 0.8.7 (March 26, 2023)
+
+* [247](https://github.com/pgourlain/vscode_erlang/issues/247)  : Revert #232, Back to double binary closing pairs.
+
 ## Version 0.8.6 (August 11, 2022)
 
 * [237](https://github.com/pgourlain/vscode_erlang/issues/237) : Use rebar3 path from Settings
