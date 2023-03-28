@@ -5,7 +5,7 @@
 
 -export([init/1,handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([set_document_attribute/3, remove_document/1, get_document_attribute/2, get_documents/0]).
--export([root_available/0, project_modules/0, add_project_file/1, remove_project_file/1, get_module_file/1, get_module_beam/1]).
+-export([root_available/0, project_modules/0, add_project_file/1, remove_project_file/1, get_module_file/1, get_module_beam/1, get_build_dir/0]).
 
 -define(SERVER, ?MODULE).
 

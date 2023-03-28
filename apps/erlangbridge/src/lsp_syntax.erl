@@ -21,7 +21,7 @@ validate_parsed_source_file(File) ->
     FileSyntaxTree = gen_lsp_doc_server:get_document_attribute(File, syntax_tree),
     BehaviourModulea = behaviour_modules(FileSyntaxTree),
     ParseTranformModules = parse_transforms(FileSyntaxTree),
-    ModulesToDelete = load_unloaded_modules(BehaviourModulea ++ ParseTranformModules),
+    ModulesToDelete = load_not_loaded_modules(BehaviourModulea ++ ParseTranformModules),
     NewFileSyntaxTree = parse_transform(FileSyntaxTree, ParseTranformModules),
     Result = lint(NewFileSyntaxTree, File),
     code_delete(ModulesToDelete),
@@ -123,27 +123,45 @@ parse_transforms(FileSyntaxTree) ->
         (_) -> false
     end, FileSyntaxTree).
 
-load_unloaded_modules(Modules) ->
+load_not_loaded_modules(Modules) ->
     lists:foldl(fun (Module, Acc) ->
-        case gen_lsp_doc_server:get_module_file(Module) of
-            undefined ->
-                Acc;
-            SourceFile -> 
-                case compile:file(SourceFile, [binary]) of
-                    {ok, ModuleName, Binary} -> 
-                        case code:load_binary(ModuleName, lists:flatten(io_lib:format("~p.beam", [ModuleName])), Binary) of
-                            {module, _} ->
-                                [Module | Acc];
-                            Error -> 
-                                gen_lsp_server:lsp_log("loading binary of compiled module '~p' failed: ~p", [SourceFile, Error]),
+        case code:is_loaded(Module) of
+            false ->
+                case find_source(Module) of
+                    undefined ->
+                        gen_lsp_server:lsp_log("cannot find module '~p'", [Module]),
+                        Acc;
+                    SourceFile -> 
+                        case compile:file(SourceFile, [binary]) of
+                            {ok, ModuleName, Binary} -> 
+                                case code:load_binary(ModuleName, lists:flatten(io_lib:format("~p.beam", [ModuleName])), Binary) of
+                                    {module, _} ->
+                                        [Module | Acc];
+                                    Error -> 
+                                        gen_lsp_server:lsp_log("loading binary of compiled module '~p' failed: ~p", [SourceFile, Error]),
+                                        Acc
+                                end;
+                            Error ->
+                                gen_lsp_server:lsp_log("compilation of module '~p' failed: ~p", [SourceFile, Error]),
                                 Acc
-                        end;
-                    Error ->
-                        gen_lsp_server:lsp_log("compilation of module '~p' failed: ~p", [SourceFile, Error]),
-                        Acc
-                end
+                        end
+                end;
+            _ ->
+                Acc
         end
     end, [], Modules).
+
+find_source(Module) ->
+    case gen_lsp_doc_server:get_module_file(Module) of
+        undefined ->
+            BuildDir = filename:join(gen_lsp_config_server:root(), gen_lsp_doc_server:get_build_dir()),
+            case filelib:wildcard(BuildDir ++ "/**/" ++ atom_to_list(Module) ++ ".erl") of
+                [SourceFile | _] -> SourceFile;
+                [] -> undefined
+            end;
+        SourceFile ->
+            SourceFile
+    end.
 
 code_delete([Module | Modules]) ->
     case code:purge(Module) of
