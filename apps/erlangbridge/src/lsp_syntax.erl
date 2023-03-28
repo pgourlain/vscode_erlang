@@ -19,25 +19,12 @@ parse_source_file(File, ContentsFile) ->
 
 validate_parsed_source_file(File) ->
     FileSyntaxTree = gen_lsp_doc_server:get_document_attribute(File, syntax_tree),
-    ModuleToDelete = case should_load_behaviour_module(FileSyntaxTree) of
-		undefined -> undefined;
-		BehaviourModule -> load_behaviour_module(BehaviourModule)
-	end,
-    % apply parse_tranform compile directive if exists
-    ParseTranformModulesToDelete = case should_load_parse_transform(FileSyntaxTree) of
-		undefined -> undefined;
-		ParseTranformsModule -> load_transform_modules(ParseTranformsModule)
-	end,
-    NewFileSyntaxTree = parse_transform(FileSyntaxTree, ParseTranformModulesToDelete),
+    BehaviourModulea = behaviour_modules(FileSyntaxTree),
+    ParseTranformModules = parse_transforms(FileSyntaxTree),
+    ModulesToDelete = load_unloaded_modules(BehaviourModulea ++ ParseTranformModules),
+    NewFileSyntaxTree = parse_transform(FileSyntaxTree, ParseTranformModules),
     Result = lint(NewFileSyntaxTree, File),
-    case ModuleToDelete of
-        undefined -> void;
-        _ -> code:delete(ModuleToDelete)
-    end,
-    case ParseTranformModulesToDelete of
-        undefined -> void;
-        _ -> code_delete(ParseTranformModulesToDelete)
-    end,
+    code_delete(ModulesToDelete),
     Result.
 
 parse_config_file(File, ContentsFile) ->
@@ -120,65 +107,43 @@ update_file_in_forms(File, ContentsFile, FileSyntaxTree) ->
               Form
 	      end, FileSyntaxTree).
 
-should_load_behaviour_module(undefined) -> undefined;
-should_load_behaviour_module(FileSyntaxTree) ->
-    BehaviourModule = lists:foldl(fun 
-        ({attribute, _, behaviour, Module}, undefined) -> Module;
-		(_, Acc) -> Acc
-	end, undefined, FileSyntaxTree),
-    case BehaviourModule of
-        undefined -> undefined;
-        _ ->
-	        case code:is_loaded(BehaviourModule) of
-	            false -> BehaviourModule;
-	            _ -> undefined
-	        end
-    end.
+behaviour_modules(undefined) ->
+    [];
+behaviour_modules(FileSyntaxTree) ->
+    lists:filtermap(fun 
+        ({attribute, _, behaviour, Module}) -> {true, Module};
+		(_) -> false
+	end, FileSyntaxTree).
 
-load_behaviour_module(BehaviourModule) ->
-    case gen_lsp_doc_server:get_module_beam(BehaviourModule) of
-        undefined -> undefined;
-        BeamFile ->
-            case code:load_abs(BeamFile) of
-                {module, _} -> BehaviourModule;
-                _ -> undefined
-            end
-    end.
+parse_transforms(undefined) ->
+    [];
+parse_transforms(FileSyntaxTree) ->
+    lists:filtermap(fun 
+        ({attribute, _, compile, {parse_transform, Module}}) -> {true, Module}; 
+        (_) -> false
+    end, FileSyntaxTree).
 
-should_load_parse_transform(undefined) -> undefined;
-should_load_parse_transform(FileSyntaxTree) ->
-    PasreTransform = lists:filtermap(fun (X) ->
-            case X of
-                {attribute, _, compile, {parse_transform, Module}} -> {true, Module}; 
-                _ -> false
-            end
-		end,
-		FileSyntaxTree),
-    %gen_lsp_server:lsp_log("should_load_parse_transform: ~p",
-	%		   [PasreTransform]),
-    PasreTransform.
-
-load_transform_module(TransformModule) ->
-    case gen_lsp_doc_server:get_module_file(TransformModule) of
-      undefined -> false;
-      SourceFile -> 
-        case compile:file(SourceFile, [binary]) of
-            {ok, ModuleName, Binary} -> 
-                case code:load_binary(ModuleName, lists:flatten(io_lib:format("~p.beam", [ModuleName])), Binary) of
-                    {module, _} -> true;
-                    Error -> 
-                        gen_lsp_server:lsp_log("loading binary of parse_transform module '~p' failed: ~p",
-                    		   [SourceFile, Error]),
-                        false
-                end;
-            Error ->
-                gen_lsp_server:lsp_log("compilation of parse_transform module '~p' failed: ~p",
-                    		   [SourceFile, Error]),
-                false
-        end        
-    end.
-load_transform_modules(Modules) ->
-    [M || M <- Modules, load_transform_module(M)].
+load_unloaded_modules(Modules) ->
+    lists:foldl(fun (Module, Acc) ->
+        case gen_lsp_doc_server:get_module_file(Module) of
+            undefined ->
+                Acc;
+            SourceFile -> 
+                case compile:file(SourceFile, [binary]) of
+                    {ok, ModuleName, Binary} -> 
+                        case code:load_binary(ModuleName, lists:flatten(io_lib:format("~p.beam", [ModuleName])), Binary) of
+                            {module, _} ->
+                                [Module | Acc];
+                            Error -> 
+                                gen_lsp_server:lsp_log("loading binary of compiled module '~p' failed: ~p", [SourceFile, Error]),
+                                Acc
+                        end;
+                    Error ->
+                        gen_lsp_server:lsp_log("compilation of module '~p' failed: ~p", [SourceFile, Error]),
+                        Acc
+                end
+        end
+    end, [], Modules).
 
 code_delete([Module | Modules]) ->
     case code:purge(Module) of
