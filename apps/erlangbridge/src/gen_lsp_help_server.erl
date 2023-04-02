@@ -58,15 +58,9 @@ handle_call(_Request, _From, State) ->
 -ifdef(OTP_RELEASE).
     -if(?OTP_RELEASE >= 23).
     get_help_eep48(Module, Function) ->
-        case gen_lsp_config_server:eep48_help() of
-            true ->
-                case code:get_doc(Module) of
-                    {ok, HelpModule} -> eep48_render_fun_doc(Module, Function, HelpModule);
-                    _ -> {error, doc_unavailable}
-                end;
-            _ -> 
-                gen_lsp_server:lsp_log("get_help_eep48 not enabled in config",[]),
-                {error, eep48_not_enabled}
+        case code:get_doc(Module) of
+            {ok, HelpModule} -> eep48_render_fun_doc(Module, Function, HelpModule);
+            _ -> {error, doc_unavailable}
         end.
     -else.
     get_help_eep48(_Module, _Function) ->
