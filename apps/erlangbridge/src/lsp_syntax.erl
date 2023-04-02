@@ -131,7 +131,7 @@ load_not_loaded_modules(Modules) ->
                     undefined ->
                         gen_lsp_server:lsp_log("cannot find module '~p'", [Module]),
                         Acc;
-                    SourceFile -> 
+                    SourceFile ->
                         case compile:file(SourceFile, [binary]) of
                             {ok, ModuleName, Binary} -> 
                                 case code:load_binary(ModuleName, lists:flatten(io_lib:format("~p.beam", [ModuleName])), Binary) of
@@ -350,37 +350,30 @@ parse_transform(FileSyntaxTree, Transformers) ->
 
 
 lint(FileSyntaxTree, File) ->
-    %%no lint for erlang file under erlang lib dir
     LintResult = case lsp_utils:is_erlang_lib_file(File) of
         false when FileSyntaxTree /= undefined ->
-            erl_lint:module(FileSyntaxTree, File,[ {strong_validation} ]);
-        _ -> {ok, []}
+            erl_lint:module(FileSyntaxTree, File, [strong_validation, {feature, all, enable}]);
+        _ ->
+            {ok, []}
     end,
     case LintResult of
-      % nothing wrong
-      {ok, []} -> #{parse_result => true};
-      % just warnings
-      {ok, [Warnings]} ->
-	  #{parse_result => true,
-	    errors_warnings =>
-		extract_error_or_warning(<<"warning">>, filter_unused_functions(Warnings))};
-      % errors, no warnings
-      {error, [Errors], []} ->
-	  #{parse_result => true,
-	    errors_warnings =>
-		extract_error_or_warning(<<"error">>, Errors)};
-      % errors and warnings
-      {error, [Errors], [Warnings]} ->
-	  #{parse_result => true,
-	    errors_warnings =>
-		extract_error_or_warning(<<"error">>, Errors) ++
-		  extract_error_or_warning(<<"warning">>, filter_unused_functions(Warnings))};
-      {error, [], [Warnings]} ->
-	  #{parse_result => true,
-	    errors_warnings =>
-		extract_error_or_warning(<<"warning">>, filter_unused_functions(Warnings))};
-      _Any ->
-	  #{parse_result => false, error_message => <<"lint error">>}
+        {ok, []} ->
+            #{parse_result => true};
+        {ok, [Warnings]} ->
+            ErrorsWarnings = extract_error_or_warning(<<"warning">>, filter_unused_functions(Warnings)),
+	        #{parse_result => true, errors_warnings => ErrorsWarnings};
+        {error, [Errors], []} ->
+            ErrorsWarnings = extract_error_or_warning(<<"error">>, Errors),
+	        #{parse_result => true, errors_warnings => ErrorsWarnings};
+        {error, [Errors], [Warnings]} ->
+            ErrorsWarnings = extract_error_or_warning(<<"error">>, Errors) ++
+                    extract_error_or_warning(<<"warning">>, filter_unused_functions(Warnings)),
+	        #{parse_result => true, errors_warnings => ErrorsWarnings};
+        {error, [], [Warnings]} ->
+            ErrorsWarnings = extract_error_or_warning(<<"warning">>, filter_unused_functions(Warnings)),
+	        #{parse_result => true, errors_warnings => ErrorsWarnings};
+        _Any ->
+	        #{parse_result => false, error_message => <<"lint error">>}
     end.
 
 filter_unused_functions({_, []}) ->

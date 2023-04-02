@@ -50,7 +50,7 @@ Terminals
 char integer float atom string var
 
 '(' ')' ',' '->' '{' '}' '[' ']' '|' '||' '<-' ';' ':' '#' '.'
-'after' 'begin' 'case' 'try' 'catch' 'end' 'fun' 'if' 'of' 'receive' 'when'
+'after' 'begin' 'case' 'try' 'catch' 'end' 'fun' 'if' 'maybe' 'of' 'receive' 'when'
 'andalso' 'orelse'
 'bnot' 'not'
 '*' '/' 'div' 'rem' 'band' 'and'
@@ -241,6 +241,7 @@ expr_max -> '(' expr ')' : set_parens('$2').
 expr_max -> 'begin' exprs 'end' : {block,?range_anno('$1', '$3'),'$2'}.
 expr_max -> if_expr : '$1'.
 expr_max -> case_expr : '$1'.
+expr_max -> 'maybe' exprs 'end' : {block,?range_anno('$1', '$3'),'$2'}.
 expr_max -> receive_expr : '$1'.
 expr_max -> fun_expr : '$1'.
 expr_max -> try_expr : '$1'.
