@@ -222,11 +222,6 @@
 						"inline: launch debugadapter in current process"
 					]
 				},
-				"erlang.eep48Help": {
-					"type": "boolean",
-					"default": true,
-					"description": "Enable/disable help based on Erlang documentation storage added in OTP 23. The setting is ignored in earlier versions."
-				},
 				"erlang.formattingLineLength": {
 					"type": "number",
 					"default": 100,

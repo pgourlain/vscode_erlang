@@ -133,7 +133,7 @@ export function activate(context: ExtensionContext) {
 
             // Start of clause, right hand side of an assignment, after 'after', etc.
             {
-                beforeText: /^.*(->|[^=]=|\s+(after|case|catch|if|of|receive|try))\s*$/,
+                beforeText: /^.*(->|[^=]=|\s+(after|begin|case|catch|if|maybe|of|receive|try))\s*$/,
                 action: { indentAction: IndentAction.Indent }
             },
 

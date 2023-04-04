@@ -19,7 +19,6 @@ function couldBeOutput(line: string) {
  * Defines support for log output from the GenericShell class.
  */
 export interface ILogOutput {
-    show(): void;
     appendLine(value: string): void;
     debug(msg : string) : void;
 }
@@ -85,7 +84,6 @@ export class GenericShell extends EventEmitter {
     protected LaunchProcess(processName, startDir: string, args: string[], quiet: boolean = false): Promise<boolean> {
         return new Promise<boolean>((resolve, reject) => {
             try {
-                this.logOutput && this.logOutput.show();
                 if (!quiet) {
                     if (this.erlangPath) {
                         this.log("log",`using erlang binaries from path : '${this.erlangPath}'`);
