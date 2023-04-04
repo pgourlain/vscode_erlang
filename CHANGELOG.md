@@ -1,8 +1,23 @@
 # Change log
+## Version 0.8.8 (April 4, 2023)
+
+* [252](https://github.com/pgourlain/vscode_erlang/issues/252)  : Fixes and improvements 
+  - Extension output is no longer opened automatically : fix [230](https://github.com/pgourlain/vscode_erlang/issues/230)
+  - Improvements in behaviours support
+  - Indent works for begin and [maybe](https://www.erlang.org/doc/reference_manual/expressions.html#maybe)
+  - Hover help always on if available in Erlang distribution
+    - erlang.eep48Help configuration section is removed
+
+Thanks to
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+
+---
 
 ## Version 0.8.7 (March 26, 2023)
 
 * [247](https://github.com/pgourlain/vscode_erlang/issues/247)  : Revert #232, Back to double binary closing pairs.
+
+---
 
 ## Version 0.8.6 (August 11, 2022)
 
@@ -10,6 +25,7 @@
   - by default embbeded rebar is working only for OTP 24 and after. So to use oldest rebar3, set "Rebar path settings"
   ![rebar-path-settings](images/vscode-erlang-rebarpath-settings.png)
 
+---
 
 ## Version 0.8.5 (August 9, 2022)
 
@@ -22,6 +38,8 @@ Thanks to
 * [Wojtek Surowka](https://github.com/wojteksurowka)
 * [William Fank Thomé](https://github.com/williamthome)
 
+---
+
 ## Version 0.8.4 (February 3, 2022)
 * [223](https://github.com/pgourlain/vscode_erlang/issues/223) : Formating a *.erl file will cause error
 * [225](https://github.com/pgourlain/vscode_erlang/issues/225) : go to function definition stopped working
@@ -30,6 +48,7 @@ Thanks to
 Thanks to
 * [Wojtek Surowka](https://github.com/wojteksurowka)
 
+---
 
 ## Version 0.8.3 (January 2, 2022)
 * [224](https://github.com/pgourlain/vscode_erlang/issues/224) : Formatting uses erlfmt, some fixes
@@ -39,12 +58,15 @@ Thanks to
 Thanks to
 * [Wojtek Surowka](https://github.com/wojteksurowka)
 
+---
+
 ## Version 0.8.2 (November 28, 2021)
 * [222](https://github.com/pgourlain/vscode_erlang/issues/222) : Remove erlang.org help support
 
 Thanks to
 * [Wojtek Surowka](https://github.com/wojteksurowka)
 
+---
 
 ## Version 0.8.1 (October 2, 2021)
 * [218](https://github.com/pgourlain/vscode_erlang/issues/218) : Bump submodule 'grammar' to the latest version
