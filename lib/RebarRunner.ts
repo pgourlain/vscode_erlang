@@ -112,21 +112,37 @@ export class RebarRunner implements vscode.Disposable {
 		}
 	}
 
+	private lineAndMessage(input: string): [number, number, string] | null {
+		var lineAndMessage1 = new RegExp("^ *Line +([0-9]+) +Column +([0-9]+): +(.+)$");
+		var match1 = lineAndMessage1.exec(input);
+		if (match1) {
+			return [Number(match1[1]), Number(match1[2]), match1[3]];
+		}
+		else {
+			var lineAndMessage2 = new RegExp("^ +([0-9]+): *(.+)$");
+			var match2 = lineAndMessage2.exec(input);
+			if (match2) {
+				return [Number(match2[1]), 1, match2[2]];
+			}
+		}
+		return null;
+	}
+
     private runDialyzer(): void {
 		try {
+			const statusBarMessage = vscode.window.setStatusBarMessage('$(loading~spin) Running Dialyzer');
 			this.runScript(["dialyzer"]).then(data => {
                 this.diagnosticCollection.clear();
                 var lines = data.split("\n");
                 var currentFile = null;
-        		var lineAndMessage = new RegExp("^ +([0-9]+): *(.+)$");
                 var diagnostics: { [id: string]: vscode.Diagnostic[]; } = {};
                 for (var i = 0; i < lines.length; ++i) {
                     if (lines[i]) {
-                        var match = lineAndMessage.exec(lines[i]);
+                        var match = this.lineAndMessage(lines[i]);
                         if (match && currentFile) {
                             if (!diagnostics[currentFile])
                                 diagnostics[currentFile] = [];
-                            var range = new vscode.Range(Number(match[1]) - 1, 0, Number(match[1]) - 1, 255);
+                            var range = new vscode.Range(match[0] - 1, match[1] - 1, match[0] - 1, 255);
                             diagnostics[currentFile].push(new vscode.Diagnostic(range , match[2], vscode.DiagnosticSeverity.Information));
                         }
                         else {
@@ -145,6 +161,9 @@ export class RebarRunner implements vscode.Disposable {
                 });
                 if (utils.keysFromDictionary(diagnostics).length > 0)
                     vscode.commands.executeCommand("workbench.action.problems.focus");
+				else
+					vscode.window.showInformationMessage('Dialyzer did not find any problems');
+				statusBarMessage.dispose();
             }, reject => {});
 		} catch (e) {
 			vscode.window.showErrorMessage('Couldn\'t execute rebar.\n' + e);
