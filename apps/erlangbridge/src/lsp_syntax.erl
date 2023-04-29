@@ -132,7 +132,8 @@ load_not_loaded_modules(Modules) ->
                         gen_lsp_server:lsp_log("cannot find module '~p'", [Module]),
                         Acc;
                     SourceFile ->
-                        case compile:file(SourceFile, [binary]) of
+                        Options = [binary, report_errors, report_warningsk | [{i, Path} || Path <- get_include_path(SourceFile)]],
+                        case compile:file(SourceFile, Options) of
                             {ok, ModuleName, Binary} -> 
                                 case code:load_binary(ModuleName, lists:flatten(io_lib:format("~p.beam", [ModuleName])), Binary) of
                                     {module, _} ->
