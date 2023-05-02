@@ -1,4 +1,16 @@
 # Change log
+
+## Version 0.8.9 (May 2, 2023)
+
+* [253](https://github.com/pgourlain/vscode_erlang/issues/253) : 
+  - Dialyzer shows status bar messages and add found issues to Problems pane
+  - Not standard behaviours/parse transforms are now compiled with the correct include paths
+
+Thanks to
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+
+---
+
 ## Version 0.8.8 (April 4, 2023)
 
 * [252](https://github.com/pgourlain/vscode_erlang/issues/252)  : Fixes and improvements 
