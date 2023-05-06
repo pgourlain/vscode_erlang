@@ -7,6 +7,7 @@ import * as path from 'path';
 import * as utils from './utils';
 import * as adapter from './vscodeAdapter';
 import { erlangBridgePath } from './erlangConnection';
+import { getElangConfigConfiguration } from './ErlangConfigurationProvider';
 
 
 export class EunitRunner implements vscode.Disposable {
@@ -61,8 +62,9 @@ export class EunitRunner implements vscode.Disposable {
 
                 this.parseForDiag(results.testcases, diagnostics);
                 var keys = utils.keysFromDictionary(diagnostics);
+                const rootPath = getElangConfigConfiguration().rootPath;
                 keys.forEach(element => {
-                    var fileUri = vscode.Uri.file(path.join(vscode.workspace.rootPath, element));
+                    var fileUri = vscode.Uri.file(path.join(rootPath, element));
                     var diags = diagnostics[element];
                     this.diagnosticCollection.set(fileUri, diags);
                 });
@@ -148,7 +150,8 @@ function logTitle(title: string) {
 
 function runEUnitRequirements(): Thenable<boolean> {
     return new Promise<boolean>((a, r) => {
-        var rebarConfig = path.join(vscode.workspace.rootPath, "rebar.config");
+        const rootPath = getElangConfigConfiguration().rootPath;
+        var rebarConfig = path.join(rootPath, "rebar.config");
         if (fs.existsSync(rebarConfig)) {
             a(true);
         }
@@ -160,14 +163,14 @@ function runEUnitRequirements(): Thenable<boolean> {
 
 function readRebarConfigWithErlangShell(): Thenable<CompileArgs> {
     return new Promise<CompileArgs>((a, r) => {
-
+        const rootPath = getElangConfigConfiguration().rootPath;
         var erlangShell = new erlang.ErlangShell();
         erlangShell.erlangPath = vscode.workspace.getConfiguration("erlang").get("erlangPath", null);
 
-        erlangShell.Start(vscode.workspace.rootPath, []).then(
+        erlangShell.Start(rootPath, []).then(
             _ => {
                 var compileArgs = new CompileArgs();
-                var content = fs.readFileSync(path.join(vscode.workspace.rootPath, "rebarconfig.json"), "utf-8");
+                var content = fs.readFileSync(path.join(rootPath, "rebarconfig.json"), "utf-8");
                 var o = JSON.parse(content);
                 compileArgs.IncludeDirs = o.IncludeDirs;
                 if (compileArgs.IncludeDirs) {
@@ -226,12 +229,14 @@ function relativePathTo(ref: string, value: string): string {
 function findErlangFiles(dirAndPattern: string): Thenable<string[]> {
     //find file from the root of current workspace
     return vscode.workspace.findFiles(dirAndPattern, "").then((files: vscode.Uri[]) => {
-        return files.map((v, i, a) => relativeTo(vscode.workspace.rootPath, v.fsPath));
+        const rootPath = getElangConfigConfiguration().rootPath;
+        return files.map((v, i, a) => relativeTo(rootPath, v.fsPath));
     });
 }
 
 function mapToFirstDirLevel(x: vscode.Uri): string {
-    var y = relativeTo(vscode.workspace.rootPath, x.fsPath);
+    const rootPath = getElangConfigConfiguration().rootPath;
+    var y = relativeTo(rootPath, x.fsPath);
     return y.split(path.sep)[0];
 }
 
@@ -262,7 +267,8 @@ function cleanDirectory(dir: string) {
 }
 
 function compile(compileArgs: CompileArgs): Thenable<string[]> {
-    var eunitDir = path.join(vscode.workspace.rootPath, eunitDirectory);
+    const rootPath = getElangConfigConfiguration().rootPath;
+    var eunitDir = path.join(rootPath, eunitDirectory);
     if (fs.existsSync(eunitDir)) {
         cleanDirectory(eunitDir);
     }
@@ -284,8 +290,7 @@ function compile(compileArgs: CompileArgs): Thenable<string[]> {
             var argsCmd = args.IncludeDirs.concat(["-o", eunitDirectory]).concat(args.ErlangFiles);
             var erlc = new erlang.ErlangCompilerShell();
             erlc.erlangPath = vscode.workspace.getConfiguration("erlang").get("erlangPath", null);
-
-            return erlc.Start(vscode.workspace.rootPath, argsCmd.map<string>(x => x.toString()))
+            return erlc.Start(rootPath, argsCmd.map<string>(x => x.toString()))
                 .then(exitCode => {
                     return args.ErlangFiles;
                 });
@@ -322,9 +327,10 @@ function walkdir(dir: string, done: (err: NodeJS.ErrnoException, files: string[]
 
 function findebinDirs(): Thenable<string[]> {
     return new Promise<string[]>((a, r) => {
-        walkdir(vscode.workspace.rootPath, (err, files) => {
+        const rootPath = getElangConfigConfiguration().rootPath;
+        walkdir(rootPath, (err, files) => {
             if (err) r(err);
-            a(files.map(x => relativePathTo(vscode.workspace.rootPath, path.resolve(x, "dummy.txt"))));
+            a(files.map(x => relativePathTo(rootPath, path.resolve(x, "dummy.txt"))));
         },
             //accept only directory that contains ebin 
             (dirName, fullPath) => dirName.match(/ebin/gi) != null)
@@ -338,9 +344,10 @@ function runTests(filenames: string[]): Thenable<TestResults> {
             var moduleNames = filenames.map((v, i, a) => to_modulename(v));
             insertBeforeEachElement(pzDirs, "-pz");
             var args = pzDirs.concat(["-pz", "./" + eunitDirectory]);
-            erlangShell.Start(vscode.workspace.rootPath, args).then(
+            const rootPath = getElangConfigConfiguration().rootPath;
+            erlangShell.Start(rootPath, args).then(
                 _ => {
-                    var jsonResults = fs.readFileSync(path.resolve(vscode.workspace.rootPath, ".eunit", "testsuite_results.json"), "utf-8")
+                    var jsonResults = fs.readFileSync(path.resolve(rootPath, ".eunit", "testsuite_results.json"), "utf-8")
                     var typedResults = (<TestResults>JSON.parse(jsonResults));
                     a(typedResults);
                 },

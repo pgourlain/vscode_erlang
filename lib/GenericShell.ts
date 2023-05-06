@@ -56,7 +56,7 @@ export class GenericShell extends EventEmitter {
                 } else {
                     erlangPath = path.normalize(erlangPath);
                     if (! fs.existsSync(erlangPath)) {
-                        erlangPath = path.join(erlangConfiguration.rootPath, erlangPath);// vscode.workspace.rootPath, erlangPath);
+                        erlangPath = path.join(erlangConfiguration.rootPath, erlangPath);
                     }
                     if (fs.existsSync(erlangPath)) {
                         this.erlangPath = erlangPath;

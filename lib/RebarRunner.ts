@@ -96,8 +96,9 @@ export class RebarRunner implements vscode.Disposable {
 		var errors = new RegExp("^(.*):(\\d+):(.*)$", "gmi");
 		data = this.parseForDiag(data, diagnostics, errors, vscode.DiagnosticSeverity.Error);
 		var keys = utils.keysFromDictionary(diagnostics);
+		const rootPath = getElangConfigConfiguration().rootPath;
 		keys.forEach(element => {
-			var fileUri = vscode.Uri.file(path.join(vscode.workspace.rootPath, element));
+			var fileUri = vscode.Uri.file(path.join(rootPath, element));
 			var diags = diagnostics[element];
 			this.diagnosticCollection.set(fileUri, diags);
 		});
@@ -136,6 +137,7 @@ export class RebarRunner implements vscode.Disposable {
                 var lines = data.split("\n");
                 var currentFile = null;
                 var diagnostics: { [id: string]: vscode.Diagnostic[]; } = {};
+				const rootPath = getElangConfigConfiguration().rootPath;
                 for (var i = 0; i < lines.length; ++i) {
                     if (lines[i]) {
                         var match = this.lineAndMessage(lines[i]);
@@ -146,7 +148,7 @@ export class RebarRunner implements vscode.Disposable {
                             diagnostics[currentFile].push(new vscode.Diagnostic(range , match[2], vscode.DiagnosticSeverity.Information));
                         }
                         else {
-                            var filepath = path.join(vscode.workspace.rootPath, lines[i]);
+                            var filepath = path.join(rootPath, lines[i]);
                             if (fs.existsSync(filepath))
                                 currentFile = filepath;
                         }
@@ -178,12 +180,13 @@ export class RebarRunner implements vscode.Disposable {
 	private getRebarSearchPaths(): string[] {
 		
 		const cfgRebarPath = getElangConfigConfiguration().rebarPath,
-			rebarSearchPaths = [];
+			rebarSearchPaths = [],
+			rootPath = getElangConfigConfiguration().rootPath;
 		if (cfgRebarPath) {
 			rebarSearchPaths.push(cfgRebarPath);
 		}
-		if (cfgRebarPath !== vscode.workspace.rootPath) {
-			rebarSearchPaths.push(vscode.workspace.rootPath);
+		if (cfgRebarPath !== rootPath) {
+			rebarSearchPaths.push(rootPath);
 		}
 		return rebarSearchPaths;
 	}
@@ -195,8 +198,9 @@ export class RebarRunner implements vscode.Disposable {
 	 * @returns Promise resolved or rejected when rebar exits
 	 */
 	public async runScript(commands: string[]): Promise<string> {
+		const rootPath = getElangConfigConfiguration().rootPath;
 		const { output } = await new RebarShell(this.getRebarSearchPaths(), this.extensionPath, ErlangOutputAdapter(RebarRunner.RebarOutput))
-			.runScript(vscode.workspace.rootPath, commands);
+			.runScript(rootPath, commands);
 		return output;
 	}
 
