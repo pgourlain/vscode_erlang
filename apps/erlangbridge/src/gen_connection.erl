@@ -78,6 +78,6 @@ loop_handle_command(Socket, Module) ->
 
 response_json(M) ->
     {ok, B} = vscode_jsone:encode(M),
-    binary_to_list(iolist_to_binary(io_lib:fwrite("HTTP/1.0 200 OK\nContent-Type: application/js"
-						  "on\nContent-Length: ~p\n\n~s",
+    binary_to_list(iolist_to_binary(io_lib:fwrite("HTTP/1.0 200 OK\r\nContent-Type: application/js"
+						  "on\r\nContent-Length: ~p\r\n\r\n~s",
 						  [byte_size(B), B]))).
