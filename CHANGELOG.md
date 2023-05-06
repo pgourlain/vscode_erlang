@@ -1,5 +1,10 @@
 # Change log
 
+## Version 0.8.10 (May 6, 2023)
+
+* [255](https://github.com/pgourlain/vscode_erlang/issues/255) : Debugging crash with VScode 1.78
+
+
 ## Version 0.8.9 (May 2, 2023)
 
 * [253](https://github.com/pgourlain/vscode_erlang/issues/253) : 
