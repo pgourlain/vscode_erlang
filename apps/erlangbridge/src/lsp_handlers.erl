@@ -86,16 +86,8 @@ textDocument_didSave(Socket, Params) ->
 
 textDocument_didChange(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
-    case filename:extension(File) of
-        ".erl" ->
-            [ContentChange] = maps:get(contentChanges, Params),
-            gen_lsp_doc_server:set_document_attribute(File, contents, maps:get(text, ContentChange));
-        ".hrl" ->
-            [ContentChange] = maps:get(contentChanges, Params),
-            gen_lsp_doc_server:set_document_attribute(File, contents, maps:get(text, ContentChange));
-        _ ->
-            ok
-    end,
+    [ContentChange] = maps:get(contentChanges, Params),
+    gen_lsp_doc_server:set_document_attribute(File, contents, maps:get(text, ContentChange)),
     case gen_lsp_config_server:autosave() of
         false ->
             Version = mapmapget(textDocument, version, Params),
@@ -233,12 +225,12 @@ file_contents_update(Socket, File, Contents) ->
         ".erl" ->
             lsp_syntax:parse_source_file(File, ContentsFile),
             Linting andalso validate_parsed_source_file(Socket, File);
-        ".hrl" ->
-            ok;
         ".src" ->
             Linting andalso validate_config_file(Socket, File, ContentsFile);
         ".config" ->
-            Linting andalso validate_config_file(Socket, File, ContentsFile)
+            Linting andalso validate_config_file(Socket, File, ContentsFile);
+        _ ->
+            ok
     end,
     Cleaner().
 
