@@ -7,9 +7,9 @@ parse_source_file(File, ContentsFile) ->
     case epp_parse_file(ContentsFile, get_include_path(File), get_define_from_rebar_config(File)) of
         {ok, FileSyntaxTree} ->
             UpdatedSyntaxTree = update_file_in_forms(File, ContentsFile, FileSyntaxTree),
-            gen_lsp_doc_server:set_document_attribute(File, syntax_tree, UpdatedSyntaxTree),
+            gen_lsp_doc_server:set_document_syntax_tree(File, UpdatedSyntaxTree),
             case epp_dodger:parse_file(ContentsFile) of
-                {ok, Forms} -> gen_lsp_doc_server:set_document_attribute(File, dodged_syntax_tree, Forms);
+                {ok, Forms} -> gen_lsp_doc_server:set_document_dodged_syntax_tree(File, Forms);
                 _ -> ok
             end,
             #{parse_result => true};
@@ -18,7 +18,7 @@ parse_source_file(File, ContentsFile) ->
     end.
 
 validate_parsed_source_file(File) ->
-    FileSyntaxTree = gen_lsp_doc_server:get_document_attribute(File, syntax_tree),
+    FileSyntaxTree = gen_lsp_doc_server:get_document_syntax_tree(File),
     BehaviourModulea = behaviour_modules(FileSyntaxTree),
     ParseTranformModules = parse_transforms(FileSyntaxTree),
     ModulesToDelete = load_not_loaded_modules(BehaviourModulea ++ ParseTranformModules),
@@ -38,7 +38,7 @@ parse_config_file(File, ContentsFile) ->
     end.
 
 file_syntax_tree(File) ->
-    case gen_lsp_doc_server:get_document_attribute(File, syntax_tree) of
+    case gen_lsp_doc_server:get_document_syntax_tree(File) of
       undefined ->
 	  case epp_parse_file(File, get_include_path(File), get_define_from_rebar_config(File)) of
 	    {ok, FileSyntaxTree} -> FileSyntaxTree;
@@ -59,7 +59,7 @@ find_macro_definition(Macro, File) -> find_macro_definition_in_files(Macro, [Fil
 
 find_macro_definition_in_files(_Macro, []) -> undefined;
 find_macro_definition_in_files(Macro, [File | Tail]) ->
-    Forms = case gen_lsp_doc_server:get_document_attribute(File, dodged_syntax_tree) of
+    Forms = case gen_lsp_doc_server:get_document_dodged_syntax_tree(File) of
         undefined ->
             case epp_dodger:parse_file(File) of
                 {ok, F} -> F;

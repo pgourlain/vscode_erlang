@@ -72,7 +72,7 @@ workspace_didChangeWatchedFiles(_Socket, Params) ->
 
 textDocument_didOpen(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
-    gen_lsp_doc_server:set_document_attribute(File, contents, mapmapget(textDocument, text, Params)),
+    gen_lsp_doc_server:set_document_contents(File, mapmapget(textDocument, text, Params)),
     gen_lsp_config_server:autosave() andalso file_contents_update(Socket, File, undefined).    
 
 textDocument_didClose(Socket, Params) ->
@@ -87,7 +87,7 @@ textDocument_didSave(Socket, Params) ->
 textDocument_didChange(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
     [ContentChange] = maps:get(contentChanges, Params),
-    gen_lsp_doc_server:set_document_attribute(File, contents, maps:get(text, ContentChange)),
+    gen_lsp_doc_server:set_document_contents(File, maps:get(text, ContentChange)),
     case gen_lsp_config_server:autosave() of
         false ->
             Version = mapmapget(textDocument, version, Params),
@@ -137,14 +137,14 @@ textDocument_completion(_Socket, Params) ->
     Line = mapmapget(position, line, Params),
     Character = mapmapget(position, character, Params),
     File = lsp_utils:file_uri_to_file(Uri),
-    Contents = gen_lsp_doc_server:get_document_attribute(File, contents),
+    Contents = gen_lsp_doc_server:get_document_contents(File),
     LineText = lists:nth(Line + 1, binary:split(Contents, <<"\n">>, [global])),
     TextBefore = binary:part(LineText, 0, min(Character + 1, byte_size(LineText))),
     auto_complete(File, Line + 1, TextBefore).
 
 textDocument_formatting(_Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
-    Contents = case gen_lsp_doc_server:get_document_attribute(File, contents) of
+    Contents = case gen_lsp_doc_server:get_document_contents(File) of
         undefined ->
             {ok, FileContents} = file:read_file(File),
             FileContents;

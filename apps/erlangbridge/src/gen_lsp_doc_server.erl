@@ -4,27 +4,55 @@
 -export([start_link/0]).
 
 -export([init/1,handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
--export([set_document_attribute/3, remove_document/1, get_document_attribute/2, get_documents/0]).
+-export([set_document_contents/2, set_document_syntax_tree/2, set_document_dodged_syntax_tree/2]).
+-export([get_document_contents/1, get_document_syntax_tree/1, get_document_dodged_syntax_tree/1]).
+-export([remove_document/1, get_documents/0]).
 -export([root_available/0, project_modules/0, add_project_file/1, remove_project_file/1, get_module_file/1, get_module_beam/1, get_build_dir/0]).
 
 -define(SERVER, ?MODULE).
 
--record(state, {opened, project_modules}).
+-record(state, {project_modules}).
 
 start_link() ->
+    safe_new_table(document_contents),
+    safe_new_table(document_syntax_tree),
+    safe_new_table(document_dodged_syntax_tree),
     gen_server:start_link({local, ?SERVER}, ?MODULE, [],[]).
 
-set_document_attribute(File, Attribute, Value) -> 
-    gen_server:call(?SERVER, {set_document_attribute, File, Attribute, Value}).
+set_document_contents(File, Contents) ->
+    ets:insert(document_contents, {File, Contents}).
+
+set_document_syntax_tree(File, SyntaxTree) -> 
+    ets:insert(document_syntax_tree, {File, SyntaxTree}).
+
+set_document_dodged_syntax_tree(File, SyntaxTree) -> 
+    ets:insert(document_dodged_syntax_tree, {File, SyntaxTree}).
+
+get_document_contents(File) ->
+    case ets:lookup(document_contents, File) of
+        [{File, Contents}] -> Contents;
+        _ -> undefined
+    end.
+
+get_document_syntax_tree(File) ->
+    case ets:lookup(document_syntax_tree, File) of
+        [{File, SyntaxTree}] -> SyntaxTree;
+        _ -> undefined
+    end.
+
+get_document_dodged_syntax_tree(File) ->
+    case ets:lookup(document_dodged_syntax_tree, File) of
+        [{File, SyntaxTree}] -> SyntaxTree;
+        _ -> undefined
+    end.
 
 remove_document(File) ->
-    gen_server:cast(?SERVER, {remove, File}).
-
-get_document_attribute(File, Attribute) ->
-    gen_server:call(?SERVER, {get_document_attribute, File, Attribute}).
+    ets:delete(document_contents, File),
+    ets:delete(document_syntax_tree, File),
+    ets:delete(document_dodged_syntax_tree, File).
 
 get_documents() ->
-    gen_server:call(?SERVER, get_documents).
+    [File || {File, _Contents} <- ets:tab2list(document_contents)].
 
 root_available() ->
     gen_server:cast(?SERVER, root_available).
@@ -45,24 +73,7 @@ get_module_beam(Module) ->
     gen_server:call(?SERVER, {get_module_beam, Module}).
 
 init(_Args) ->
-    {ok, #state{opened = #{}, project_modules = #{}}}.
-
-handle_call({get_document_attribute, File, Attribute}, _From, State) ->
-    {reply, proplists:get_value(Attribute, maps:get(File, State#state.opened, [])), State};
-
-handle_call({set_document_attribute, File, Attribute, Value},_From, State) ->
-    Opened = State#state.opened,
-    Attributes = maps:get(File, Opened, []),
-    UpdatedAttributes = case proplists:is_defined(Attribute, Attributes) of
-        true ->
-            lists:keyreplace(Attribute, 1, Attributes, {Attribute, Value});
-        _ ->
-            [{Attribute, Value} | Attributes]
-    end,
-    {reply, ok, State#state{opened = Opened#{File => UpdatedAttributes}}};
-
-handle_call(get_documents, _From, State) ->
-    {reply, maps:keys(State#state.opened), State};
+    {ok, #state{project_modules = #{}}}.
 
 handle_call(project_modules, _From, State) ->
     {reply, maps:keys(State#state.project_modules), State};
@@ -116,10 +127,6 @@ handle_call({get_module_beam, Module},_From, State) ->
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
-
-handle_cast({remove, File}, State) ->
-    Opened = State#state.opened,
-    {noreply, State#state{opened = maps:remove(File, Opened)}};
 
 handle_cast(stop, State) ->
     {stop, normal, State};
@@ -193,4 +200,10 @@ get_build_dir() ->
             end;
         false ->
             undefined
+    end.
+
+safe_new_table(Name) ->
+    case ets:whereis(Name) of
+        undefined -> ets:new(Name, [named_table, public]);
+        _ -> Name
     end.

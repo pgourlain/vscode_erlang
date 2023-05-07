@@ -28,7 +28,7 @@ goto_definition(File, Line, Column) ->
     end.
 
 file_line(File, Line) ->
-    Contents = case gen_lsp_doc_server:get_document_attribute(File, contents) of
+    Contents = case gen_lsp_doc_server:get_document_contents(File) of
         undefined ->
             {ok, FileContents} = file:read_file(File),
             FileContents;
