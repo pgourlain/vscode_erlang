@@ -1,5 +1,13 @@
 # Change log
 
+## Version 0.8.11 (May 7, 2023)
+
+* [257](https://github.com/pgourlain/vscode_erlang/issues/257) : Reformatting no longer destroys .config and .src files
+* [258](https://github.com/pgourlain/vscode_erlang/issues/258) : remove deprecated 'workspace.rootpath'
+
+Thanks to
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+
 ## Version 0.8.10 (May 6, 2023)
 
 * [255](https://github.com/pgourlain/vscode_erlang/issues/255) : Debugging crash with VScode 1.78
