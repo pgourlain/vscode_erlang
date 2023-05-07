@@ -42,7 +42,7 @@ function extractRootPath() : string {
     //workspace.rootPath is deprecated, and documentation notice that value is store in first workspace folder
     let folders = workspace.workspaceFolders;
     if (folders && folders.length > 0) {
-        return folders[0].uri.path;
+        return folders[0].uri.fsPath;
     }
     return undefined;
 }
