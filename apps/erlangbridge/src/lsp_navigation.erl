@@ -13,7 +13,7 @@
 	end).
 
 goto_definition(File, Line, Column) ->
-    FileSyntaxTree = gen_lsp_doc_server:get_document_syntax_tree(File),
+    FileSyntaxTree = gen_lsp_doc_server:get_syntax_tree(File),
     Module = list_to_atom(filename:rootname(filename:basename(File))),
     What = element_at_position(Module, FileSyntaxTree, Line, Column, file_line(File, Line)),
     ?LOG("element_at_position : ~p", [What]),
@@ -44,7 +44,7 @@ file_line(File, Line) ->
 
 hover_info(File, Line, Column) ->
     Module = list_to_atom(filename:rootname(filename:basename(File))),
-    FileSyntax = gen_lsp_doc_server:get_document_syntax_tree(File),
+    FileSyntax = gen_lsp_doc_server:get_syntax_tree(File),
     What = element_at_position(Module, FileSyntax, Line, Column, file_line(File, Line)),
     %gen_lsp_server:lsp_log("hover_info What:~p", [What]),
     case What of
@@ -70,7 +70,7 @@ function_description(Module, Function) ->
 
 function_description(Module, Function, Arity) ->
     File = gen_lsp_doc_server:get_module_file(Module),
-    case gen_lsp_doc_server:get_document_syntax_tree(File) of
+    case gen_lsp_doc_server:get_syntax_tree(File) of
         undefined ->
             get_generic_help(Module, Function);
         SyntaxTree ->
@@ -108,7 +108,7 @@ get_generic_help(Module, Function) ->
 
 references_info(File, Line, Column) ->
     MapResult = fold_in_file_syntax_tree(
-        gen_lsp_doc_server:get_document_syntax_tree(File), 
+        gen_lsp_doc_server:get_syntax_tree(File), 
         #{location => {Line, Column}, references => []}, 
         fun references_analyze/2),
     References = maps:get(references, MapResult),
@@ -143,7 +143,7 @@ references_analyze(SyntaxTree, Map) ->
 codelens_info(File) ->
     %filter only defined functions
     MapResult = maps:filter(fun (_K,V) -> maps:is_key(func_name, V) end,
-        fold_in_file_syntax_tree(gen_lsp_doc_server:get_document_syntax_tree(File), #{}, fun codelens_analyze/2)),
+        fold_in_file_syntax_tree(gen_lsp_doc_server:get_syntax_tree(File), #{}, fun codelens_analyze/2)),
     lists:filtermap(fun (V) ->
         case maps:get(location, V, undefined) of
             {Line, Column} ->
@@ -208,7 +208,7 @@ codelens_add_or_update_refcount(Map, Key, Count) ->
 
 symbol_info(Uri, File) ->
     %return all symbols for the specified document 
-    SyntaxTree = gen_lsp_doc_server:get_document_syntax_tree(File),
+    SyntaxTree = gen_lsp_doc_server:get_syntax_tree(File),
     %gen_lsp_server:lsp_log("syntax for symbolinfo : ~p", [SyntaxTree]),
     fold_in_file_syntax_tree(SyntaxTree, [], fun (S, Acc) -> symbolinfo_analyze(Uri, S, Acc) end).
 
@@ -552,7 +552,7 @@ find_record_field_use(Record, [_Head | Tail], Column, Line) ->
 
 find_element({module_use, Module}, _CurrentFileSyntaxTree, _CurrentFile) ->
     File = gen_lsp_doc_server:get_module_file(Module),
-    case gen_lsp_doc_server:get_document_syntax_tree(File) of
+    case gen_lsp_doc_server:get_syntax_tree(File) of
         undefined -> undefined;
         SyntaxTree ->
             case find_module(SyntaxTree, Module) of
@@ -564,7 +564,7 @@ find_element({hrl, HrlFile}, _CurrentFileSyntaxTree, _CurrentFile) ->
     {HrlFile, 1, 1};
 find_element({function_use, Module, Function, Arity}, _CurrentFileSyntaxTree, _CurrentFile) ->
     File = gen_lsp_doc_server:get_module_file(Module),
-    case gen_lsp_doc_server:get_document_syntax_tree(File) of
+    case gen_lsp_doc_server:get_syntax_tree(File) of
         undefined -> undefined;
         SyntaxTree ->
             case find_function(SyntaxTree, Function, Arity) of
@@ -574,7 +574,7 @@ find_element({function_use, Module, Function, Arity}, _CurrentFileSyntaxTree, _C
     end;
 find_element({function_use, Module, Function, Arity, Args}, _CurrentFileSyntaxTree, _CurrentFile) ->
     File = gen_lsp_doc_server:get_module_file(Module),
-    case gen_lsp_doc_server:get_document_syntax_tree(File) of
+    case gen_lsp_doc_server:get_syntax_tree(File) of
         undefined -> undefined;
         SyntaxTree ->
             case find_function(SyntaxTree, Function, Arity) of
@@ -710,7 +710,7 @@ variable_in_fun_clause_arguments(Variable, {clause, {_, _}, Arguments, _, _}) ->
 
 get_function_arities(Module, Function) ->
     File = gen_lsp_doc_server:get_module_file(Module),
-    case gen_lsp_doc_server:get_document_syntax_tree(File) of
+    case gen_lsp_doc_server:get_syntax_tree(File) of
         undefined ->
             [];
         FileSyntaxTree ->

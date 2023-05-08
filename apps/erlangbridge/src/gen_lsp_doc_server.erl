@@ -3,9 +3,9 @@
 -behavior(gen_server).
 -export([start_link/0]).
 
--export([document_opened/2, document_closed/1, document_changed/2, opened_documents/0, parse_document/1]).
+-export([document_opened/2, document_changed/2, document_closed/1, opened_documents/0, get_document_contents/1, parse_document/1]).
 -export([project_file_added/1, project_file_changed/1, project_file_deleted/1]).
--export([get_document_contents/1, get_document_syntax_tree/1, get_document_dodged_syntax_tree/1]).
+-export([get_syntax_tree/1, get_dodged_syntax_tree/1]).
 -export([init/1,handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([root_available/0, project_modules/0, get_module_file/1, get_module_beam/1, get_build_dir/0]).
 
@@ -16,14 +16,20 @@
 document_opened(File, Contents) ->
     ets:insert(document_contents, {File, Contents}).
 
-document_closed(File) ->
-    ets:delete(document_contents, File).
-
 document_changed(File, Contents) ->
     ets:insert(document_contents, {File, Contents}).
 
+document_closed(File) ->
+    ets:delete(document_contents, File).
+
 opened_documents() ->
     [File || {File, _Contents} <- ets:tab2list(document_contents)].
+
+get_document_contents(File) ->
+    case ets:lookup(document_contents, File) of
+        [{File, Contents}] -> Contents;
+        _ -> undefined
+    end.
 
 parse_document(File) ->
     case filename:extension(File) of
@@ -40,12 +46,6 @@ parse_document(File) ->
             ok
     end.
 
-get_document_contents(File) ->
-    case ets:lookup(document_contents, File) of
-        [{File, Contents}] -> Contents;
-        _ -> undefined
-    end.
-
 project_file_added(File) ->
     gen_server:cast(?SERVER, {project_file_added, File}).
 
@@ -55,28 +55,28 @@ project_file_changed(File) ->
 project_file_deleted(File) ->
     gen_server:cast(?SERVER, {project_file_deleted, File}).
 
-get_document_syntax_tree(File) ->
-    case get_tree(document_syntax_tree, File) of
+get_syntax_tree(File) ->
+    case get_tree(syntax_tree, File) of
         undefined ->
             parse_and_store_trees(File, File),
-            get_tree(document_syntax_tree, File);
+            get_tree(syntax_tree, File);
         SyntaxTree ->
             SyntaxTree
     end.
 
-get_document_dodged_syntax_tree(File) ->
-    case get_tree(document_dodged_syntax_tree, File) of
+get_dodged_syntax_tree(File) ->
+    case get_tree(dodged_syntax_tree, File) of
         undefined ->
             parse_and_store_trees(File, File),
-            get_tree(document_dodged_syntax_tree, File);
+            get_tree(dodged_syntax_tree, File);
         SyntaxTree ->
             SyntaxTree
     end.
 
 start_link() ->
     safe_new_table(document_contents),
-    safe_new_table(document_syntax_tree),
-    safe_new_table(document_dodged_syntax_tree),
+    safe_new_table(syntax_tree),
+    safe_new_table(dodged_syntax_tree),
     gen_server:start_link({local, ?SERVER}, ?MODULE, [],[]).
 
 root_available() ->
@@ -175,8 +175,8 @@ handle_cast({project_file_changed, File}, State) ->
 
 handle_cast({project_file_deleted, File}, State) ->
     ets:delete(document_contents, File),
-    ets:delete(document_syntax_tree, File),
-    ets:delete(document_dodged_syntax_tree, File),
+    ets:delete(syntax_tree, File),
+    ets:delete(dodged_syntax_tree, File),
     Module = filename:rootname(filename:basename(File)),
     UpdatedFiles = lists:delete(File, maps:get(Module, State#state.project_modules, [])),
     UpdatedProjectModules = case UpdatedFiles of
@@ -251,11 +251,11 @@ parse_and_store_trees(File, ContentsFile) ->
     {SyntaxTree, DodgedSyntaxTree} = lsp_parse:parse_source_file(File, ContentsFile),
     case SyntaxTree of
         undefined -> ok;
-        _ -> ets:insert(document_syntax_tree, {File, SyntaxTree})
+        _ -> ets:insert(syntax_tree, {File, SyntaxTree})
     end,
     case DodgedSyntaxTree of
         undefined -> ok;
-        _ -> ets:insert(document_dodged_syntax_tree, {File, DodgedSyntaxTree})
+        _ -> ets:insert(dodged_syntax_tree, {File, DodgedSyntaxTree})
     end.
 
 get_tree(TreeType, File) ->

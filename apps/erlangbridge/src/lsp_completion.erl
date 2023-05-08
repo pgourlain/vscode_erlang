@@ -9,7 +9,7 @@ disable_completion() ->
 
 module_function(Module, Prefix) ->
     File = gen_lsp_doc_server:get_module_file(Module),
-    ExportsResult = case gen_lsp_doc_server:get_document_syntax_tree(File) of
+    ExportsResult = case gen_lsp_doc_server:get_syntax_tree(File) of
         undefined ->
             standard_module_exports(Module);
         SyntaxTree ->
@@ -74,10 +74,10 @@ record(File, Prefix) ->
             end;
         (_) ->
             false
-    end, gen_lsp_doc_server:get_document_syntax_tree(File)).
+    end, gen_lsp_doc_server:get_syntax_tree(File)).
 
 field(File, Record, Prefix) ->
-    RecordTree = lsp_navigation:find_record(gen_lsp_doc_server:get_document_syntax_tree(File), Record),
+    RecordTree = lsp_navigation:find_record(gen_lsp_doc_server:get_syntax_tree(File), Record),
     case RecordTree of
         {{attribute, _, record, {Record, Fields}}, _File} ->
             lists:filtermap(fun 
@@ -97,7 +97,7 @@ field(File, Record, Prefix) ->
     end.
 
 variable(File, Line, Prefix) ->
-    FileSyntaxTree = gen_lsp_doc_server:get_document_syntax_tree(File),
+    FileSyntaxTree = gen_lsp_doc_server:get_syntax_tree(File),
     Function = lsp_navigation:find_function_with_line(FileSyntaxTree, Line),
     case Function of
         undefined ->
@@ -157,7 +157,7 @@ atom(File, Prefix) ->
     LocalAtoms ++ StandardModules ++ ProjectModules ++ BIFs.
 
 local_atoms(File) ->
-    FileSyntaxTree = gen_lsp_doc_server:get_document_syntax_tree(File),
+    FileSyntaxTree = gen_lsp_doc_server:get_syntax_tree(File),
     AtomTypes = lists:foldl(fun (TopLevelSyntaxTree, Acc) ->
         erl_syntax_lib:fold(fun (SyntaxTree, AccS) ->
             case SyntaxTree of

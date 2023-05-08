@@ -3,7 +3,7 @@
 -export([validate_parsed_source_file/1, find_macro_definition/2]).
 
 validate_parsed_source_file(File) ->
-    FileSyntaxTree = gen_lsp_doc_server:get_document_syntax_tree(File),
+    FileSyntaxTree = gen_lsp_doc_server:get_syntax_tree(File),
     BehaviourModulea = behaviour_modules(FileSyntaxTree),
     ParseTranformModules = parse_transforms(FileSyntaxTree),
     ModulesToDelete = load_not_loaded_modules(BehaviourModulea ++ ParseTranformModules),
@@ -16,14 +16,7 @@ find_macro_definition(Macro, File) -> find_macro_definition_in_files(Macro, [Fil
 
 find_macro_definition_in_files(_Macro, []) -> undefined;
 find_macro_definition_in_files(Macro, [File | Tail]) ->
-    Forms = case gen_lsp_doc_server:get_document_dodged_syntax_tree(File) of
-        undefined ->
-            case epp_dodger:parse_file(File) of
-                {ok, F} -> F;
-                _ -> undefined
-            end;
-        F -> F
-    end,
+    Forms = gen_lsp_doc_server:get_dodged_syntax_tree(File),
     case find_macro_definition(Macro, File, Forms) of
         undefined ->
             Included = lists:reverse(find_included_files(Forms, [])),
