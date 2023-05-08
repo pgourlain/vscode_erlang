@@ -7,7 +7,8 @@
          search_exclude_globs_to_regexps/1,
          to_string/1,
          is_erlang_lib_file/1,
-         absolute_path/2]).
+         absolute_path/2,
+         make_temporary_file/1]).
 
 client_range(Line, StartChar, EndChar) ->
     #{
@@ -221,3 +222,10 @@ absolute_path(BaseDir, Path) ->
         _ ->
             Path
     end.
+
+make_temporary_file(Contents) ->
+    Rand = integer_to_list(binary:decode_unsigned(crypto:strong_rand_bytes(8)), 36) ++ ".erl",
+    TempFile = filename:join(gen_lsp_config_server:tmpdir(), Rand),
+    filelib:ensure_dir(TempFile),
+    file:write_file(TempFile, Contents),
+    TempFile.

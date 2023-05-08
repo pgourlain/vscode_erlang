@@ -38,7 +38,7 @@ cancelRequest(_Socket, _Params) ->
     ok.
 
 configuration(Socket, [ErlangSection, ComputedSecton, HttpSection, SearchSection]) ->
-    Documents = gen_lsp_doc_server:get_documents(),
+    Documents = gen_lsp_doc_server:opened_documents(),
     gen_lsp_config_server:update_config(erlang, ErlangSection),
     %% because 'verbose' is stored in erlang section, loggin should be after update erlang config
     gen_lsp_server:lsp_log("configuration ~p", [Documents]),
@@ -54,7 +54,7 @@ configuration(Socket, [ErlangSection, ComputedSecton, HttpSection, SearchSection
     lists:foreach(fun (File) ->
         gen_lsp_server:lsp_log("File = ~p",[File]),
         send_diagnostics(Socket, File, []),
-        file_contents_update(Socket, File, undefined)
+        validate_file(Socket, File)
     end, Documents).
 
 workspace_didChangeConfiguration(Socket, _Params) ->
@@ -72,35 +72,40 @@ workspace_didChangeWatchedFiles(_Socket, Params) ->
 
 textDocument_didOpen(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
-    gen_lsp_doc_server:set_document_contents(File, mapmapget(textDocument, text, Params)),
-    gen_lsp_config_server:autosave() andalso file_contents_update(Socket, File, undefined).    
+    gen_lsp_doc_server:document_opened(File, mapmapget(textDocument, text, Params)),
+    case gen_lsp_config_server:autosave() of
+        true ->
+            gen_lsp_doc_server:parse_document(File),
+            validate_file(Socket, File);
+        _ ->
+            ok
+    end.
 
 textDocument_didClose(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
     send_diagnostics(Socket, File, []),
-    gen_lsp_doc_server:remove_document(File).
+    gen_lsp_doc_server:document_closed(File).
 
 textDocument_didSave(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
-    gen_lsp_config_server:autosave() andalso file_contents_update(Socket, File, undefined).
+    case gen_lsp_config_server:autosave() of
+        true ->
+            gen_lsp_doc_server:parse_document(File),
+            validate_file(Socket, File);
+        _ ->
+            ok
+    end.
 
 textDocument_didChange(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
     [ContentChange] = maps:get(contentChanges, Params),
-    gen_lsp_doc_server:set_document_contents(File, maps:get(text, ContentChange)),
+    gen_lsp_doc_server:document_changed(File, maps:get(text, ContentChange)),
     case gen_lsp_config_server:autosave() of
-        false ->
-            Version = mapmapget(textDocument, version, Params),
-            Contents = if
-                Version =:= 1 ->
-                    undefined;
-                true ->
-                    [ParseContentChange] = maps:get(contentChanges, Params),
-                    maps:get(text, ParseContentChange)
-            end,
-            file_contents_update(Socket, File, Contents);
+        true ->
+            ok;
         _ ->
-            ok
+            gen_lsp_doc_server:parse_document(File),
+            validate_file(Socket, File)
     end.
 
 textDocument_definition(_Socket, Params) ->
@@ -212,35 +217,38 @@ references_code_lens(Uri, #{data := Data} = Item) ->
         end
     }.
 
-file_contents_update(Socket, File, Contents) ->
-    Linting = gen_lsp_config_server:linting(),
-    {ContentsFile, Cleaner} = case Contents of
-        undefined ->
-            {File, fun () -> ok end};
-        _ ->
-            InnerContentsFile = mktemp(Contents),
-            {InnerContentsFile, fun () -> file:delete(InnerContentsFile) end}
-    end,
-    case filename:extension(File) of
-        ".erl" ->
-            lsp_parse:parse_source_file(File, ContentsFile),
-            Linting andalso validate_parsed_source_file(Socket, File);
-        ".src" ->
-            Linting andalso validate_config_file(Socket, File, ContentsFile);
-        ".config" ->
-            Linting andalso validate_config_file(Socket, File, ContentsFile);
+validate_file(Socket, File) ->
+    case gen_lsp_config_server:linting() of
+        true ->
+            case filename:extension(File) of
+                ".erl" ->
+                    validate_parsed_source_file(Socket, File);
+                ".src" ->
+                    validate_config_file(Socket, File);
+                ".config" ->
+                    validate_config_file(Socket, File);
+                _ ->
+                    ok
+            end;
         _ ->
             ok
-    end,
-    Cleaner().
+    end.
 
 validate_parsed_source_file(Socket, File) ->
     ErrorsWarnings = lsp_syntax:validate_parsed_source_file(File),
     send_diagnostics(Socket, File, maps:get(errors_warnings, ErrorsWarnings, [])).
 
-validate_config_file(Socket, File, ContentsFile) ->
+validate_config_file(Socket, File) ->
+    {ContentsFile, Cleaner} = case gen_lsp_doc_server:get_document_contents(File) of
+        undefined ->
+            {File, fun () -> ok end};
+        Contents ->
+            InnerContentsFile = lsp_utils:make_temporary_file(Contents),
+            {InnerContentsFile, fun () -> file:delete(InnerContentsFile) end}
+    end,
     ErrorsWarnings = lsp_parse:parse_config_file(File, ContentsFile),
-    send_diagnostics(Socket, File, maps:get(errors_warnings, ErrorsWarnings, [])).
+    send_diagnostics(Socket, File, maps:get(errors_warnings, ErrorsWarnings, [])),
+    Cleaner().
 
 -ifdef(OTP_RELEASE).
     -if(?OTP_RELEASE >= 21).
@@ -278,13 +286,6 @@ formatting(Contents) ->
     UpdatedContents.
 
 -endif.
-
-mktemp(Contents) ->
-    Rand = integer_to_list(binary:decode_unsigned(crypto:strong_rand_bytes(8)), 36) ++ ".erl",
-    TempFile = filename:join(gen_lsp_config_server:tmpdir(), Rand),
-    filelib:ensure_dir(TempFile),
-    file:write_file(TempFile, Contents),
-    TempFile.
 
 request_configuration(Socket) ->
     gen_lsp_server:send_to_client(Socket, #{

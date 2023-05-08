@@ -3,30 +3,43 @@
 -behavior(gen_server).
 -export([start_link/0]).
 
--export([init/1,handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
--export([set_document_contents/2, set_document_syntax_tree/2, set_document_dodged_syntax_tree/2]).
+-export([document_opened/2, document_closed/1, document_changed/2, opened_documents/0, parse_document/1]).
 -export([get_document_contents/1, get_document_syntax_tree/1, get_document_dodged_syntax_tree/1]).
--export([remove_document/1, get_documents/0]).
+-export([init/1,handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([root_available/0, project_modules/0, add_project_file/1, remove_project_file/1, get_module_file/1, get_module_beam/1, get_build_dir/0]).
 
 -define(SERVER, ?MODULE).
 
 -record(state, {project_modules}).
 
-start_link() ->
-    safe_new_table(document_contents),
-    safe_new_table(document_syntax_tree),
-    safe_new_table(document_dodged_syntax_tree),
-    gen_server:start_link({local, ?SERVER}, ?MODULE, [],[]).
-
-set_document_contents(File, Contents) ->
+document_opened(File, Contents) ->
     ets:insert(document_contents, {File, Contents}).
 
-set_document_syntax_tree(File, SyntaxTree) -> 
-    ets:insert(document_syntax_tree, {File, SyntaxTree}).
+document_closed(File) ->
+    ets:delete(document_contents, File),
+    ets:delete(document_syntax_tree, File),
+    ets:delete(document_dodged_syntax_tree, File).
 
-set_document_dodged_syntax_tree(File, SyntaxTree) -> 
-    ets:insert(document_dodged_syntax_tree, {File, SyntaxTree}).
+document_changed(File, Contents) ->
+    ets:insert(document_contents, {File, Contents}).
+
+opened_documents() ->
+    [File || {File, _Contents} <- ets:tab2list(document_contents)].
+
+parse_document(File) ->
+    case filename:extension(File) of
+        ".erl" ->
+            case get_document_contents(File) of
+                undefined ->
+                    ok;
+                Contents ->
+                    ContentsFile = lsp_utils:make_temporary_file(Contents),
+                    parse_and_store_trees(File, ContentsFile),
+                    file:delete(ContentsFile)
+            end;
+        _ ->
+            ok
+    end.
 
 get_document_contents(File) ->
     case ets:lookup(document_contents, File) of
@@ -35,24 +48,28 @@ get_document_contents(File) ->
     end.
 
 get_document_syntax_tree(File) ->
-    case ets:lookup(document_syntax_tree, File) of
-        [{File, SyntaxTree}] -> SyntaxTree;
-        _ -> undefined
+    case get_tree(document_syntax_tree, File) of
+        undefined ->
+            parse_and_store_trees(File, File),
+            get_tree(document_syntax_tree, File);
+        SyntaxTree ->
+            SyntaxTree
     end.
 
 get_document_dodged_syntax_tree(File) ->
-    case ets:lookup(document_dodged_syntax_tree, File) of
-        [{File, SyntaxTree}] -> SyntaxTree;
-        _ -> undefined
+    case get_tree(document_dodged_syntax_tree, File) of
+        undefined ->
+            parse_and_store_trees(File, File),
+            get_tree(document_dodged_syntax_tree, File);
+        SyntaxTree ->
+            SyntaxTree
     end.
 
-remove_document(File) ->
-    ets:delete(document_contents, File),
-    ets:delete(document_syntax_tree, File),
-    ets:delete(document_dodged_syntax_tree, File).
-
-get_documents() ->
-    [File || {File, _Contents} <- ets:tab2list(document_contents)].
+start_link() ->
+    safe_new_table(document_contents),
+    safe_new_table(document_syntax_tree),
+    safe_new_table(document_dodged_syntax_tree),
+    gen_server:start_link({local, ?SERVER}, ?MODULE, [],[]).
 
 root_available() ->
     gen_server:cast(?SERVER, root_available).
@@ -206,4 +223,23 @@ safe_new_table(Name) ->
     case ets:whereis(Name) of
         undefined -> ets:new(Name, [named_table, public]);
         _ -> Name
+    end.
+
+parse_and_store_trees(File, ContentsFile) ->
+    {SyntaxTree, DodgedSyntaxTree} = lsp_parse:parse_source_file(File, ContentsFile),
+    case SyntaxTree of
+        undefined -> ok;
+        _ -> ets:insert(document_syntax_tree, {File, SyntaxTree})
+    end,
+    case DodgedSyntaxTree of
+        undefined -> ok;
+        _ -> ets:insert(document_dodged_syntax_tree, {File, DodgedSyntaxTree})
+    end.
+
+get_tree(TreeType, File) ->
+    case ets:lookup(TreeType, File) of
+        [{File, SyntaxTree}] ->
+            SyntaxTree;
+        _ ->
+            undefined
     end.

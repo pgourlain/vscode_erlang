@@ -1,36 +1,16 @@
 -module(lsp_parse).
--export([parse_source_file/2, file_syntax_tree/1, module_syntax_tree/1, get_include_path/1, parse_config_file/2]).
+-export([parse_source_file/2, parse_config_file/2, get_include_path/1]).
 
 parse_source_file(File, ContentsFile) ->
     case epp_parse_file(ContentsFile, get_include_path(File), get_define_from_rebar_config(File)) of
         {ok, FileSyntaxTree} ->
             UpdatedSyntaxTree = update_file_in_forms(File, ContentsFile, FileSyntaxTree),
-            gen_lsp_doc_server:set_document_syntax_tree(File, UpdatedSyntaxTree),
             case epp_dodger:parse_file(ContentsFile) of
-                {ok, Forms} -> gen_lsp_doc_server:set_document_dodged_syntax_tree(File, Forms);
-                _ -> ok
-            end,
-            #{parse_result => true};
+                {ok, Forms} -> {UpdatedSyntaxTree, Forms};
+                _ -> {UpdatedSyntaxTree, undefined}
+            end;
         _ ->
-            #{parse_result => false, error_message => <<"Cannot open file">>}
-    end.
-
-file_syntax_tree(File) ->
-    case gen_lsp_doc_server:get_document_syntax_tree(File) of
-      undefined ->
-	  case epp_parse_file(File, get_include_path(File), get_define_from_rebar_config(File)) of
-	    {ok, FileSyntaxTree} -> FileSyntaxTree;
-	    _Err -> throw("Cannot parse file " ++ File)
-	  end;
-      FileSyntaxTree ->
-          FileSyntaxTree
-    end.
-
-module_syntax_tree(Module) ->
-    File = gen_lsp_doc_server:get_module_file(Module),
-    case File of
-      undefined -> undefined;
-      _ -> {file_syntax_tree(File), File}
+            {undefined, undefined}
     end.
 
 parse_config_file(File, ContentsFile) ->
