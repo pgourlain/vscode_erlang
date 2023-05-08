@@ -6,10 +6,14 @@ parse_source_file(File, ContentsFile) ->
         {ok, FileSyntaxTree} ->
             UpdatedSyntaxTree = update_file_in_forms(File, ContentsFile, FileSyntaxTree),
             case epp_dodger:parse_file(ContentsFile) of
-                {ok, Forms} -> {UpdatedSyntaxTree, Forms};
-                _ -> {UpdatedSyntaxTree, undefined}
+                {ok, Forms} ->
+                    {UpdatedSyntaxTree, Forms};
+                _ ->
+                    io:format("epp_dodger:parse_file could not parse ~p~n", [File]),
+                    {UpdatedSyntaxTree, undefined}
             end;
         _ ->
+            io:format("epp:parse_file could not parse ~p~n", [File]),
             {undefined, undefined}
     end.
 

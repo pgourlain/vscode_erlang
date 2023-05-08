@@ -31,7 +31,7 @@ parse_document(File) ->
         ".erl" ->
             case get_document_contents(File) of
                 undefined ->
-                    ok;
+                    io:format("Cannot find contents of document ~p~n", [File]);
                 Contents ->
                     ContentsFile = lsp_utils:make_temporary_file(Contents),
                     parse_and_store_trees(File, ContentsFile),

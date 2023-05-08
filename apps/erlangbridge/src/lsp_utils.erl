@@ -225,7 +225,10 @@ absolute_path(BaseDir, Path) ->
 
 make_temporary_file(Contents) ->
     Rand = integer_to_list(binary:decode_unsigned(crypto:strong_rand_bytes(8)), 36) ++ ".erl",
-    TempFile = filename:join(gen_lsp_config_server:tmpdir(), Rand),
+    TempFile = case gen_lsp_config_server:tmpdir() of
+        "" -> Rand;
+        TmpDir -> filename:join(TmpDir, Rand)
+    end,
     filelib:ensure_dir(TempFile),
     file:write_file(TempFile, Contents),
     TempFile.
