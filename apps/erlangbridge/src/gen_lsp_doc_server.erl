@@ -4,21 +4,20 @@
 -export([start_link/0]).
 
 -export([document_opened/2, document_closed/1, document_changed/2, opened_documents/0, parse_document/1]).
+-export([project_file_added/1, project_file_changed/1, project_file_deleted/1]).
 -export([get_document_contents/1, get_document_syntax_tree/1, get_document_dodged_syntax_tree/1]).
 -export([init/1,handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
--export([root_available/0, project_modules/0, add_project_file/1, remove_project_file/1, get_module_file/1, get_module_beam/1, get_build_dir/0]).
+-export([root_available/0, project_modules/0, get_module_file/1, get_module_beam/1, get_build_dir/0]).
 
 -define(SERVER, ?MODULE).
 
--record(state, {project_modules}).
+-record(state, {project_modules, files_to_parse}).
 
 document_opened(File, Contents) ->
     ets:insert(document_contents, {File, Contents}).
 
 document_closed(File) ->
-    ets:delete(document_contents, File),
-    ets:delete(document_syntax_tree, File),
-    ets:delete(document_dodged_syntax_tree, File).
+    ets:delete(document_contents, File).
 
 document_changed(File, Contents) ->
     ets:insert(document_contents, {File, Contents}).
@@ -46,6 +45,15 @@ get_document_contents(File) ->
         [{File, Contents}] -> Contents;
         _ -> undefined
     end.
+
+project_file_added(File) ->
+    gen_server:cast(?SERVER, {project_file_added, File}).
+
+project_file_changed(File) ->
+    gen_server:cast(?SERVER, {project_file_changed, File}).
+
+project_file_deleted(File) ->
+    gen_server:cast(?SERVER, {project_file_deleted, File}).
 
 get_document_syntax_tree(File) ->
     case get_tree(document_syntax_tree, File) of
@@ -77,12 +85,6 @@ root_available() ->
 project_modules() ->
     gen_server:call(?SERVER, project_modules).
 
-add_project_file(File) ->
-    gen_server:cast(?SERVER, {add_project_file, File}).
-
-remove_project_file(File) ->
-    gen_server:cast(?SERVER, {remove_project_file, File}).
-
 get_module_file(Module) ->
     gen_server:call(?SERVER, {get_module_file, Module}).
 
@@ -90,7 +92,7 @@ get_module_beam(Module) ->
     gen_server:call(?SERVER, {get_module_beam, Module}).
 
 init(_Args) ->
-    {ok, #state{project_modules = #{}}}.
+    {ok, #state{project_modules = #{}, files_to_parse = []}}.
 
 handle_call(project_modules, _From, State) ->
     {reply, maps:keys(State#state.project_modules), State};
@@ -150,17 +152,31 @@ handle_cast(stop, State) ->
 
 handle_cast(root_available, State) ->
     BuildDir = get_build_dir(),
-    Fun = fun(File, ProjectModules) ->
-        do_add_project_file(File, ProjectModules, BuildDir)
+    Fun = fun(File, {ProjectModules, FilesToParse}) ->
+        {do_add_project_file(File, ProjectModules, BuildDir), [File | FilesToParse]}
     end,
-    ProjectModules = filelib:fold_files(gen_lsp_config_server:root(), ".erl$", true, Fun, #{}),
-    {noreply, State#state{project_modules = ProjectModules}};
+    {ProjectModules, FilesToParse} = filelib:fold_files(gen_lsp_config_server:root(), ".erl$", true, Fun, {#{}, []}),
+    {noreply, parse_next_file_in_background(State#state{project_modules = ProjectModules, files_to_parse = FilesToParse})};
 
-handle_cast({add_project_file, File}, State) ->
+handle_cast({project_file_added, File}, State) ->
     UpdatedProjectModules = do_add_project_file(File, State#state.project_modules, get_build_dir()),
-    {noreply, State#state{project_modules = UpdatedProjectModules}};
+    FilesToParse = [File | State#state.files_to_parse],
+    UpdatedState = State#state{project_modules = UpdatedProjectModules, files_to_parse = FilesToParse},
+    {noreply, parse_next_file_in_background(UpdatedState)};
 
-handle_cast({remove_project_file, File}, State) ->
+handle_cast({project_file_changed, File}, State) ->
+    case ets:lookup(document_contents, File) of
+        [_FileContents] ->
+            {noreply, State};
+        _ ->
+            FilesToParse = [File | State#state.files_to_parse],
+            {noreply, parse_next_file_in_background(State#state{files_to_parse = FilesToParse})}
+    end;
+
+handle_cast({project_file_deleted, File}, State) ->
+    ets:delete(document_contents, File),
+    ets:delete(document_syntax_tree, File),
+    ets:delete(document_dodged_syntax_tree, File),
     Module = filename:rootname(filename:basename(File)),
     UpdatedFiles = lists:delete(File, maps:get(Module, State#state.project_modules, [])),
     UpdatedProjectModules = case UpdatedFiles of
@@ -169,6 +185,12 @@ handle_cast({remove_project_file, File}, State) ->
     end,
     {noreply, State#state{project_modules = UpdatedProjectModules}}.
 
+handle_info({worker_result, File, _Result}, State) ->
+    gen_lsp_server:lsp_log("Parsed in background: ~s~n", [File]),
+    {noreply, parse_next_file_in_background(State)};
+handle_info({worker_error, File, _Exception}, State) ->
+    gen_lsp_server:lsp_log("Parse in background failed: ~s~n", [File]),
+    {noreply, parse_next_file_in_background(State)};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -243,3 +265,9 @@ get_tree(TreeType, File) ->
         _ ->
             undefined
     end.
+
+parse_next_file_in_background(#state{files_to_parse = []} = State) ->
+    State;
+parse_next_file_in_background(#state{files_to_parse = [File | Rest]} = State) ->
+    worker:start(fun () -> parse_and_store_trees(File, File) end, File),
+    State#state{files_to_parse = Rest}.

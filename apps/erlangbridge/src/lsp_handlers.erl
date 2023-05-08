@@ -63,11 +63,11 @@ workspace_didChangeConfiguration(Socket, _Params) ->
 workspace_didChangeWatchedFiles(_Socket, Params) ->
     lists:foreach(fun
         (#{uri := Uri, type := 1}) -> % Created 
-            gen_lsp_doc_server:add_project_file(lsp_utils:file_uri_to_file(Uri));
-        (#{uri := _Uri, type := 2}) -> % Changed  
-            nothing;
+            gen_lsp_doc_server:project_file_added(lsp_utils:file_uri_to_file(Uri));
+        (#{uri := Uri, type := 2}) -> % Changed  
+            gen_lsp_doc_server:project_file_changed(lsp_utils:file_uri_to_file(Uri));
         (#{uri := Uri, type := 3}) -> % Deleted  
-            gen_lsp_doc_server:remove_project_file(lsp_utils:file_uri_to_file(Uri))
+            gen_lsp_doc_server:project_file_deleted(lsp_utils:file_uri_to_file(Uri))
     end, maps:get(changes, Params)).
 
 textDocument_didOpen(Socket, Params) ->
