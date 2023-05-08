@@ -13,7 +13,7 @@
 	end).
 
 goto_definition(File, Line, Column) ->
-    FileSyntaxTree = lsp_syntax:file_syntax_tree(File),
+    FileSyntaxTree = lsp_parse:file_syntax_tree(File),
     Module = list_to_atom(filename:rootname(filename:basename(File))),
     What = element_at_position(Module, FileSyntaxTree, Line, Column, file_line(File, Line)),
     ?LOG("element_at_position : ~p", [What]),
@@ -44,7 +44,7 @@ file_line(File, Line) ->
 
 hover_info(File, Line, Column) ->
     Module = list_to_atom(filename:rootname(filename:basename(File))),
-    FileSyntax = lsp_syntax:file_syntax_tree(File),
+    FileSyntax = lsp_parse:file_syntax_tree(File),
     What = element_at_position(Module, FileSyntax, Line, Column, file_line(File, Line)),
     %gen_lsp_server:lsp_log("hover_info What:~p", [What]),
     case What of
@@ -69,7 +69,7 @@ function_description(Module, Function) ->
     end.
 
 function_description(Module, Function, Arity) ->
-    SyntaxTreeFile = lsp_syntax:module_syntax_tree(Module),                    
+    SyntaxTreeFile = lsp_parse:module_syntax_tree(Module),                    
     case SyntaxTreeFile of
         {SyntaxTree, File} ->
             case lsp_utils:is_erlang_lib_file(File) of
@@ -107,7 +107,7 @@ get_generic_help(Module, Function) ->
 
 references_info(File, Line, Column) ->
     MapResult = fold_in_file_syntax_tree(
-        lsp_syntax:file_syntax_tree(File), 
+        lsp_parse:file_syntax_tree(File), 
         #{location => {Line, Column}, references => []}, 
         fun references_analyze/2),
     References = maps:get(references, MapResult),
@@ -142,7 +142,7 @@ references_analyze(SyntaxTree, Map) ->
 codelens_info(File) ->
     %filter only defined functions
     MapResult = maps:filter(fun (_K,V) -> maps:is_key(func_name, V) end,
-        fold_in_file_syntax_tree(lsp_syntax:file_syntax_tree(File), #{}, fun codelens_analyze/2)),
+        fold_in_file_syntax_tree(lsp_parse:file_syntax_tree(File), #{}, fun codelens_analyze/2)),
     lists:filtermap(fun (V) ->
         case maps:get(location, V, undefined) of
             {Line, Column} ->
@@ -207,7 +207,7 @@ codelens_add_or_update_refcount(Map, Key, Count) ->
 
 symbol_info(Uri, File) ->
     %return all symbols for the specified document 
-    SyntaxTree = lsp_syntax:file_syntax_tree(File),
+    SyntaxTree = lsp_parse:file_syntax_tree(File),
     %gen_lsp_server:lsp_log("syntax for symbolinfo : ~p", [SyntaxTree]),
     fold_in_file_syntax_tree(SyntaxTree, [], fun (S, Acc) -> symbolinfo_analyze(Uri, S, Acc) end).
 
@@ -431,7 +431,7 @@ process_hrl_filename(File, LineContents, Column) ->
     end.
 
 resolve_include_file_path(File, IncludeFileName) ->
-    IncludePaths = lsp_syntax:get_include_path(File),
+    IncludePaths = lsp_parse:get_include_path(File),
     Candidates = [filename:join(Path, IncludeFileName) || Path <- IncludePaths],
     case lists:filter(fun filelib:is_file/1, Candidates) of
         [First|_] -> First;
@@ -550,7 +550,7 @@ find_record_field_use(Record, [_Head | Tail], Column, Line) ->
     find_record_field_use(Record, Tail, Column, Line).
 
 find_element({module_use, Module}, _CurrentFileSyntaxTree, _CurrentFile) ->
-    case lsp_syntax:module_syntax_tree(Module) of
+    case lsp_parse:module_syntax_tree(Module) of
         undefined -> undefined;
         {SyntaxTree, File} ->
             case find_module(SyntaxTree, Module) of
@@ -561,7 +561,7 @@ find_element({module_use, Module}, _CurrentFileSyntaxTree, _CurrentFile) ->
 find_element({hrl, HrlFile}, _CurrentFileSyntaxTree, _CurrentFile) ->
     {HrlFile, 1, 1};
 find_element({function_use, Module, Function, Arity}, _CurrentFileSyntaxTree, _CurrentFile) ->
-    case lsp_syntax:module_syntax_tree(Module) of
+    case lsp_parse:module_syntax_tree(Module) of
         undefined -> undefined;
         {SyntaxTree, File} ->
             case find_function(SyntaxTree, Function, Arity) of
@@ -570,7 +570,7 @@ find_element({function_use, Module, Function, Arity}, _CurrentFileSyntaxTree, _C
             end
     end;
 find_element({function_use, Module, Function, Arity, Args}, _CurrentFileSyntaxTree, _CurrentFile) ->
-    case lsp_syntax:module_syntax_tree(Module) of
+    case lsp_parse:module_syntax_tree(Module) of
         undefined -> undefined;
         {SyntaxTree, File} ->
             case find_function(SyntaxTree, Function, Arity) of
@@ -705,7 +705,7 @@ variable_in_fun_clause_arguments(Variable, {clause, {_, _}, Arguments, _, _}) ->
     length(find_variable_occurrences(Variable, Arguments)) > 0.
 
 get_function_arities(Module, Function) ->
-    case lsp_syntax:module_syntax_tree(Module) of
+    case lsp_parse:module_syntax_tree(Module) of
         {FileSyntaxTree, _File} ->
             lists:sort(fold_in_file_syntax_tree(FileSyntaxTree, [], fun
                 ({function, _Position, FoundFunction, Arity, _Clauses}, Acc) when FoundFunction =:= Function ->

@@ -223,7 +223,7 @@ file_contents_update(Socket, File, Contents) ->
     end,
     case filename:extension(File) of
         ".erl" ->
-            lsp_syntax:parse_source_file(File, ContentsFile),
+            lsp_parse:parse_source_file(File, ContentsFile),
             Linting andalso validate_parsed_source_file(Socket, File);
         ".src" ->
             Linting andalso validate_config_file(Socket, File, ContentsFile);
@@ -239,7 +239,7 @@ validate_parsed_source_file(Socket, File) ->
     send_diagnostics(Socket, File, maps:get(errors_warnings, ErrorsWarnings, [])).
 
 validate_config_file(Socket, File, ContentsFile) ->
-    ErrorsWarnings = lsp_syntax:parse_config_file(File, ContentsFile),
+    ErrorsWarnings = lsp_parse:parse_config_file(File, ContentsFile),
     send_diagnostics(Socket, File, maps:get(errors_warnings, ErrorsWarnings, [])).
 
 -ifdef(OTP_RELEASE).

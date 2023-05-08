@@ -55,7 +55,7 @@ end_per_testcase(_TestCase, Config) ->
 
 parseFile(AppDir, [FileName | T]) ->
     FilePath = filename:join(AppDir, FileName),
-    lsp_syntax:parse_source_file(FilePath, FilePath),
+    lsp_parse:parse_source_file(FilePath, FilePath),
     parseFile(AppDir, T);
 parseFile(_AppDir, []) -> ok.
 

@@ -6,7 +6,8 @@
          is_path_excluded/2,
          search_exclude_globs_to_regexps/1,
          to_string/1,
-         is_erlang_lib_file/1]).
+         is_erlang_lib_file/1,
+         absolute_path/2]).
 
 client_range(Line, StartChar, EndChar) ->
     #{
@@ -207,9 +208,16 @@ do_is_path_excluded(Path, [{RegExp, true} | ExcFilters], PreliminaryAnswer) ->
         nomatch    -> do_is_path_excluded(Path, ExcFilters, PreliminaryAnswer)
     end.
 
-
 is_erlang_lib_file(File) ->
     case string_prefix(File, code:lib_dir()) of
         nomatch -> false;
         _ -> true
+    end.
+
+absolute_path(BaseDir, Path) ->
+    case filename:pathtype(Path) of
+        relative ->
+            filename:absname_join(BaseDir, Path);
+        _ ->
+            Path
     end.
