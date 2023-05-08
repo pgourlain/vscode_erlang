@@ -6,8 +6,8 @@
 -export([document_opened/2, document_changed/2, document_closed/1, opened_documents/0, get_document_contents/1, parse_document/1]).
 -export([project_file_added/1, project_file_changed/1, project_file_deleted/1]).
 -export([get_syntax_tree/1, get_dodged_syntax_tree/1]).
+-export([root_available/0, project_modules/0, get_module_file/1, get_build_dir/0]).
 -export([init/1,handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
--export([root_available/0, project_modules/0, get_module_file/1, get_module_beam/1, get_build_dir/0]).
 
 -define(SERVER, ?MODULE).
 
@@ -73,12 +73,6 @@ get_dodged_syntax_tree(File) ->
             SyntaxTree
     end.
 
-start_link() ->
-    safe_new_table(document_contents),
-    safe_new_table(syntax_tree),
-    safe_new_table(dodged_syntax_tree),
-    gen_server:start_link({local, ?SERVER}, ?MODULE, [],[]).
-
 root_available() ->
     gen_server:cast(?SERVER, root_available).
 
@@ -88,8 +82,26 @@ project_modules() ->
 get_module_file(Module) ->
     gen_server:call(?SERVER, {get_module_file, Module}).
 
-get_module_beam(Module) ->
-    gen_server:call(?SERVER, {get_module_beam, Module}).
+get_build_dir() ->
+    ConfigFilename = filename:join([gen_lsp_config_server:root(), "rebar.config"]),
+    case filelib:is_file(ConfigFilename) of
+        true ->
+            Default = "_build",
+            case file:consult(ConfigFilename) of
+                {ok, Config} ->
+                    proplists:get_value(base_dir, Config, Default);
+                {error, _} ->
+                    Default
+            end;
+        false ->
+            undefined
+    end.
+
+start_link() ->
+    safe_new_table(document_contents),
+    safe_new_table(syntax_tree),
+    safe_new_table(dodged_syntax_tree),
+    gen_server:start_link({local, ?SERVER}, ?MODULE, [],[]).
 
 init(_Args) ->
     {ok, #state{project_modules = #{}, files_to_parse = []}}.
@@ -116,33 +128,6 @@ handle_call({get_module_file, Module},_From, State) ->
             [AFile | _] -> AFile
         end,
     {reply, File, State};
-
-handle_call({get_module_beam, Module},_From, State) ->
-    %% Get search.exclude setting of Visual Studio Code
-    SearchExcludeConf = gen_lsp_config_server:search_exclude(),
-    SearchExclude = lsp_utils:search_exclude_globs_to_regexps(SearchExcludeConf),
-    %% Select a non-excluded file
-    Files = maps:get(atom_to_list(Module), State#state.project_modules, []),
-    {ExceptExcluded, Excluded} = lists:partition(fun (File) ->
-        not lsp_utils:is_path_excluded(File, SearchExclude)
-    end, Files),
-    BeamFiles = lists:filtermap(fun (File) ->
-        case find_existing_beam(File) of
-            undefined -> false;
-            BeamFile -> {true, BeamFile}
-        end
-    end, ExceptExcluded ++ Excluded),
-    BeamFile = case BeamFiles of
-        [] ->
-            %try to find in erlang source files
-            case filelib:wildcard(code:lib_dir()++"/**/" ++ atom_to_list(Module) ++ ".erl") of
-                [] -> undefined;
-                [AFile | _] -> find_existing_beam(AFile)
-            end;
-        [AFile | _] ->
-            AFile
-    end,
-    {reply, BeamFile, State};
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
@@ -211,34 +196,6 @@ concat_project_files(File, OldFiles, BuildDir) ->
     case lists:member(BuildDir, filename:split(File)) of
         true  -> OldFiles ++ [File];
         false -> [File | OldFiles]
-    end.
-
-find_existing_beam(SourceFile) ->
-    case lists:reverse(filename:split(SourceFile)) of
-        [FilenameErl, "src" | T] ->
-            RootBeamName = filename:join(lists:reverse([filename:rootname(FilenameErl), "ebin" | T])),
-            case filelib:is_regular(RootBeamName ++ ".beam") of
-                true -> RootBeamName;
-                false -> undefined
-            end;
-        _ ->
-            undefined
-    end.
-
--spec get_build_dir() -> string() | undefined.
-get_build_dir() ->
-    ConfigFilename = filename:join([gen_lsp_config_server:root(), "rebar.config"]),
-    case filelib:is_file(ConfigFilename) of
-        true ->
-            Default = "_build",
-            case file:consult(ConfigFilename) of
-                {ok, Config} ->
-                    proplists:get_value(base_dir, Config, Default);
-                {error, _} ->
-                    Default
-            end;
-        false ->
-            undefined
     end.
 
 safe_new_table(Name) ->
