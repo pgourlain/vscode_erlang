@@ -53,12 +53,6 @@ end_per_testcase(_TestCase, Config) ->
 %% test cases %%
 %%%%%%%%%%%%%%%%
 
-parseFile(AppDir, [FileName | T]) ->
-    FilePath = filename:join(AppDir, FileName),
-    lsp_parse:parse_source_file(FilePath, FilePath),
-    parseFile(AppDir, T);
-parseFile(_AppDir, []) -> ok.
-
 check_result(Result, ExpectedStart, ExpectedEnd, ExpectedModuleName) ->
     #{range := #{<<"end">> := #{line := EndLine}, 
         <<"start">> := #{line := StartLine}},
