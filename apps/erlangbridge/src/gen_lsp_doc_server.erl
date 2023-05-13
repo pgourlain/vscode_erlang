@@ -241,7 +241,7 @@ parse_and_store(File, ContentsFile) ->
             ets:delete(references, File),
             lsp_navigation:fold_references(fun (Reference, Line, Column, End, _) ->
                 ets:insert(references, {File, Reference, Line, Column, End})
-            end, undefined, SyntaxTree)
+            end, undefined, File, SyntaxTree)
     end,
     case DodgedSyntaxTree of
         undefined -> ok;

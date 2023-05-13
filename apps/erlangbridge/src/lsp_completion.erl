@@ -77,24 +77,12 @@ record(File, Prefix) ->
     end, gen_lsp_doc_server:get_syntax_tree(File)).
 
 field(File, Record, Prefix) ->
-    RecordTree = lsp_navigation:find_record(gen_lsp_doc_server:get_syntax_tree(File), Record),
-    case RecordTree of
-        {{attribute, _, record, {Record, Fields}}, _File} ->
-            lists:filtermap(fun 
-                ({record_field, _, {atom, _, Field}}) ->
-                    case lists:prefix(Prefix, atom_to_list(Field)) of
-                        true -> {true, #{
-                            label => list_to_binary(atom_to_list(Field)),
-                            kind => 5 % Field
-                        }};
-                        _ -> false
-                    end;
-                (_) ->
-                    false
-            end, Fields);
-        _ ->
-            []
-    end.
+    lists:filtermap(fun (Field) ->
+        case lists:prefix(Prefix, atom_to_list(Field)) of
+            true -> {true, #{label => list_to_binary(atom_to_list(Field)), kind => 5}};
+            _ -> false
+        end
+    end, lsp_navigation:record_fields(File, Record)).
 
 variable(File, Line, Prefix) ->
     FileSyntaxTree = gen_lsp_doc_server:get_syntax_tree(File),
