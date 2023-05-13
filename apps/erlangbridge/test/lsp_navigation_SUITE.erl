@@ -54,29 +54,18 @@ end_per_testcase(_TestCase, Config) ->
 %%%%%%%%%%%%%%%%
 
 check_result(Result, ExpectedStart, ExpectedEnd, ExpectedModuleName) ->
-    #{range := #{<<"end">> := #{line := EndLine}, 
-        <<"start">> := #{line := StartLine}},
-      uri := FilePath} = Result,
-    ?assertEqual(ExpectedStart, StartLine),
-    ?assertEqual(ExpectedEnd, EndLine),
-    BaseName = filename:basename(binary_to_list(FilePath)),
+    error_logger:info_msg("check_result: ~p ~p ~p ~p~n", [Result, ExpectedStart, ExpectedEnd, ExpectedModuleName]),
+    {FilePath, Line, _StartColumn, _EndColumn} = Result,
+    ?assertEqual(ExpectedStart, Line - 1),
+    ?assertEqual(ExpectedEnd, Line - 1),
+    BaseName = filename:basename(FilePath),
     ?assertEqual(ExpectedModuleName, BaseName).
 
-
 check_result(Result, ExpectedStart, ExpectedEnd) ->
-    #{range := #{<<"end">> := #{line := EndLine}, 
-        <<"start">> := #{line := StartLine}}} = Result,
+    {_File, Line, _StartColumn, _EndColumn} = Result,
 
-    ?assertEqual(ExpectedStart, StartLine),
-    ?assertEqual(ExpectedEnd, EndLine),
-    % sample result    
-    % A = #{range =>
-    %           #{<<"end">> => #{character => 0, line => 17},
-    %             <<"start">> => #{character => 0, line => 17}},
-    %       uri =>
-    %           <<"file:///...../sources/vscode"
-    %             "_erlang/_build/test/lib/vscode_lsp/test/lsp_n"
-    %             "avigation_SUITE_data/main.erl">>},
+    ?assertEqual(ExpectedStart, Line - 1),
+    ?assertEqual(ExpectedEnd, Line - 1),
     ok.
 
 dotestfiles(AppDir, [{FileName, LocationTests}|T]) ->
@@ -86,12 +75,12 @@ dotestfiles(_AppDir, []) ->
     ok.
 
 dotestfile(FilePath, [{Line,Column, ExpectedLine, _ExpectedColumn, ExpectedModuleName}|T]) ->
-    GoTo = lsp_navigation:definition(FilePath, Line,Column),
+    GoTo = lsp_navigation:definition(FilePath, Line, Column),
     ?writeConsole(GoTo),
     check_result(GoTo, ExpectedLine, ExpectedLine, ExpectedModuleName),
     dotestfile(FilePath, T);  
 dotestfile(FilePath, [{Line,Column, ExpectedLine, _ExpectedColumn}|T]) ->
-    GoTo = lsp_navigation:definition(FilePath, Line,Column),
+    GoTo = lsp_navigation:definition(FilePath, Line, Column),
     ?writeConsole(GoTo),
     check_result(GoTo, ExpectedLine, ExpectedLine),
     dotestfile(FilePath, T);  
