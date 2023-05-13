@@ -1,7 +1,7 @@
 -module(lsp_navigation).
 
--export([definition/3, hover_info/3, function_description/2, function_description/3, references/3, codelens_info/1,
-    find_function_with_line/2, get_function_arities/2, find_record/2, symbol_info/2, fold_references/3]).
+-export([definition/3, hover_info/3, function_description/2, function_description/3, references/3]).
+-export([codelens_info/1, symbol_info/1, find_function_with_line/2, get_function_arities/2, find_record/2, fold_references/3]).
 
 -define(LOG(S),
 	begin
@@ -58,6 +58,32 @@ codelens_info(File) ->
             length(gen_lsp_doc_server:get_references({function, FileModule, Function, Arity})),
         {Function, RefCount, maps:is_key({Function, Arity}, Exports), L, Start}
     end, Functions).
+
+symbol_info(File) ->
+    lists:reverse(fold_in_syntax_tree(fun
+        (_SyntaxTree, CurrentFile, Acc) when CurrentFile =/= File ->
+            Acc;
+        ({function, {L, _}, Function, Arity, _}, _CurrentFile, Acc) ->
+            FullName = iolist_to_binary(io_lib:format("~p/~p", [Function, Arity])),
+            [{FullName, 12, L} | Acc];
+        ({attribute, {L, _}, record, {Record, _}}, _CurrentFile, Acc) ->
+            [{Record, 23, L} | Acc];
+        (_SyntaxTree, _CurrentFile, Acc) ->
+            Acc
+    end, [], File, gen_lsp_doc_server:get_syntax_tree(File))).
+
+create_symbolinfo(FuncName, Uri, SymbolKind, {L, C}) ->
+    #{
+        name => FuncName,
+        kind => SymbolKind, 
+        location => #{ 
+            uri => Uri, 
+            range => #{ 
+                start => #{ character => C, line => L-1}, 
+                <<"end">> => #{ character => C, line => L-1 } 
+            } 
+        }
+    }.
 
 find_at(File, Line, Column) ->
     FileModule = list_to_atom(filename:rootname(filename:basename(File))),
@@ -488,66 +514,6 @@ get_generic_help(Module, Function) ->
         undefined -> <<>>;
         _ -> Help
     end.
-
-symbol_info(Uri, File) ->
-    %return all symbols for the specified document 
-    SyntaxTree = gen_lsp_doc_server:get_syntax_tree(File),
-    %gen_lsp_server:lsp_log("syntax for symbolinfo : ~p", [SyntaxTree]),
-    fold_in_syntax_tree(fun (S, Acc) -> symbolinfo_analyze(Uri, S, Acc) end, [], SyntaxTree).
-
-symbolinfo_analyze(Uri, SyntaxTree, List) ->
-    case SyntaxTree of
-    {function, Location, FuncName, Arity, _} -> 
-        FuncFullName = list_to_binary(lists:flatten(io_lib:format("~p/~p", [FuncName,Arity]))),
-        List++ create_symbolinfo(FuncFullName, Uri, function, Location);
-    {attribute, Location, record, {Record, _}} ->
-        List++ create_symbolinfo(Record, Uri, struct, Location);
-    {attribute, Location, type, {Type, _, _}} ->
-        List++ create_symbolinfo(Type, Uri, class, Location);
-    _ -> List
-    end.
-
-symbol_kind(ErlangKind) ->
-    %mapping a name to number expected by vscode
-    case ErlangKind of 
-    function -> 9;
-    interface -> 11;
-    array -> 18;
-    namespace -> 19;
-    event -> 24;
-    string -> 15;
-    struct -> 23;
-    number -> 16;
-    null -> 21;
-    constant -> 14;
-    class -> 5;
-    boolean -> 17;
-    _ -> 1
-    end.
-
-symbol_container_from_symbol_kind(ErlangKind) ->
-    case ErlangKind of
-    function -> <<"functions">>;
-    class -> <<"types">>;
-    struct -> <<"records">>;
-    _ -> <<"root">>
-    end.
-
-create_symbolinfo(FuncName, Uri, SymbolKind, {L, C}) ->
-    %gen_lsp_server:lsp_log("create symbol info, ~p: ~p", [FuncName, Location]),
-    %vscode documentation  : https://code.visualstudio.com/docs/extensionAPI/vscode-api#SymbolInformation
-    [#{
-        containerName => symbol_container_from_symbol_kind(SymbolKind),
-        name => FuncName,
-        kind => symbol_kind(SymbolKind), 
-        location => #{ 
-            uri => Uri, 
-            range => #{ 
-                start => #{ character => C, line => L-1}, 
-                <<"end">> => #{ character => C, line => L-1 } 
-            } 
-        }
-    }].
 
 function_header(Function, Args) ->
     "**" ++ atom_to_list(Function) ++ "**(" ++ join_strings(lists:map(fun erl_prettypr:format/1, Args), ", ") ++ ")".

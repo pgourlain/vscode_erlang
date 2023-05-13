@@ -205,8 +205,16 @@ textDocument_codeLens(_Socket, Params) ->
 
 textDocument_documentSymbol(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),
-    lsp_navigation:symbol_info(Uri, lsp_utils:file_uri_to_file(Uri)).
-    %test_symbols(Uri, 25).
+    lists:map(fun ({Name, Kind, Line}) ->
+        #{
+            name => Name,
+            kind => Kind, 
+            location => #{ 
+                uri => Uri, 
+                range => lsp_utils:client_range(Line, 1, 1)
+            }
+        }
+    end, lsp_navigation:symbol_info(lsp_utils:file_uri_to_file(Uri))).
 
 validate_file(Socket, File) ->
     case gen_lsp_config_server:linting() of
