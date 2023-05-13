@@ -51,6 +51,7 @@ configuration(Socket, [ErlangSection, ComputedSecton, HttpSection, SearchSection
                            " - http: ~p~n"
                            " - search: ~p",
                            [ErlangSection, ComputedSecton, HttpSection, SearchSection]),
+
     lists:foreach(fun (File) ->
         gen_lsp_server:lsp_log("File = ~p",[File]),
         send_diagnostics(Socket, File, []),
@@ -112,30 +113,35 @@ textDocument_definition(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),
     Line = mapmapget(position, line, Params),
     Character = mapmapget(position, character, Params),
-    lsp_navigation:goto_definition(lsp_utils:file_uri_to_file(Uri), Line + 1, Character + 1).
+    case lsp_navigation:definition(lsp_utils:file_uri_to_file(Uri), Line + 1, Character + 1) of
+        {File, L, S, E} ->
+            #{
+                uri => lsp_utils:file_uri_to_vscode_uri(lsp_utils:file_to_file_uri(File)),
+                range => lsp_utils:client_range(L, S, E)
+            };
+        undefined ->
+            []
+    end.
 
 textDocument_references(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),
     Line = mapmapget(position, line, Params),
     Character = mapmapget(position, character, Params),
-    Result = lsp_navigation:references_info(lsp_utils:file_uri_to_file(Uri), Line + 1, Character + 1),
-    case Result of
-        #{references := References} = _ ->
-            lists:map(fun (#{uri := RefUri, line := RefLine, character := RefCharacter} = _) ->
-                #{
-                    uri => lsp_utils:file_uri_to_vscode_uri(RefUri),
-                    range => lsp_utils:client_range(RefLine, RefCharacter, RefCharacter)
-                }
-            end, References);
-        _ ->
-            #{}
-    end.
+    lists:map(fun ({File, L, S, E}) ->
+        #{
+            uri => lsp_utils:file_uri_to_vscode_uri(lsp_utils:file_to_file_uri(File)),
+            range => lsp_utils:client_range(L, S, E)
+        }
+    end, lsp_navigation:references(lsp_utils:file_uri_to_file(Uri), Line + 1, Character + 1)).
 
 textDocument_hover(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),
     Line = mapmapget(position, line, Params),
     Character = mapmapget(position, character, Params),
-    lsp_navigation:hover_info(lsp_utils:file_uri_to_file(Uri), Line + 1, Character + 1).
+    case lsp_navigation:hover_info(lsp_utils:file_uri_to_file(Uri), Line + 1, Character + 1) of
+        undefined -> #{contents => <<>>};
+        Contents -> #{contents => Contents}
+    end.
 
 textDocument_completion(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),
@@ -169,53 +175,38 @@ textDocument_formatting(_Socket, Params) ->
 textDocument_codeLens(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),
     case gen_lsp_config_server:codeLensEnabled() of
-        false -> [];
+        false ->
+            [];
         _ ->
-            lists:foldl(fun (#{data := Data} = Item, Acc) ->
-                case maps:get(exported, Data) of
-                    true ->
-                        AccWithExported = [exported_code_lens(Item) | Acc],
-                        case maps:get(count, Data) > 0 of
-                            true -> [references_code_lens(Uri, Item) | AccWithExported];
-                            _ -> AccWithExported
-                        end;
+            lists:foldl(fun ({Function, RefCount, Exported, Line, Column}, Acc) ->
+                Range = lsp_utils:client_range(Line, Column, Column + length(atom_to_list(Function))),
+                Base = #{range => Range, data => #{function => Function, count => RefCount, exported => Exported}},
+                ExportedCL = Base#{command => #{title => <<"exported">>, command => <<>>}},
+                ReferenceCL = case RefCount of
+                    0 ->
+                        Base#{command => #{title => <<"unused">>, command => <<>>}};
                     _ ->
-                        [references_code_lens(Uri, Item) | Acc]
+                        Base#{command => #{
+                            title => list_to_binary(integer_to_list(RefCount) ++ " references"),
+                            command => <<"editor.action.findReferences">>,
+                            arguments => [
+                                lsp_utils:file_uri_to_vscode_uri(Uri),
+                                #{lineNumber => Line, column => Column}
+                            ]
+                        }}
+                end,
+                case {RefCount > 0, Exported} of
+                    {_, false} -> [ReferenceCL | Acc];
+                    {false, true} -> [ExportedCL | Acc];
+                    {true, true} -> [ReferenceCL, ExportedCL | Acc]
                 end
             end, [], lsp_navigation:codelens_info(lsp_utils:file_uri_to_file(Uri)))
     end.
-
 
 textDocument_documentSymbol(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),
     lsp_navigation:symbol_info(Uri, lsp_utils:file_uri_to_file(Uri)).
     %test_symbols(Uri, 25).
-
-exported_code_lens(#{data := Data} = Item) ->
-    StartChar = maps:get(character, Item),
-    #{
-        range => lsp_utils:client_range(maps:get(line, Item), StartChar, StartChar + byte_size(maps:get(func_name, Data))),
-        data => Data,
-        command => #{title => <<"exported">>, command => <<>>}
-    }.
-
-references_code_lens(Uri, #{data := Data} = Item) ->
-    StartChar = maps:get(character, Item),
-    #{
-        range => lsp_utils:client_range(maps:get(line, Item), StartChar, StartChar + byte_size(maps:get(func_name, Data))),
-        data => Data,
-        command => case maps:get(count, Data) of
-            0 -> #{title => <<"unused">>, command => <<>>};
-            _ -> #{
-                title => list_to_binary(integer_to_list(maps:get(count, Data)) ++ " private references"),
-                command => <<"editor.action.findReferences">>,
-                arguments => [
-                    lsp_utils:file_uri_to_vscode_uri(Uri),
-                    #{lineNumber => maps:get(line, Item), column => maps:get(character, Item)}
-                ]
-            }
-        end
-    }.
 
 validate_file(Socket, File) ->
     case gen_lsp_config_server:linting() of

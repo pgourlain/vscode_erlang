@@ -28,10 +28,10 @@ parse_config_file(File, ContentsFile) ->
     end.
 
 get_include_path(File) ->
-    Candidates = get_standard_include_paths() ++
-		        get_settings_include_paths() ++
-		        get_file_include_paths(File) ++
-		        get_include_paths_from_rebar_config(File),
+    Candidates = get_file_include_paths(File) ++
+        get_settings_include_paths() ++
+        get_include_paths_from_rebar_config(File) ++
+        get_standard_include_paths(),
     Paths = lists:filter(fun filelib:is_dir/1, Candidates),
     gen_lsp_server:lsp_log("get_include_path: ~p", [Paths]),
     Paths.
@@ -39,10 +39,10 @@ get_include_path(File) ->
 get_standard_include_paths() ->
     RootDir = gen_lsp_config_server:root(),
     [
-        filename:join([RootDir, "_build", "default", "lib"]),
-        filename:join([RootDir, "_build", "default", "plugins"]),
         filename:join([RootDir, "apps"]),
-        filename:join([RootDir, "lib"])
+        filename:join([RootDir, "lib"]),
+        filename:join([RootDir, "_build", "default", "lib"]),
+        filename:join([RootDir, "_build", "default", "plugins"])
     ].
 
 get_settings_include_paths() ->

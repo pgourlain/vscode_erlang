@@ -86,17 +86,17 @@ dotestfiles(_AppDir, []) ->
     ok.
 
 dotestfile(FilePath, [{Line,Column, ExpectedLine, _ExpectedColumn, ExpectedModuleName}|T]) ->
-    GoTo = lsp_navigation:goto_definition(FilePath, Line,Column),
+    GoTo = lsp_navigation:definition(FilePath, Line,Column),
     ?writeConsole(GoTo),
     check_result(GoTo, ExpectedLine, ExpectedLine, ExpectedModuleName),
     dotestfile(FilePath, T);  
 dotestfile(FilePath, [{Line,Column, ExpectedLine, _ExpectedColumn}|T]) ->
-    GoTo = lsp_navigation:goto_definition(FilePath, Line,Column),
+    GoTo = lsp_navigation:definition(FilePath, Line,Column),
     ?writeConsole(GoTo),
     check_result(GoTo, ExpectedLine, ExpectedLine),
     dotestfile(FilePath, T);  
 dotestfile(FilePath, [{Line,Column, ExpectedLine}|T]) ->
-    GoTo = lsp_navigation:goto_definition(FilePath, Line,Column),
+    GoTo = lsp_navigation:definition(FilePath, Line,Column),
     ?writeConsole(GoTo),
     check_result(GoTo, ExpectedLine, ExpectedLine),
     dotestfile(FilePath, T);  

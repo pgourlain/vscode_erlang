@@ -5,8 +5,8 @@
 
 -export([document_opened/2, document_changed/2, document_closed/1, opened_documents/0, get_document_contents/1, parse_document/1]).
 -export([project_file_added/1, project_file_changed/1, project_file_deleted/1]).
--export([get_syntax_tree/1, get_dodged_syntax_tree/1]).
--export([root_available/0, project_modules/0, get_module_file/1, get_build_dir/0]).
+-export([get_syntax_tree/1, get_dodged_syntax_tree/1, get_references/1]).
+-export([root_available/0, project_modules/0, get_module_file/1, get_build_dir/0, find_source_file/1]).
 -export([init/1,handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 -define(SERVER, ?MODULE).
@@ -39,7 +39,7 @@ parse_document(File) ->
                     io:format("Cannot find contents of document ~p~n", [File]);
                 Contents ->
                     ContentsFile = lsp_utils:make_temporary_file(Contents),
-                    parse_and_store_trees(File, ContentsFile),
+                    parse_and_store(File, ContentsFile),
                     file:delete(ContentsFile)
             end;
         _ ->
@@ -58,7 +58,7 @@ project_file_deleted(File) ->
 get_syntax_tree(File) ->
     case get_tree(syntax_tree, File) of
         undefined ->
-            parse_and_store_trees(File, File),
+            parse_and_store(File, File),
             get_tree(syntax_tree, File);
         SyntaxTree ->
             SyntaxTree
@@ -67,11 +67,14 @@ get_syntax_tree(File) ->
 get_dodged_syntax_tree(File) ->
     case get_tree(dodged_syntax_tree, File) of
         undefined ->
-            parse_and_store_trees(File, File),
+            parse_and_store(File, File),
             get_tree(dodged_syntax_tree, File);
         SyntaxTree ->
             SyntaxTree
     end.
+
+get_references(Reference) ->
+    ets:match(references, {'$1', Reference, '$2', '$3', '$4'}).
 
 root_available() ->
     gen_server:cast(?SERVER, root_available).
@@ -97,10 +100,26 @@ get_build_dir() ->
             undefined
     end.
 
+find_source_file(File) ->
+    BuildDir = filename:join(gen_lsp_config_server:root(), gen_lsp_doc_server:get_build_dir()),
+    Result = lists:filter(fun (Path) ->
+        string:prefix(Path, BuildDir) =:= nomatch
+    end, filelib:wildcard(as_string(filename:join([gen_lsp_config_server:root(), "**", File])))),
+    case Result of
+        [AFile | _] -> AFile;
+        [] -> undefined
+    end.
+
+as_string(Text) when is_binary(Text) ->
+    binary_to_list(Text);
+as_string(Text) -> 
+    Text.
+
 start_link() ->
-    safe_new_table(document_contents),
-    safe_new_table(syntax_tree),
-    safe_new_table(dodged_syntax_tree),
+    safe_new_table(document_contents, set),
+    safe_new_table(syntax_tree, set),
+    safe_new_table(dodged_syntax_tree, set),
+    safe_new_table(references, bag),
     gen_server:start_link({local, ?SERVER}, ?MODULE, [],[]).
 
 init(_Args) ->
@@ -115,18 +134,20 @@ handle_call({get_module_file, Module},_From, State) ->
     SearchExclude = lsp_utils:search_exclude_globs_to_regexps(SearchExcludeConf),
     %% Select a non-excluded file
     Files = maps:get(atom_to_list(Module), State#state.project_modules, []),
-    File =
-        case [F || F<-Files, not lsp_utils:is_path_excluded(F, SearchExclude)] of
-            []          -> 
-                %try to find in erlang source files
-                case filelib:wildcard(code:lib_dir()++"/**/" ++ atom_to_list(Module) ++ ".erl") of
-                    [] -> undefined;
-                    [OneFile]   -> OneFile;
-                    [AFile | _] -> AFile
-                end;
-            [OneFile]   -> OneFile;
-            [AFile | _] -> AFile
-        end,
+    File = case [F || F <- Files, not lsp_utils:is_path_excluded(F, SearchExclude)] of
+        [] ->
+            case find_module_source_in_dir(Module, code:lib_dir()) of
+                undefined ->
+                    BuildDir = filename:join(gen_lsp_config_server:root(), gen_lsp_doc_server:get_build_dir()),
+                    find_module_source_in_dir(Module, BuildDir);
+                Result ->
+                    Result
+            end;
+        [OneFile] ->
+            OneFile;
+        [AFile | _] ->
+            AFile
+    end,
     {reply, File, State};
 
 handle_call(_Request, _From, State) ->
@@ -137,8 +158,13 @@ handle_cast(stop, State) ->
 
 handle_cast(root_available, State) ->
     BuildDir = get_build_dir(),
+    FullBuildDir = filename:join(gen_lsp_config_server:root(), BuildDir),
     Fun = fun(File, {ProjectModules, FilesToParse}) ->
-        {do_add_project_file(File, ProjectModules, BuildDir), [File | FilesToParse]}
+        UpdatedFilesToParse = case string:prefix(File, FullBuildDir) of
+            nomatch -> [File | FilesToParse];
+            _ -> FilesToParse
+        end,
+        {do_add_project_file(File, ProjectModules, BuildDir), UpdatedFilesToParse}
     end,
     {ProjectModules, FilesToParse} = filelib:fold_files(gen_lsp_config_server:root(), ".erl$", true, Fun, {#{}, []}),
     {noreply, parse_next_file_in_background(State#state{project_modules = ProjectModules, files_to_parse = FilesToParse})};
@@ -162,6 +188,7 @@ handle_cast({project_file_deleted, File}, State) ->
     ets:delete(document_contents, File),
     ets:delete(syntax_tree, File),
     ets:delete(dodged_syntax_tree, File),
+    ets:delete(references, File),
     Module = filename:rootname(filename:basename(File)),
     UpdatedFiles = lists:delete(File, maps:get(Module, State#state.project_modules, [])),
     UpdatedProjectModules = case UpdatedFiles of
@@ -198,17 +225,23 @@ concat_project_files(File, OldFiles, BuildDir) ->
         false -> [File | OldFiles]
     end.
 
-safe_new_table(Name) ->
+safe_new_table(Name, Type) ->
     case ets:whereis(Name) of
-        undefined -> ets:new(Name, [named_table, public]);
+        undefined -> ets:new(Name, [Type, named_table, public]);
         _ -> Name
     end.
 
-parse_and_store_trees(File, ContentsFile) ->
+parse_and_store(File, ContentsFile) ->
     {SyntaxTree, DodgedSyntaxTree} = lsp_parse:parse_source_file(File, ContentsFile),
     case SyntaxTree of
-        undefined -> ok;
-        _ -> ets:insert(syntax_tree, {File, SyntaxTree})
+        undefined ->
+            ok;
+        _ ->
+            ets:insert(syntax_tree, {File, SyntaxTree}),
+            ets:delete(references, File),
+            lsp_navigation:fold_references(fun (Reference, Line, Column, End, _) ->
+                ets:insert(references, {File, Reference, Line, Column, End})
+            end, undefined, SyntaxTree)
     end,
     case DodgedSyntaxTree of
         undefined -> ok;
@@ -226,5 +259,12 @@ get_tree(TreeType, File) ->
 parse_next_file_in_background(#state{files_to_parse = []} = State) ->
     State;
 parse_next_file_in_background(#state{files_to_parse = [File | Rest]} = State) ->
-    worker:start(fun () -> parse_and_store_trees(File, File) end, File),
+    worker:start(fun () -> parse_and_store(File, File) end, File),
     State#state{files_to_parse = Rest}.
+
+find_module_source_in_dir(Module, Dir) ->
+    case filelib:wildcard(Dir ++ "/**/" ++ atom_to_list(Module) ++ ".erl") of
+        [] -> undefined;
+        [OneFile]   -> OneFile;
+        [AFile | _] -> AFile
+    end.

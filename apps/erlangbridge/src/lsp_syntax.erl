@@ -1,6 +1,6 @@
 -module(lsp_syntax).
 
--export([validate_parsed_source_file/1, find_macro_definition/2]).
+-export([validate_parsed_source_file/1]).
 
 validate_parsed_source_file(File) ->
     FileSyntaxTree = gen_lsp_doc_server:get_syntax_tree(File),
@@ -11,41 +11,6 @@ validate_parsed_source_file(File) ->
     Result = lint(NewFileSyntaxTree, File),
     code_delete(ModulesToDelete),
     Result.
-
-find_macro_definition(Macro, File) -> find_macro_definition_in_files(Macro, [File]).
-
-find_macro_definition_in_files(_Macro, []) -> undefined;
-find_macro_definition_in_files(Macro, [File | Tail]) ->
-    Forms = gen_lsp_doc_server:get_dodged_syntax_tree(File),
-    case find_macro_definition(Macro, File, Forms) of
-        undefined ->
-            Included = lists:reverse(find_included_files(Forms, [])),
-            IncludePath = lsp_parse:get_include_path(File),
-            case find_macro_definition_in_files(Macro, [filename:join(Path, IncludedFile) || IncludedFile <- Included, Path <- IncludePath]) of
-                undefined -> find_macro_definition_in_files(Macro, Tail);
-                Result -> Result
-            end;
-        Result -> Result
-    end.
-
-find_macro_definition(_Macro, _File, undefined) ->
-    undefined;
-find_macro_definition(_Macro, _File, []) ->
-    undefined;
-find_macro_definition(Macro, File, [{tree, attribute, _, {attribute, {atom, _, define}, [{_, Line, Macro}, _]}} | _]) ->
-    {File, Line, 1};
-find_macro_definition(Macro, File, [{tree, attribute, _, {attribute, {atom, _, define}, [{_, _, _, {_, {_, Line, Macro}, _}}, _]}} | _]) ->
-    {File, Line, 1};
-find_macro_definition(Macro, File, [_ | Tail]) ->
-    find_macro_definition(Macro, File, Tail).
-
-find_included_files(undefined, Acc) -> Acc;
-find_included_files([], Acc) -> Acc;
-find_included_files([{tree, attribute, _, {attribute, {atom, _, include_lib}, [{string, _ , Name}]}} | Tail], Acc) ->
-    find_included_files(Tail, [Name | Acc]);
-find_included_files([{tree, attribute, _, {attribute, {atom, _, include}, [{string, _ , Name}]}} | Tail], Acc) ->
-    find_included_files(Tail, [Name | Acc]);
-find_included_files([_ | Tail], Acc) -> find_included_files(Tail, Acc).
 
 behaviour_modules(undefined) ->
     [];
