@@ -1,5 +1,18 @@
 # Change log
 
+
+## Version 0.9.0 (May 14, 2023)
+
+* [259](https://github.com/pgourlain/vscode_erlang/issues/259) : Navigation improvements
+  - All project source files are parsed after project is opened
+  - References work within the project not only locally in single file
+  - References work for variables
+  - Code Lens show references in the project not only local
+  - Some fixes in completion of record field names
+  - Outline shows functions as functions not constructors
+
+---
+
 ## Version 0.8.11 (May 7, 2023)
 
 * [257](https://github.com/pgourlain/vscode_erlang/issues/257) : Reformatting no longer destroys .config and .src files
@@ -8,10 +21,13 @@
 Thanks to
 * [Wojtek Surowka](https://github.com/wojteksurowka)
 
+---
+
 ## Version 0.8.10 (May 6, 2023)
 
 * [255](https://github.com/pgourlain/vscode_erlang/issues/255) : Debugging crash with VScode 1.78
 
+---
 
 ## Version 0.8.9 (May 2, 2023)
 
