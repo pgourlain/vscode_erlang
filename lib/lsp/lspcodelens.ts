@@ -49,7 +49,7 @@ export async function onProvideCodeLenses(document: TextDocument, token: Cancell
 
 async function internalProvideCodeLenses(document: TextDocument, token: CancellationToken): Promise<ProviderResult<VSCodeLens[]>> {
     //Send request for codeLens
-	return await client.sendRequest<CodeLensParams, CodeLens[], void, CodeLensRegistrationOptions>(CodeLensRequest.type,
+	return await client.sendRequest<CodeLensParams, CodeLens[], CodeLens[], void, CodeLensRegistrationOptions>(CodeLensRequest.type,
 		<CodeLensParams>{
 			textDocument: <TextDocumentIdentifier>{ uri: document.uri.toString() }
 		},

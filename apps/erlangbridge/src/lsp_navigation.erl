@@ -2,7 +2,7 @@
 
 -export([definition/3, hover_info/3, function_description/2, function_description/3, references/3]).
 -export([codelens_info/1, symbol_info/1, record_fields/2, find_function_with_line/2, fold_references/4]).
--export([inlayhint_info/3]).
+-export([inlayhints_info/3, full_inlayhints_info/2]).
 
 -define(LOG(S),
 	begin
@@ -63,20 +63,10 @@ codelens_info(File) ->
 %
 % return { Position, Label} => {{1,1}, "sample"}
 %
-inlayhint_info(File, {LS, _CS}, {LE,_CE}) ->
-    Res = case get_inlayhints_state(File) of
-        undefined -> 
-            #{defs := Defs, calls := Calls} = fold_in_syntax_tree(fun inlayhint_analyze/2,
-                #{defs => [], calls => []},
-                File, lsp_syntax:file_syntax_tree(File)),
-            %?LOG("inlay_analyse result:~p, ~p", [Defs, Calls]),
-            NewInlays = [X || X <- filter_and_map(Calls, Defs)],
-            %gen_lsp_doc_server:set_document_attribute(File, inlay_hints, NewInlays),
-            NewInlays;
-        Inlays -> 
-            %?LOG("inlay_analyse saved state:~p", [Inlays]),
-            Inlays
-    end,
+inlayhints_info(File, {LS, _CS}, {LE,_CE}) ->
+    %% Like syntax_tree, it should be store in ets, and update after each parse
+
+    Res = full_inlayhints_info(File,  gen_lsp_doc_server:get_syntax_tree(File)),
     %filter on provided range
     %?LOG("inlayhint_info expected range:(~p,~p),(~p,~p)", [LS,CS, LE,CE]),
     % filter base on line
@@ -84,124 +74,13 @@ inlayhint_info(File, {LS, _CS}, {LE,_CE}) ->
     ?LOG("inlayhint_info result:~p, filtered:~p", [length(Res), length(FilteredRes)]),
     FilteredRes.
 
-get_inlayhints_state(File) ->
-    undefined.
-    % case gen_lsp_doc_server:get_document_attribute(File, inlay_hints) of
-    %     undefined -> undefined;
-    %     [] -> undefined;
-    %     Other -> Other
-    % end.
-
-filter_and_map([], _Defs) ->
-    [];
-filter_and_map([#{args := Args, func_name := FName} | RestCalls], Defs) ->
-    L = length(Args),
-    case
-        lists:filter(
-            fun(#{arity := Arity, func_name := Dfn}) -> Arity =:= L andalso FName =:= Dfn end, Defs
-        )
-    of
-        [#{args := DArgs}] -> filter_and_map_args(Args, DArgs);
-        _ -> []
-    end ++
-        filter_and_map(RestCalls, Defs).
-
-filter_and_map_args([], _Defs) ->
-    [];
-filter_and_map_args([{Index, Call} | RestCalls], Defs) ->
-    %get corresponding argument in definition
-    D = lists:nth(Index + 1, Defs),
-    %?LOG("try_match:~p, ~p", [Call, D]),
-    Result = try_match_parameter(Call, D),
-    Result ++ filter_and_map_args(RestCalls, Defs).
-
-try_match_parameter({var, _, VarName}, {var, _, DefVarName}) when VarName =:= DefVarName ->
-    % call var name is equal to definition var name, no inlay for this argument
-    [];
-try_match_parameter({_, Position, _}, DefArg) ->
-   try_match_inlay(Position, DefArg);
-try_match_parameter({call, Position, _,_}, DefArg)  ->
-   try_match_inlay(Position, DefArg);
-try_match_parameter(_, _)  ->
-    [].
-
-try_match_inlay(Position, DefArg) ->
-    Label = case DefArg of
-        {match, _, _,_} ->  "match:";
-        {map, _,_} -> "map:";
-        {cons, _,_,_} -> "cons:";
-        {var, _, DefVarName} -> lsp_utils:to_string(DefVarName) ++ ":";
-        _ -> false
-    end,
-    if
-        Label =:= false -> [];
-        true ->
-            [{
-            Position,
-            Label,
-            "parameter"
-            }]
-    end.
-
-inlayhint_analyze(SyntaxTree, #{defs := Defs, calls := Calls} = Dict) ->
-    case SyntaxTree of
-        %TODO, get args from spec if exists
-        {function, _Location, FuncName, Arity, Content} when Arity > 0 ->
-            F = #{
-                func_name => FuncName,
-                arity => Arity,
-                args => extract_function_args(Content)
-            },
-            maps:put(defs, Defs ++ [F], Dict);
-        {call, _LocationCall, {atom, _, FName}, Args} when length(Args) > 0 ->
-            %sample Args
-            %functionName:test_literal_guard, args: [{integer,{11,24},5}]
-            %functionName:test_literal_guard), args: [{var,{12,24},'B'}]
-            F = #{
-                func_name => FName,
-                args => index_args(Args)
-            },
-            maps:put(calls, Calls ++ [F], Dict);
-        _ ->
-            Dict
-    end.
-
-index_args(Args) ->
-    %%add index for each arg
-    {LR, _} = lists:mapfoldl(fun(A, Acc) -> {{Acc, A}, Acc + 1} end, 0, Args),
-    LR.
-
-extract_function_args([]) ->
-    [];
-extract_function_args(Clauses) ->
-    ArgsList = lists:filtermap(fun (X) ->
-        case X of
-            {clause, _, Args, _, _} -> {true, Args};
-            _ -> false
-         end
-        end,  Clauses),
-    zip_args(ArgsList).
-
-zip_args([]) -> [];
-zip_args([Args]) -> 
-    Args;
-zip_args([Args1,Args2|Tail]) -> 
-    %?LOG("zip_args(~p,~p)",[Args1, Args2]),
-    Res = lists:zipwith(fun (Arg1,Arg2) ->
-        %compare two args, if var is '_' => take next
-        case Arg1 of
-            {var, _, VarName} -> is_ignored(lsp_utils:to_string(VarName), Arg1, Arg2);
-            _ -> Arg2
-        end
-        end, Args1, Args2),
-    zip_args([Res]++Tail).
-
-is_ignored(VarName, Arg1, Arg2) ->
-    F = string:find(VarName, "_"),
-    if 
-        F =:= VarName -> Arg2;
-        true -> Arg1
-    end.
+full_inlayhints_info(File, SyntaxTree) ->
+    #{defs := Defs, calls := Calls} = fold_in_syntax_tree(fun lsp_inlayhints:inlayhint_analyze/3,
+                #{defs => [], calls => []},
+                File, SyntaxTree),
+    %?LOG("full_inlayhints_info result:~p, ~p", [Defs, Calls]),
+    NewInlays = [X || X <- lsp_inlayhints:generate_inlayhints(Calls, Defs)],
+    NewInlays.
 
 symbol_info(File) ->
     lists:reverse(fold_in_syntax_tree(fun

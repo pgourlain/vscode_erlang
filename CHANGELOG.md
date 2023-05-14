@@ -1,10 +1,10 @@
 # Change log
 
-## Version 0.9.1 (May 14, 2023)
+## Version 0.9.1 (May 15, 2023)
 
 * [XX](https://github.com/pgourlain/vscode_erlang/issues/XX) : 
   - Upgrade vscode engine to 1.52
-  - Add inlayHints implmentation
+  - Add inlayHints implementation (see Readme.md) 
 
 ## Version 0.9.0 (May 14, 2023)
 

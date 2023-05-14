@@ -76,8 +76,6 @@ workspace_didChangeWatchedFiles(_Socket, Params) ->
 textDocument_didOpen(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
     gen_lsp_doc_server:document_opened(File, mapmapget(textDocument, text, Params)),
-    % clean inlays on change
-    gen_lsp_doc_server:set_document_attribute(File, inlay_hints, []),
     case gen_lsp_config_server:autosave() of
         true ->
             gen_lsp_doc_server:parse_document(File),
@@ -225,7 +223,7 @@ textDocument_inlayHints(_Socket, Params) ->
                     label => lsp_utils:to_binary(Label)
                 }
                 end, 
-                lsp_navigation:inlayhint_info(lsp_utils:file_uri_to_file(Uri), {LS,CS}, {LE,CE}))
+                lsp_navigation:inlayhints_info(lsp_utils:file_uri_to_file(Uri), {LS,CS}, {LE,CE}))
     end.
 
 textDocument_documentSymbol(_Socket, Params) ->
