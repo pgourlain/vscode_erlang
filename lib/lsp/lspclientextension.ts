@@ -93,6 +93,10 @@ namespace Configuration {
           client.sendNotification(DidChangeWatchedFilesNotification.type,
             { changes: [{ uri: uri.fsPath, type: FileChangeType.Created }] });
         });
+        fileSystemWatcher.onDidChange(uri => {
+          client.sendNotification(DidChangeWatchedFilesNotification.type,
+            { changes: [{ uri: uri.fsPath, type: FileChangeType.Changed }] });
+        });
         fileSystemWatcher.onDidDelete(uri => {
           client.sendNotification(DidChangeWatchedFilesNotification.type,
             { changes: [{ uri: uri.fsPath, type: FileChangeType.Deleted }] });

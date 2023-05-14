@@ -8,11 +8,11 @@ disable_completion() ->
     }].
 
 module_function(Module, Prefix) ->
-    SyntaxTreeFile = lsp_syntax:module_syntax_tree(Module),
-    ExportsResult = case SyntaxTreeFile of
+    File = gen_lsp_doc_server:get_module_file(Module),
+    ExportsResult = case gen_lsp_doc_server:get_syntax_tree(File) of
         undefined ->
             standard_module_exports(Module);
-        {SyntaxTree, _File} ->
+        SyntaxTree ->
             syntax_tree_exports(SyntaxTree)
     end,
     case ExportsResult of
@@ -74,30 +74,18 @@ record(File, Prefix) ->
             end;
         (_) ->
             false
-    end, lsp_syntax:file_syntax_tree(File)).
+    end, gen_lsp_doc_server:get_syntax_tree(File)).
 
 field(File, Record, Prefix) ->
-    RecordTree = lsp_navigation:find_record(lsp_syntax:file_syntax_tree(File), Record),
-    case RecordTree of
-        {{attribute, _, record, {Record, Fields}}, _File} ->
-            lists:filtermap(fun 
-                ({record_field, _, {atom, _, Field}}) ->
-                    case lists:prefix(Prefix, atom_to_list(Field)) of
-                        true -> {true, #{
-                            label => list_to_binary(atom_to_list(Field)),
-                            kind => 5 % Field
-                        }};
-                        _ -> false
-                    end;
-                (_) ->
-                    false
-            end, Fields);
-        _ ->
-            []
-    end.
+    lists:filtermap(fun (Field) ->
+        case lists:prefix(Prefix, atom_to_list(Field)) of
+            true -> {true, #{label => list_to_binary(atom_to_list(Field)), kind => 5}};
+            _ -> false
+        end
+    end, lsp_navigation:record_fields(File, Record)).
 
 variable(File, Line, Prefix) ->
-    FileSyntaxTree = lsp_syntax:file_syntax_tree(File),
+    FileSyntaxTree = gen_lsp_doc_server:get_syntax_tree(File),
     Function = lsp_navigation:find_function_with_line(FileSyntaxTree, Line),
     case Function of
         undefined ->
@@ -157,7 +145,7 @@ atom(File, Prefix) ->
     LocalAtoms ++ StandardModules ++ ProjectModules ++ BIFs.
 
 local_atoms(File) ->
-    FileSyntaxTree = lsp_syntax:file_syntax_tree(File),
+    FileSyntaxTree = gen_lsp_doc_server:get_syntax_tree(File),
     AtomTypes = lists:foldl(fun (TopLevelSyntaxTree, Acc) ->
         erl_syntax_lib:fold(fun (SyntaxTree, AccS) ->
             case SyntaxTree of

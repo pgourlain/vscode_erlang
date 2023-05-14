@@ -1,7 +1,7 @@
 -module(lsp_navigation).
 
--export([goto_definition/3, hover_info/3, function_description/2, function_description/3, references_info/3, codelens_info/1,
-    find_function_with_line/2, get_function_arities/2, find_record/2, symbol_info/2]).
+-export([definition/3, hover_info/3, function_description/2, function_description/3, references/3]).
+-export([codelens_info/1, symbol_info/1, record_fields/2, find_function_with_line/2, fold_references/4]).
 
 -define(LOG(S),
 	begin
@@ -12,23 +12,487 @@
         gen_lsp_server:lsp_log(Fmt, Args)
 	end).
 
-goto_definition(File, Line, Column) ->
-    FileSyntaxTree = lsp_syntax:file_syntax_tree(File),
-    Module = list_to_atom(filename:rootname(filename:basename(File))),
-    What = element_at_position(Module, FileSyntaxTree, Line, Column, file_line(File, Line)),
-    ?LOG("element_at_position : ~p", [What]),
-    case find_element(What, FileSyntaxTree, File) of
-        {FoundFile, FoundLine, FoundColumn} ->
-            #{
-                uri => lsp_utils:file_uri_to_vscode_uri(lsp_utils:file_to_file_uri(FoundFile)),
-                range => lsp_utils:client_range(FoundLine, FoundColumn, FoundColumn)
-            };
+definition(File, Line, Column) ->
+    find_definition(File, find_at(File, Line, Column)).
+
+hover_info(File, Line, Column) ->
+    case find_at(File, Line, Column) of
+        {{reference, {function, Module, Function, Arity}}, _Details} ->
+            function_description(Module, Function, Arity);
         _ ->
-            throw(<<"Definition not found">>)
+            undefined
     end.
 
+references(File, Line, Column) ->
+    FileModule = list_to_atom(filename:rootname(filename:basename(File))),
+    case find_at(File, Line, Column) of
+        {{_, {function, Module, Function, Arity}}, _Details} ->
+            Local = case FileModule =:= Module of
+                true -> local_function_references(File, Function, Arity);
+                false -> []
+            end,
+            Global = [{F, L, C, E} || [F, L, C, E] <- gen_lsp_doc_server:get_references({function, Module, Function, Arity})],
+            Global ++ Local;
+        {{variable, {Variable, VariableLine, VariableColumn}}, _Details} ->
+            Length = length(atom_to_list(Variable)),
+            [{File, L, C, C + Length} || {L, C} <- variable_references(File, Variable, VariableLine, VariableColumn)];
+        _ ->
+            []
+    end.
+
+codelens_info(File) ->
+    {Functions, Exports} = fold_in_syntax_tree(fun
+        ({function, {L, Start}, Function, Arity, _}, CurrentFile, {FunAcc, ExportAcc}) when CurrentFile =:= File ->
+            {[{Function, Arity, L, Start} | FunAcc], ExportAcc};
+        ({attribute,_, export, Exports}, _CurrentFile, {FunAcc, ExportAcc}) ->
+            UpdatedExportAcc = lists:foldl(fun ({Function, Arity}, Acc) ->
+                Acc#{{Function, Arity} => true}
+            end, ExportAcc, Exports),
+            {FunAcc, UpdatedExportAcc};
+        (_SyntaxTree, _CurrentFile, Acc) ->
+            Acc
+    end, {[], #{}}, File, gen_lsp_doc_server:get_syntax_tree(File)),
+    FileModule = list_to_atom(filename:rootname(filename:basename(File))),
+    lists:map(fun ({Function, Arity, L, Start}) ->
+        RefCount = length(local_function_references(File, Function, Arity)) +
+            length(gen_lsp_doc_server:get_references({function, FileModule, Function, Arity})),
+        {Function, RefCount, maps:is_key({Function, Arity}, Exports), L, Start}
+    end, Functions).
+
+symbol_info(File) ->
+    lists:reverse(fold_in_syntax_tree(fun
+        (_SyntaxTree, CurrentFile, Acc) when CurrentFile =/= File ->
+            Acc;
+        ({function, {L, _}, Function, Arity, _}, _CurrentFile, Acc) ->
+            FullName = iolist_to_binary(io_lib:format("~p/~p", [Function, Arity])),
+            [{FullName, 12, L} | Acc];
+        ({attribute, {L, _}, record, {Record, _}}, _CurrentFile, Acc) ->
+            [{Record, 23, L} | Acc];
+        (_SyntaxTree, _CurrentFile, Acc) ->
+            Acc
+    end, [], File, gen_lsp_doc_server:get_syntax_tree(File))).
+
+record_fields(File, Record) ->
+    RecordFields = find_in_syntax_tree(fun
+        ({attribute, _, record, {FoundRecord, Fields}}, _CurrentFile) when FoundRecord =:= Record -> 
+            Fields;
+        (_SyntaxTree, _CurrentFile) ->
+            undefined
+    end, File),
+    case RecordFields of
+        undefined ->
+            [];
+        _ ->
+            lists:map(fun
+                FieldGetter({record_field, _, {atom, _, Field}}) -> Field;
+                FieldGetter({record_field, _, {atom, _, Field}, _}) -> Field;
+                FieldGetter({typed_record_field, RecordField, _Type}) -> FieldGetter(RecordField)
+            end, RecordFields)
+    end.
+
+find_at(File, Line, Column) ->
+    FileModule = list_to_atom(filename:rootname(filename:basename(File))),
+    LineContents = file_line(File, Line),
+    case find_with_re(File, LineContents, Column) of
+        undefined ->
+            find_in_syntax_tree(fun
+                (_SyntaxTree, CurrentFile) when CurrentFile =/= File ->
+                    undefined;
+                ({call, {L, Start}, {atom, {L, Start}, Function}, Args}, _CurrentFile) when L == Line, Column >= Start ->
+                    case column_in_atom(Function, Start, Column) of
+                        true -> {{reference, {function, FileModule, Function, length(Args)}}, [{args, Args}]};
+                        false -> undefined
+                    end;
+                ({attribute, {_L, _StartColumn}, export, _Exports}, _CurrentFile) ->
+                    find_exported_function(FileModule, LineContents, Column);
+                ({call, {_, _}, {remote, {_, _}, {atom, {_, ModuleStart}, Module}, {atom, {L, Start}, Function} = Prefix}, Args}, _CurrentFile) ->
+                    case L == Line andalso column_in_atom(Module, ModuleStart, Column) of
+                        true ->
+                            {{reference, {module, Module}}, []};
+                        false ->
+                            case L == Line andalso column_in_atom(Function, Start, Column) of
+                                true -> {{reference, {function, Module, Function, length(Args)}}, [{args, Args}]};
+                                false -> find_in_args(Module, Function, Prefix, Args, Line, Column)
+                            end
+                    end;
+                ({'fun',{L, Start}, {function, Function, Arity}}, _CurrentFile) when L == Line, Start =< Column ->
+                    case column_in_atom(Function, Start, Column) of
+                        true -> {{reference, {function, FileModule, Function, Arity}}, []};
+                        false -> undefined
+                    end;
+                ({'fun', {_, _}, {function, {atom, {_, _}, Module}, {atom, {L, Start}, Function}, {integer, {_, _}, Arity}}}, _CurrentFile)
+                        when L == Line, Start =< Column ->
+                    case column_in_atom(Function, Start, Column) of
+                        true -> {{reference, {function, Module, Function, Arity}}, []};
+                        false -> undefined
+                    end;
+                ({var, {L, Start}, Variable}, _CurrentFile) when L == Line, Start =< Column ->
+                    case column_in_atom(Variable, Start, Column) of
+                        true -> {{variable, {Variable, L, Start}}, []};
+                        false -> undefined
+                    end;
+                ({record, {L, Start}, Record, Fields}, _CurrentFile) when L == Line, Start =< Column ->
+                    case column_in_atom(Record, Start, Column) of
+                        true -> {{reference, {record, Record}}, []};
+                        false -> find_record_field(Record, Fields, Column, Line)
+                    end;
+                ({record, _, Record, Fields}, _CurrentFile) ->
+                    find_record_field(Record, Fields, Column, Line);
+                ({record, {L, Start}, _, Record, Fields}, _CurrentFile) when L == Line, Start =< Column ->
+                    case column_in_atom(Record, Start, Column) of
+                        true -> {{reference, {record, Record}}, []};
+                        false -> find_record_field(Record, Fields, Column, Line)
+                    end;
+                ({record, _, _, Record, Fields}, _CurrentFile) ->
+                    find_record_field(Record, Fields, Column, Line);
+                ({record_field, _, _, Record, {atom, {L, Start}, Field}}, _CurrentFile) when L == Line, Start =< Column ->
+                    case column_in_atom(Field, Start, Column) of
+                        true -> {{reference, {field, Record, Field}}, []};
+                        false -> undefined
+                    end;
+                ({record_index, {L, RecordStart}, Record, {atom, {L, Start}, Field}}, _CurrentFile) when L == Line, RecordStart =< Column ->
+                    End = Start + length(atom_to_list(Field)),
+                    if
+                        Column < Start -> {{reference, {record, Record}}, []};
+                        Column =< End -> {{reference, {field, Record, Field}}, []};
+                        true -> undefined
+                    end;
+                ({function, {L, Start}, Function, Arity, _}, _CurrentFile) when L =:= Line andalso Start =< Column ->
+                    case column_in_atom(Function, Start, Column) of
+                        true -> {{definition, {function, FileModule, Function, Arity}}, []};
+                        false -> undefined
+                    end;
+                ({tuple, _LC, [{atom, {ModL, ModC}, ModAtom}, {atom, {FuncL, FuncC}, FuncAtom} | _]}, _CurrentFile) when ModL == Line; FuncL == Line ->
+                    module_function_atoms({ModL, ModC}, ModAtom, {FuncL, FuncC}, FuncAtom, Line, Column);
+                (_SyntaxTree, _CurrentFile) ->
+                    undefined
+            end, File);
+        FoundWithRE ->
+            {FoundWithRE, []}
+    end.
+
+fold_in_syntax_tree(_Fun, StartAcc, _File, undefined) ->
+    StartAcc;
+fold_in_syntax_tree(Fun, StartAcc, File, SyntaxTree) ->
+    {Result, _, _} = lists:foldl(fun (TopLevelElementSyntaxTree, Acc) ->
+        erl_syntax_lib:fold(fun
+            ({attribute, _, file, {NewFile, _}} = Tree, {ValueAcc, _CurrentFile, undefined}) ->
+                {Fun(Tree, File, ValueAcc), File, NewFile};
+            ({attribute, _, file, {NewFile, _}} = Tree, {ValueAcc, _CurrentFile, FirstFile}) when NewFile =:= FirstFile ->
+                {Fun(Tree, File, ValueAcc), File, FirstFile};
+            ({attribute, _, file, {NewFile, _}} = Tree, {ValueAcc, _CurrentFile, FirstFile}) ->
+                {Fun(Tree, NewFile, ValueAcc), NewFile, FirstFile};
+            (Tree, {ValueAcc, CurrentFile, FirstFile}) ->
+                {Fun(Tree, CurrentFile, ValueAcc), CurrentFile, FirstFile}
+        end, Acc, TopLevelElementSyntaxTree)
+    end, {StartAcc, File, undefined}, SyntaxTree),
+    Result.
+
+find_in_syntax_tree(Fun, File) ->
+    fold_in_syntax_tree(fun
+        (SyntaxTree, CurrentFile, undefined) -> Fun(SyntaxTree, CurrentFile);
+        (_SyntaxTree, _CurrentFile, Value) -> Value
+    end, undefined, File, gen_lsp_doc_server:get_syntax_tree(File)).
+
+find_exported_function(_CurrentModule, undefined, _Column) ->
+    undefined;
+find_exported_function(CurrentModule, LineContents, Column) ->
+    case re:run(LineContents, <<"([a-z][A-Z_0-9a-z@]*)/([0-9]+)">>, [global]) of
+        {match, Matches} ->
+            case lists:filter(fun ([{Pos, Len}, _, _]) -> Column > Pos andalso Column =< Pos + Len end, Matches) of
+                [[_, {NamePos, NameLen}, {ArityPos, ArityLen}]] ->
+                    Function = binary_to_atom(binary:part(LineContents, NamePos, NameLen), latin1),
+                    Arity = binary_to_integer(binary:part(LineContents, ArityPos, ArityLen)),
+                    {{reference, {function, CurrentModule, Function, Arity}}, []};
+                _ ->
+                    undefined
+            end;
+        _ ->
+            undefined
+    end.
+
+find_in_args(Module, Function, Prefix, Args, Line, Column) ->
+    GenFun = fun(GenMsgLine, GenMsgColumn, AtomMsg, GenMsg) ->
+        case Line == GenMsgLine andalso GenMsgColumn =< Column andalso column_in_atom(AtomMsg, GenMsgColumn, Column) of
+            true when Module =:= gen_server ->
+                {{gen_msg, [GenMsg]}, []};
+            true when Module =:= gen_statem ->
+                PreMsg = case Function of
+                    call -> {tuple, {0, 0}, [Prefix, {var, {0, 0}, 'From'}]};
+                    _ -> Prefix
+                end,
+                {{gen_msg, [PreMsg, GenMsg]}, []};
+            _ ->
+                undefined
+        end
+    end,
+    Result = case Args of
+        [_, {atom, {GenMsgLine, GenMsgColumn}, AtomMsg} = GenMsg | _] ->
+            GenFun(GenMsgLine, GenMsgColumn, AtomMsg, GenMsg);
+        [_, {tuple, _, [{atom, {GenMsgLine, GenMsgColumn}, AtomMsg} | _]} = GenMsg | _] ->
+            GenFun(GenMsgLine, GenMsgColumn, AtomMsg, GenMsg);
+        _ ->
+            undefined
+    end,
+    case Result of
+        undefined ->
+            case Args of
+                [{atom, ModAtomLC, ModAtom}, {atom, FuncAtomLC, FuncAtom} | _] ->
+                    module_function_atoms(ModAtomLC, ModAtom, FuncAtomLC, FuncAtom, Line, Column);
+                _ ->
+                    undefined
+            end;
+        _ ->
+            Result
+    end.
+
+module_function_atoms({Line, ModAtomC}, _ModAtom, {Line, _FuncAtomC}, _FuncAtom, Line, Column) when Column < ModAtomC ->
+    undefined;
+module_function_atoms({Line, ModAtomC}, ModAtom, {Line, FuncAtomC}, FuncAtom, Line, Column) ->
+    case column_in_atom(ModAtom, ModAtomC, Column) of
+        true ->
+            {{reference, {module, ModAtom}}, []};
+        false ->
+            case column_in_atom(FuncAtom, FuncAtomC, Column) of
+                true -> {{reference, {function, ModAtom, FuncAtom, any}}, []};
+                false -> undefined
+            end
+    end;
+module_function_atoms({Line, ModAtomC}, ModAtom, {_FuncAtomL, _FuncAtomC}, _FuncAtom, Line, Column) ->
+    case column_in_atom(ModAtom, ModAtomC, Column) of
+        true -> {{reference, {module, ModAtom}}, []};
+        false -> undefined
+    end;
+module_function_atoms({_ModAtomL, _ModAtomC}, ModAtom, {Line, FuncAtomC}, FuncAtom, Line, Column) ->
+    case column_in_atom(FuncAtom, FuncAtomC, Column) of
+        true -> {{reference, {function, ModAtom, FuncAtom, any}}, []};
+        false -> undefined
+    end;
+module_function_atoms({_ModAtomL, _ModAtomC}, _ModAtom, {_FuncAtomL, _FuncAtomC}, _FuncAtom, _Line, _Column) ->
+    undefined.
+
+find_record_field(_Record, [], _Column, _Line) ->
+    undefined;
+find_record_field(Record, [{record_field, _, {atom, {L, Start}, Field}, _} | Tail], Column, Line) when L == Line, Start =< Column ->
+    case column_in_atom(Field, Start, Column) of
+        true -> {{reference, {field, Record, Field}}, []};
+        false -> find_record_field(Record, Tail, Column, Line)
+    end;
+find_record_field(Record, [_ | Tail], Column, Line) ->
+    find_record_field(Record, Tail, Column, Line).
+
+find_with_re(_File, undefined, _Column) ->
+    undefined;
+find_with_re(File, LineContents, Column) ->
+    case find_macro_reference(LineContents, Column) of
+        undefined -> find_include(File, LineContents, Column);
+        MacroReference -> MacroReference
+    end.
+
+find_macro_reference(LineContents, Column) ->
+    case re:run(LineContents, <<"\\?[A-Z_0-9a-z]+">>, [global]) of
+        {match, Matches} ->
+            case lists:filter(fun ([{Pos, Len}]) -> Column > Pos andalso Column =< Pos + Len end, Matches) of
+                [[{FoundPos, FoundLen}]] ->
+                    Macro = binary_to_atom(binary:part(LineContents, FoundPos + 1, FoundLen - 1), latin1),
+                    {reference, {macro, Macro}};
+                _ ->
+                    undefined
+            end;
+        _ ->
+            undefined
+    end.
+
+find_include(File, LineContents, Column) ->
+    case re:run(LineContents, <<"-(include|include_lib)\\(\"([^\"]+)\"\\)\\.">>, [global]) of
+        {match, Matches} ->
+            IncludeFile = lists:foldl(fun
+                ([{Start, Len}, AttributePL, FilenamePL], undefined) when Column - 1 >= Start, Column < Start + Len ->
+                    case binary:part(LineContents, AttributePL) of
+                        <<"include">> -> resolve_include_file_path(File, binary:part(LineContents, FilenamePL));
+                        <<"include_lib">> -> find_libdir(binary:part(LineContents, FilenamePL))
+                    end;
+                (_, Acc) ->
+                    Acc
+            end, undefined, Matches),
+            case IncludeFile of
+                undefined -> undefined;
+                _ -> {include, IncludeFile}
+            end;
+        _ ->
+            undefined
+    end.
+
+column_in_atom(_Atom, Start, Column) when Column < Start->
+    false;
+column_in_atom(Atom, Start, Column) ->
+    Column =< Start + length(atom_to_list(Atom)).
+
+resolve_include_file_path(File, IncludeFileName) ->
+    IncludePaths = lsp_parse:get_include_path(File),
+    Candidates = [filename:join(Path, IncludeFileName) || Path <- IncludePaths],
+    case lists:filter(fun filelib:is_file/1, Candidates) of
+        [First|_] -> First;
+        _ -> IncludeFileName
+    end.
+
+find_libdir(IncludeFileName) ->
+    case filename:split(IncludeFileName) of
+        [LibName | Remain] ->
+            case code:lib_dir(binary_to_atom(LibName)) of
+                {error, bad_name} ->
+                    gen_lsp_doc_server:find_source_file(IncludeFileName);
+                AbsLib ->
+                    filename:nativename(string:join([AbsLib | Remain], "/"))
+            end;
+        _ ->
+            undefined
+    end.
+
+local_function_references(File, Function, Arity) ->
+    FunctionLength = length(atom_to_list(Function)),
+    fold_in_syntax_tree(fun
+        ({call, {L, C}, {atom, _, FunctionName}, Args}, CurrentFile, Acc)
+                when CurrentFile =:= File, Function =:= FunctionName, length(Args) == Arity ->
+            [{File, L, C, C + FunctionLength} | Acc];
+        (_SyntaxTree, _CurrentFile, Acc) ->
+            Acc
+    end, [], File, gen_lsp_doc_server:get_syntax_tree(File)).
+
+find_definition(_File, {{_, {module, Module}}, _Details}) ->
+    case gen_lsp_doc_server:get_module_file(Module) of
+        undefined -> undefined;
+        ModuleFile -> {ModuleFile, 1, 1, 1}
+    end;
+find_definition(_File, {{include, IncludedFile}, _Details}) ->
+    {IncludedFile, 1, 1, 1};
+find_definition(_File, {{_, {function, Module, Function, Arity}}, Details}) ->
+    find_in_syntax_tree(fun
+        ({function, {L, Start}, FoundFunction, FoundArity, Clauses}, CurrentFile)
+                when Function =:= FoundFunction andalso (Arity =:= any orelse Arity == FoundArity) ->
+            case proplists:get_value(args, Details) of
+                undefined ->
+                    {CurrentFile, L, Start, Start};
+                Args ->
+                    case find_clause_location(Clauses, Args) of
+                        {CL, CC} -> {CurrentFile, CL, CC, CC};
+                        undefined -> {CurrentFile, L, Start, Start}
+                    end
+            end;
+        (_SyntaxTree, _CurrentFile) ->
+            undefined
+    end, gen_lsp_doc_server:get_module_file(Module));
+find_definition(File, {{gen_msg, GenMsg}, _Details}) ->
+    case match_gen_msg(File, GenMsg) of
+        undefined -> undefined;
+        {ClauseLine, ClauseColumn} -> {File, ClauseLine, ClauseColumn, ClauseColumn}
+    end;
+find_definition(File, {{_, {record, Record}}, _Details}) ->
+    find_in_syntax_tree(fun
+        ({attribute, {L, Start}, record, {FoundRecord, _}}, CurrentFile) when Record =:= FoundRecord ->
+            {CurrentFile, L, Start, Start};
+        (_SyntaxTree, _CurrentFile) ->
+            undefined
+    end, File);
+find_definition(File, {{_, {field, Record, Field}}, _Details}) ->
+    find_in_syntax_tree(fun
+        ({attribute, _, record, {FoundRecord, Fields}}, CurrentFile) when Record =:= FoundRecord ->
+            find_field_definition(Field, Fields, CurrentFile);
+        (_SyntaxTree, _CurrentFile) ->
+            undefined
+    end, File);
+find_definition(File, {{variable, {Variable, Line, Column}}, _Details}) ->
+    case variable_references(File, Variable, Line, Column) of
+        [] -> undefined;
+        [{L, C} | _] -> {File, L, C, C}
+    end;
+find_definition(File, {{_, {macro, Macro}}, _Details}) ->
+    find_macro_definition(Macro, File);
+find_definition(_File, _What) ->
+    undefined.
+
+find_field_definition(_Field, [], _CurrentFile) ->
+    undefined;
+find_field_definition(Field, [{typed_record_field, {record_field, _, {atom, {Line, Column}, Field}}, _} | _], CurrentFile) ->
+    {CurrentFile, Line, Column, Column};
+find_field_definition(Field, [{typed_record_field, {record_field, _, {atom, {Line, Column}, Field}, _}, _} | _], CurrentFile) ->
+    {CurrentFile, Line, Column, Column};
+find_field_definition(Field, [{record_field, _, {atom, {Line, Column}, Field}} | _], CurrentFile) ->
+    {CurrentFile, Line, Column, Column};
+find_field_definition(Field, [{record_field, _, {atom, {Line, Column}, Field}, _} | _], CurrentFile) ->
+    {CurrentFile, Line, Column, Column};
+find_field_definition(Field, [_ | Tail], CurrentFile) ->
+    find_field_definition(Field, Tail, CurrentFile).
+
+variable_references(File, Variable, Line, Column) ->
+    FunctionWithVariable = find_function_with_line(gen_lsp_doc_server:get_syntax_tree(File), Line),
+    DoClause = fun ({clause, ClauseLC, _, _, _} = Clause, ClauseAcc) ->
+        VarLCs = erl_syntax_lib:fold(fun
+            ({var, LC, V}, Acc) when V =:= Variable -> [LC | Acc];
+            (_, Acc) -> Acc
+        end, [], Clause),
+        lists:foldl(fun (VarLC, Acc) ->
+            case Acc of
+                #{VarLC := _} -> Acc;
+                _ -> Acc#{VarLC => ClauseLC}
+            end
+        end, ClauseAcc, VarLCs)
+    end,
+    VarLC2ClauseLC = erl_syntax_lib:fold(fun
+        ({function, _FunctionLC, _Function, _Arity, Clauses}, Acc) ->
+            lists:foldl(DoClause, Acc, Clauses);
+        ({'fun', _FunLC, {clauses, Clauses}}, Acc) ->
+            lists:foldl(DoClause, Acc, Clauses);
+        (_S, ClauseAcc) ->
+            ClauseAcc
+    end, #{}, FunctionWithVariable),
+    case VarLC2ClauseLC of
+        #{{Line, Column} := ClauseLC} ->
+            lists:usort(lists:filtermap(fun
+                ({VarLC, ThisClauseLC}) when ThisClauseLC =:= ClauseLC -> {true, VarLC};
+                (_) -> false
+            end, maps:to_list(VarLC2ClauseLC)));
+        _ ->
+            []
+    end.
+
+find_macro_definition(Macro, File) -> find_macro_definition_in_files(Macro, [File]).
+
+find_macro_definition_in_files(_Macro, []) -> undefined;
+find_macro_definition_in_files(Macro, [File | Tail]) ->
+    Forms = gen_lsp_doc_server:get_dodged_syntax_tree(File),
+    case find_macro_definition(Macro, File, Forms) of
+        undefined ->
+            Included = lists:reverse(find_included_files(Forms, [])),
+            IncludePath = lsp_parse:get_include_path(File),
+            case find_macro_definition_in_files(Macro, [filename:join(Path, IncludedFile) || IncludedFile <- Included, Path <- IncludePath]) of
+                undefined -> find_macro_definition_in_files(Macro, Tail);
+                Result -> Result
+            end;
+        Result -> Result
+    end.
+
+find_macro_definition(_Macro, _File, undefined) ->
+    undefined;
+find_macro_definition(_Macro, _File, []) ->
+    undefined;
+find_macro_definition(Macro, File, [{tree, attribute, _, {attribute, {atom, _, define}, [{_, Line, Macro}, _]}} | _]) ->
+    {File, Line, 1, 1};
+find_macro_definition(Macro, File, [{tree, attribute, _, {attribute, {atom, _, define}, [{_, _, _, {_, {_, Line, Macro}, _}}, _]}} | _]) ->
+    {File, Line, 1, 1};
+find_macro_definition(Macro, File, [_ | Tail]) ->
+    find_macro_definition(Macro, File, Tail).
+
+find_included_files(undefined, Acc) -> Acc;
+find_included_files([], Acc) -> Acc;
+find_included_files([{tree, attribute, _, {attribute, {atom, _, include_lib}, [{string, _ , Name}]}} | Tail], Acc) ->
+    find_included_files(Tail, [Name | Acc]);
+find_included_files([{tree, attribute, _, {attribute, {atom, _, include}, [{string, _ , Name}]}} | Tail], Acc) ->
+    find_included_files(Tail, [Name | Acc]);
+find_included_files([_ | Tail], Acc) -> find_included_files(Tail, Acc).
+
 file_line(File, Line) ->
-    Contents = case gen_lsp_doc_server:get_document_attribute(File, contents) of
+    Contents = case gen_lsp_doc_server:get_document_contents(File) of
         undefined ->
             {ok, FileContents} = file:read_file(File),
             FileContents;
@@ -42,60 +506,45 @@ file_line(File, Line) ->
         undefined
     end.
 
-hover_info(File, Line, Column) ->
-    Module = list_to_atom(filename:rootname(filename:basename(File))),
-    FileSyntax = lsp_syntax:file_syntax_tree(File),
-    What = element_at_position(Module, FileSyntax, Line, Column, file_line(File, Line)),
-    %gen_lsp_server:lsp_log("hover_info What:~p", [What]),
-    case What of
-        {function_use, FunctionModule, Function, Arity} ->
-            #{contents => function_description(FunctionModule, Function, Arity)};
-        {function_use, FunctionModule, Function, Arity, _Args} ->
-            #{contents => function_description(FunctionModule, Function, Arity)};
-        _ ->
-            #{contents => <<>>}
-    end.
-
 function_description(Module, Function) ->
     Help = gen_lsp_help_server:get_help(Module, Function),
     case Help of
         undefined ->
-            lists:foldl(fun (Arity, Acc) ->
-                Description = function_description(Module, Function, Arity),
-                <<Acc/binary, Description/binary>>
-            end, <<>>, get_function_arities(Module, Function));
+            function_description(Module, Function, any);
         _ ->
             Help
     end.
 
 function_description(Module, Function, Arity) ->
-    SyntaxTreeFile = lsp_syntax:module_syntax_tree(Module),                    
-    case SyntaxTreeFile of
-        {SyntaxTree, File} ->
+    case gen_lsp_doc_server:get_module_file(Module) of
+        undefined ->
+            get_generic_help(Module, Function);
+        File ->
             case lsp_utils:is_erlang_lib_file(File) of
                 false ->
-                case find_function(SyntaxTree, Function, Arity) of
-                    {function, _, _, _, Clauses} ->
-                        DocAsString = try edoc:layout(edoc:get_doc(File, [{hidden, true}, {private, true}]), 
-                            [{layout, hover_doc_layout}, {filter, [{function, {Function, Arity}}]} ]) of
-                                _Any -> _Any
-                            catch
-                                _Err:_Reason -> ""
-                            end,                                                                        
-                        FunctionHeaders = join_strings(lists:map(fun ({clause, _Location, Args, _Guard, _Body}) ->
-                            function_header(Function, Args)
-                        end, Clauses), "  \n") ++ "  \n" ++ DocAsString,
-                        list_to_binary(FunctionHeaders);
-                    _ ->
-                        %check if a BIF
-                        case lists:keyfind(Function,1, erlang:module_info(exports)) of
-                            {Function, _} -> gen_lsp_help_server:get_help(erlang, Function);
-                            _  -> <<>>
-                        end
-                end;
-                _ ->  get_generic_help(Module, Function)
-            end;                              
-        _ -> get_generic_help(Module, Function)
+                    case function_clauses(File, Function, Arity) of
+                        [] ->
+                            case lists:keyfind(Function, 1, erlang:module_info(exports)) of
+                                {Function, _} -> gen_lsp_help_server:get_help(erlang, Function);
+                                _  -> <<>>
+                            end;
+                        ClausesList ->
+                            iolist_to_binary(lists:map(fun (Clauses) ->
+                                DocAsString = try edoc:layout(edoc:get_doc(File, [{hidden, true}, {private, true}]), 
+                                    [{layout, hover_doc_layout}, {filter, [{function, {Function, Arity}}]} ]) of
+                                        _Any -> _Any
+                                    catch
+                                        _Err:_Reason -> ""
+                                    end,                                                                        
+                                FunctionHeaders = join_strings(lists:map(fun ({clause, _Location, Args, _Guard, _Body}) ->
+                                    function_header(Function, Args)
+                                end, Clauses), "  \n") ++ "  \n" ++ DocAsString,
+                                list_to_binary(FunctionHeaders)
+                            end, ClausesList))
+                    end;
+                _ ->
+                    get_generic_help(Module, Function)
+            end
     end.
 
 get_generic_help(Module, Function) ->
@@ -104,166 +553,6 @@ get_generic_help(Module, Function) ->
         undefined -> <<>>;
         _ -> Help
     end.
-
-references_info(File, Line, Column) ->
-    MapResult = fold_in_file_syntax_tree(
-        lsp_syntax:file_syntax_tree(File), 
-        #{location => {Line, Column}, references => []}, 
-        fun references_analyze/2),
-    References = maps:get(references, MapResult),
-    case maps:get(ref, MapResult, undefined) of
-        undefined -> #{result => <<"ko">>};
-        RefKey -> 
-            Result = lists:map(fun ({_, {L,C}}) -> 
-                #{uri => lsp_utils:file_to_file_uri(File), line => L, character => C}
-            end, lists:filter(fun ({K,_L}) -> K =:= RefKey end, References)),
-            #{result => <<"ok">>, references => Result}
-    end.
-
-references_analyze(SyntaxTree, Map) ->
-    {Line, Column} = maps:get(location, Map),
-    case SyntaxTree of
-    {function, {FLine, FColumn}, FuncName, Arity, _} when FLine =:= Line andalso FColumn =< Column -> 
-        FunKey = lists:flatten(io_lib:format("~p/~p", [FuncName,Arity])),
-        EndColumn = FColumn + length(atom_to_list(FuncName)),
-        NewMap = if 
-            Column =< EndColumn ->
-                maps:put(ref, FunKey, Map);
-            true -> Map
-        end,
-        NewMap;
-    {call, CLocation, {atom,_,FName},Args} -> 
-        FunKey1 = lists:flatten(io_lib:format("~p/~p", [FName,length(Args)])),
-        References = maps:get(references, Map) ++ [{FunKey1, CLocation}],
-        maps:put(references, References, Map);
-    _ -> Map
-    end.
-
-codelens_info(File) ->
-    %filter only defined functions
-    MapResult = maps:filter(fun (_K,V) -> maps:is_key(func_name, V) end,
-        fold_in_file_syntax_tree(lsp_syntax:file_syntax_tree(File), #{}, fun codelens_analyze/2)),
-    lists:filtermap(fun (V) ->
-        case maps:get(location, V, undefined) of
-            {Line, Column} ->
-                Count = maps:get(count, V),
-                FName = list_to_binary(atom_to_list(maps:get(func_name, V))),
-                {true, #{
-                    line => Line,
-                    character => Column,
-                    data => #{
-                        count => Count,
-                        func_name => FName,
-                        exported => maps:get(exported, V, false)
-                    }
-                }};
-            undefined -> false
-        end
-    end, maps:values(MapResult)).
-
-codelens_analyze(SyntaxTree, Map) ->
-    case SyntaxTree of
-    {function, Location, FuncName, Arity, _} -> 
-        FunKey = lists:flatten(io_lib:format("~p/~p", [FuncName,Arity])),
-        codelens_add_or_update_ref(Map, FunKey, FuncName, Location);
-    {call,_LocationCall, {atom,_,FName},Args} -> 
-        FunKey1 = lists:flatten(io_lib:format("~p/~p", [FName,length(Args)])),
-        codelens_add_or_update_refcount(Map, FunKey1, 1);
-    {attribute,_,export,Exports} ->
-        %export sample : [{start,0},{stop,0}]
-        lists:foldl(fun ({FuncName, Arity}, AccMap) ->
-            FunKey = lists:flatten(io_lib:format("~p/~p", [FuncName,Arity])),
-            codelens_add_or_update_exported(AccMap, FunKey, FuncName, true)
-        end, Map, Exports);
-    _ -> Map
-    end.
-
-codelens_add_or_update_exported(Map, Key, FuncName, Exported) ->
-    case maps:get(Key, Map, undefined) of
-    undefined -> maps:put(Key, #{exported => Exported, count=> 0, func_name => FuncName}, Map);
-    FMap -> 
-        NewFMap = maps:put(exported, Exported, FMap), 
-        NewFMap1 = maps:put(func_name, FuncName, NewFMap), 
-        maps:put(Key, NewFMap1, Map)
-    end.
-
-codelens_add_or_update_ref(Map, Key, FuncName, Location) ->
-    case maps:get(Key, Map, undefined) of
-    undefined -> maps:put(Key, #{location => Location, count=> 0, func_name => FuncName}, Map);
-    FMap -> 
-        NewFMap = maps:put(location, Location, FMap), 
-        NewFMap1 = maps:put(func_name, FuncName, NewFMap), 
-        maps:put(Key, NewFMap1, Map)
-    end.
-    
-codelens_add_or_update_refcount(Map, Key, Count) ->
-    case maps:get(Key, Map, undefined) of
-    undefined -> maps:put(Key, #{count=> Count}, Map);
-    FMap ->
-        NewCount = maps:get(count, FMap) + Count,
-        NewFMap = maps:put(count, NewCount, FMap), 
-        maps:put(Key, NewFMap, Map)
-    end.
-
-symbol_info(Uri, File) ->
-    %return all symbols for the specified document 
-    SyntaxTree = lsp_syntax:file_syntax_tree(File),
-    %gen_lsp_server:lsp_log("syntax for symbolinfo : ~p", [SyntaxTree]),
-    fold_in_file_syntax_tree(SyntaxTree, [], fun (S, Acc) -> symbolinfo_analyze(Uri, S, Acc) end).
-
-symbolinfo_analyze(Uri, SyntaxTree, List) ->
-    case SyntaxTree of
-    {function, Location, FuncName, Arity, _} -> 
-        FuncFullName = list_to_binary(lists:flatten(io_lib:format("~p/~p", [FuncName,Arity]))),
-        List++ create_symbolinfo(FuncFullName, Uri, function, Location);
-    {attribute, Location, record, {Record, _}} ->
-        List++ create_symbolinfo(Record, Uri, struct, Location);
-    {attribute, Location, type, {Type, _, _}} ->
-        List++ create_symbolinfo(Type, Uri, class, Location);
-    _ -> List
-    end.
-
-symbol_kind(ErlangKind) ->
-    %mapping a name to number expected by vscode
-    case ErlangKind of 
-    function -> 9;
-    interface -> 11;
-    array -> 18;
-    namespace -> 19;
-    event -> 24;
-    string -> 15;
-    struct -> 23;
-    number -> 16;
-    null -> 21;
-    constant -> 14;
-    class -> 5;
-    boolean -> 17;
-    _ -> 1
-    end.
-
-symbol_container_from_symbol_kind(ErlangKind) ->
-    case ErlangKind of
-    function -> <<"functions">>;
-    class -> <<"types">>;
-    struct -> <<"records">>;
-    _ -> <<"root">>
-    end.
-
-create_symbolinfo(FuncName, Uri, SymbolKind, {L, C}) ->
-    %gen_lsp_server:lsp_log("create symbol info, ~p: ~p", [FuncName, Location]),
-    %vscode documentation  : https://code.visualstudio.com/docs/extensionAPI/vscode-api#SymbolInformation
-    [#{
-        containerName => symbol_container_from_symbol_kind(SymbolKind),
-        name => FuncName,
-        kind => symbol_kind(SymbolKind), 
-        location => #{ 
-            uri => Uri, 
-            range => #{ 
-                start => #{ character => C, line => L-1}, 
-                <<"end">> => #{ character => C, line => L-1 } 
-            } 
-        }
-    }].
 
 function_header(Function, Args) ->
     "**" ++ atom_to_list(Function) ++ "**(" ++ join_strings(lists:map(fun erl_prettypr:format/1, Args), ", ") ++ ")".
@@ -274,373 +563,6 @@ join_strings([String], _) ->
     String;
 join_strings([String|Rest], Joiner) ->
     String ++ Joiner ++ join_strings(Rest, Joiner).
-
-fold_in_file_syntax_tree(FileSyntaxTree, StartAcc, Fun) ->
-    % FileStyntaxTree is [] of TopLevelStyntaxTree
-    % post-order traversal, then
-    lists:foldl(fun (TopLevelSyntaxTree, Acc) ->
-        erl_syntax_lib:fold(Fun, Acc, TopLevelSyntaxTree)
-        end, StartAcc, FileSyntaxTree).
-
-find_in_file_syntax_tree(FileSyntaxTree, Fun1) ->
-    DefaultVal = case Fun1 of
-        {function, Fun} -> {{undefined, undefined}, undefined};
-        Fun -> {undefined, undefined}
-    end,
-    fold_in_file_syntax_tree(FileSyntaxTree, DefaultVal, 
-        fun (SyntaxTree, {SingleAcc, CurrentFile}) ->
-            UpdatedFile = case SyntaxTree of
-                {attribute, _, file, {FileName, _}} -> FileName;
-                _ -> CurrentFile
-            end,
-            case SingleAcc of
-                undefined ->
-                    {Fun(SyntaxTree, UpdatedFile), UpdatedFile};
-                {undefined, DefaultTree} ->
-                    {Fun(SyntaxTree, DefaultTree, UpdatedFile), UpdatedFile};
-                _ ->
-                    {SingleAcc, CurrentFile}
-            end
-        end).
-
-element_at_position(CurrentModule, FileSyntaxTree, Line, Column, LineContents) ->
-    Fun = fun
-        ({tuple, {L, StartTuple}, Args}, _) when L =:= Line, Column > StartTuple ->
-            find_definition_in_args(Args, Column, Line, CurrentModule);
-        ({cons, {L, StartCons}, _, _} = Cons, _) when L =:= Line, Column > StartCons ->
-            case cons_to_list(Cons, []) of
-                false -> undefined;
-                Args -> find_definition_in_args(Args, Column, Line, CurrentModule)
-            end;
-        ({call, {L, StartColumn}, {atom, {L, StartColumn}, Function}, Args}, _) ->
-            EndColumn = StartColumn + length(atom_to_list(Function)),
-            if
-                L =:= Line, StartColumn =< Column, Column =< EndColumn -> {function_use, CurrentModule, Function, length(Args)};
-                true -> find_definition_in_args(Args, Column, Line, CurrentModule)
-            end;
-        ({attribute, {_L, _StartColumn}, export, _Exports}, _) ->
-            find_function_in_export(CurrentModule, LineContents, Column);
-        ({attribute, _, file, {HrlFile, _}}, _) ->
-            process_hrl_filename(HrlFile, LineContents, Column);
-        ({call, {_, _}, {remote, {_, _}, {atom, {_, MStartColumn}, Module}, {atom, {L, StartColumn}, Function} = Prefix}, Args}, _) ->
-            MEndColumn = MStartColumn + length(atom_to_list(Module)), 
-            EndColumn = StartColumn + length(atom_to_list(Function)),
-            if
-                L =:= Line, MStartColumn =< Column, Column =< MEndColumn -> {module_use, Module};
-                L =:= Line, StartColumn =< Column, Column =< EndColumn -> {function_use, Module, Function, length(Args), Args};
-                true ->
-                    GenFun = fun(GenMsgLine, GenMsgColumn, AtomMsg, GenMsg) ->
-                        GEndColumn = GenMsgColumn + length(atom_to_list(AtomMsg)),
-                        case Line =:= GenMsgLine andalso GenMsgColumn =< Column andalso Column =< GEndColumn of
-                            true when Module == gen_server -> {gen_msg_use, [GenMsg]};
-                            true when Module == gen_statem ->
-                                PreMsg = case Function of
-                                    call ->
-                                        {tuple, {0, 0}, [Prefix, {var, {0, 0}, 'From'}]};
-                                    _ -> Prefix
-                                end,
-                                {gen_msg_use, [PreMsg, GenMsg]};
-                            _ -> false
-                        end
-                    end,
-                    GenResult = case Args of
-                        [_, {atom, {GenMsgLine, GenMsgColumn}, AtomMsg} = GenMsg | _] ->
-                            GenFun(GenMsgLine, GenMsgColumn, AtomMsg, GenMsg);
-                        [_, {tuple, _, [{atom, {GenMsgLine, GenMsgColumn}, AtomMsg} | _]} = GenMsg | _] ->
-                            GenFun(GenMsgLine, GenMsgColumn, AtomMsg, GenMsg);
-                        _ -> false
-                    end,
-                    case GenResult of
-                        false -> find_definition_in_args(Args, Column, Line, CurrentModule);
-                        _ -> GenResult
-                    end
-            end;
-        ({'fun',{L, StartColumn}, {function, Function, Arity}}, _) when L =:= Line andalso StartColumn =< Column ->
-            EndColumn = StartColumn + 4 + length(atom_to_list(Function)),
-            if
-                Column =< EndColumn -> {function_use, CurrentModule, Function, Arity};
-                true -> undefined
-            end;
-        ({'fun', {_, _}, {function, {atom, {_, _}, Module}, {atom, {L, StartColumn}, Function}, {integer, {_, _}, Arity}}}, _) when L =:= Line andalso StartColumn =< Column ->
-            EndColumn = StartColumn + length(atom_to_list(Function)),
-            if
-                Column =< EndColumn -> {function_use, Module, Function, Arity};
-                true -> undefined
-            end;
-        ({var, {L, StartColumn}, Variable}, _) when L =:= Line andalso StartColumn =< Column ->
-            EndColumn = StartColumn + length(atom_to_list(Variable)),
-            if
-                Column =< EndColumn -> {variable, Variable, L, StartColumn};
-                true -> undefined
-            end;
-        ({record, {L, StartColumn}, Record, Fields}, _) ->
-            EndColumn = StartColumn + length(atom_to_list(Record)),
-            if
-                L =:= Line, StartColumn =< Column, Column =< EndColumn -> {record, Record};
-                true -> find_record_field_use(Record, Fields, Column, Line)
-            end;
-        ({record, {L, StartColumn}, _, Record, Fields}, _) ->
-            EndColumn = StartColumn + length(atom_to_list(Record)),
-            if
-                L =:= Line, StartColumn =< Column, Column =< EndColumn -> {record, Record};
-                true -> find_record_field_use(Record, Fields, Column, Line)
-            end;
-        ({record_field, {L, RecordSttartColumn}, _, Record, {atom, {L, FieldStartColumn}, Field}}, _) when L =:= Line andalso RecordSttartColumn =< Column ->
-            FieldEndColumn = FieldStartColumn + length(atom_to_list(Field)),
-            if
-                Column < FieldStartColumn -> {record, Record};
-                Column < FieldEndColumn -> {field, Record, Field};
-                true -> undefined
-            end;
-        ({record_index, {L, RecordSttartColumn}, Record, {atom, {L, FieldStartColumn}, Field}}, _) when L =:= Line andalso RecordSttartColumn =< Column ->
-            FieldEndColumn = FieldStartColumn + length(atom_to_list(Field)),
-            if
-                Column < FieldStartColumn -> {record, Record};
-                Column < FieldEndColumn -> {field, Record, Field};
-                true -> undefined
-            end;
-        (_SyntaxTree, _File) ->
-            undefined
-    end,
-    case find_macro_use(LineContents, Column) of
-        undefined ->
-            case find_in_file_syntax_tree(FileSyntaxTree, Fun) of
-                {{function_use, _, _, _} = Export, _File} -> Export;
-                {{function_use, _, _, _, _} = Export, _File} -> Export;
-                {What, _File} -> What
-            end;
-        MacroUse -> MacroUse
-            
-    end.
-
-cons_to_list({nil,_}, List) -> lists:reverse(List);
-cons_to_list({cons, _, Data, Cons}, List) ->
-    cons_to_list(Cons, [Data|List]);
-cons_to_list(_, _List) -> false.
-
-process_hrl_filename(File, LineContents, Column) ->
-    MatchResult = find_include_filename(LineContents, Column),
-    case MatchResult of
-        {include, IncludeFileName, true} ->
-            %gen_lsp_server:lsp_log("attr hrl match include", []),
-            {hrl, resolve_include_file_path(File, IncludeFileName)};
-        {include_lib, IncludeFileName, true} ->
-            %gen_lsp_server:lsp_log("attr hrl match include_lib", []),            
-            find_libdir(IncludeFileName);
-        _ -> undefined
-    end.
-
-resolve_include_file_path(File, IncludeFileName) ->
-    IncludePaths = lsp_syntax:get_include_path(File),
-    Candidates = [filename:join(Path, IncludeFileName) || Path <- IncludePaths],
-    case lists:filter(fun filelib:is_file/1, Candidates) of
-        [First|_] -> First;
-        _ -> IncludeFileName
-    end.
-find_libdir(IncludeFileName) ->
-    case filename:split(IncludeFileName) of
-        [LibName|Remain] ->
-            case code:lib_dir(LibName) of
-                {error,bad_name} -> undefined;
-                AbsLib -> {hrl, filename:nativename(string:join([AbsLib|Remain], "/")) }
-            end;
-        _ -> undefined
-    end.
-
-find_include_filename(LineContents, Column) ->
-    % regular expression, intead of binaries matching. Because a comment can be exists at the end of include line
-    case re:run(LineContents, <<"^-include(?<alib>|_lib)\\(\"(?<grp>.+)\"\\)">>, [global,{capture, all_names}]) of
-        {match, Matches} ->
-            case lists:nth(1,Matches) of
-                [{_,0},{Pos,Len}] -> %include
-                    IncludeFile =binary_to_list(binary:part(LineContents, Pos, Len)), 
-                    %gen_lsp_server:lsp_log("include found: ~p", [IncludeFile]),
-                    {include, IncludeFile, is_between(Column, 1, 10+Pos+Len)};
-                [{_,_},{Pos,Len}] -> %include_lib
-                    IncludeFile = binary_to_list(binary:part(LineContents, Pos, Len)),
-                    %gen_lsp_server:lsp_log("include_lib found: ~p", [IncludeFile]),
-                    {include_lib, IncludeFile, is_between(Column, 1, 14+Pos+Len)};                  
-                _ -> 
-                    undefined
-            end;
-        _ -> undefined
-    end.
-
-is_between(C, Start, End) ->
-    case C of
-    X when X >= Start andalso X =< End -> true;
-    _ -> false
-    end.
-find_macro_use(undefined, _Column) ->
-    undefined;
-find_macro_use(LineContents, Column) ->
-    case re:run(LineContents, <<"\\?[A-Z_0-9a-z]+">>, [global]) of
-        {match, Matches} ->
-            case lists:filter(fun ([{Pos, Len}]) -> Column > Pos andalso Column =< Pos + Len end, Matches) of
-                [[{FoundPos, FoundLen}]] -> {macro_use, binary_to_atom(binary:part(LineContents, FoundPos + 1, FoundLen - 1), latin1)};
-                _ -> undefined
-            end;
-        _ ->
-            undefined
-    end.
-
-find_definition_in_args([{atom, {ModLine, StartMod}, Module}, {atom, {ColumnLine, StartColumn}, Function}, ArityTuple | _] = [_ | Tail], Column, Line, CurrentModule) ->
-    EndMod = StartMod + length(atom_to_list(Module)),
-    EndColumn = StartColumn + length(atom_to_list(Function)),
-    case Line of
-        ModLine when StartMod =< Column, Column =< EndMod, Module =/= CurrentModule ->
-            case parse_arity_tuple(ArityTuple, 0) of
-                false -> find_definition_in_args(Tail, Column, Line, CurrentModule);
-                _Arity -> {module_use, Module}
-            end;
-        ColumnLine when StartColumn =< Column, Column =< EndColumn ->
-            case parse_arity_tuple(ArityTuple, 0) of
-                false -> find_definition_in_args(Tail, Column, Line, CurrentModule);
-                Arity -> {function_use, Module, Function, Arity}
-            end;
-        _ -> find_definition_in_args(Tail, Column, Line, CurrentModule)
-    end;
-find_definition_in_args([_ | Tail], Column, Line, CurrentModule) when length(Tail) > 2 ->
-    find_definition_in_args(Tail, Column, Line, CurrentModule);
-find_definition_in_args([{atom, {ModLine, StartMod}, Module}, {atom, {ColumnLine, StartColumn}, Function}], Column, Line, CurrentModule)  ->
-    EndMod = StartMod + length(atom_to_list(Module)),
-    EndColumn = StartColumn + length(atom_to_list(Function)),
-    case Line of
-        ModLine when StartMod =< Column, Column =< EndMod, Module =/= CurrentModule ->
-            {module_use, Module};
-        ColumnLine when StartColumn =< Column, Column =< EndColumn ->
-            {function_use, Module, Function, 1};
-        _ -> undefined
-    end;
-find_definition_in_args(_, _Column, _Line, _CurrentModule) -> undefined.
-
-parse_arity_tuple({cons, _, _, ArityTuple}, Num) ->
-    parse_arity_tuple(ArityTuple, Num + 1);
-parse_arity_tuple({nil, _}, Num) -> Num;
-parse_arity_tuple({var, _, _}, _Num) -> 1;
-parse_arity_tuple({tuple, _, _}, _Num) -> 1;
-parse_arity_tuple(_, _) -> false.
-
-find_function_in_export(_CurrentModule, undefined, _Column) ->
-    undefined;
-find_function_in_export(CurrentModule, LineContents, Column) ->
-    case re:run(LineContents, <<"([a-z][A-Z_0-9a-z@]*)/([0-9]+)">>, [global]) of
-        {match, Matches} ->
-            case lists:filter(fun ([{Pos, Len}, _, _]) -> Column > Pos andalso Column =< Pos + Len end, Matches) of
-                [[_, {NamePos, NameLen}, {ArityPos, ArityLen}]] ->
-                    Function = binary_to_atom(binary:part(LineContents, NamePos, NameLen), latin1),
-                    Arity = binary_to_integer(binary:part(LineContents, ArityPos, ArityLen)),
-                    {function_use, CurrentModule, Function, Arity};
-                _ -> undefined
-            end;
-        _ ->
-            undefined
-    end.
-
-find_record_field_use(_Record, [], _Column, _Line) ->
-    undefined;
-find_record_field_use(Record, [{record_field, _, {atom, {L, StartColumn}, Field}, _} | Tail], Column, Line) ->
-    EndColumn = StartColumn + length(atom_to_list(Field)),
-    if
-        L =:= Line, StartColumn =< Column, Column =< EndColumn -> {field, Record, Field};
-        true -> find_record_field_use(Record, Tail, Column, Line)
-    end;
-%% Non-atom record field, e.g. #rec{a = 1, _ = '_'} pattern or match spec
-find_record_field_use(Record, [_Head | Tail], Column, Line) ->
-    find_record_field_use(Record, Tail, Column, Line).
-
-find_element({module_use, Module}, _CurrentFileSyntaxTree, _CurrentFile) ->
-    case lsp_syntax:module_syntax_tree(Module) of
-        undefined -> undefined;
-        {SyntaxTree, File} ->
-            case find_module(SyntaxTree, Module) of
-                {attribute, {Line, Column}, _} -> {File, Line, Column};
-                _ -> undefined
-            end
-    end;
-find_element({hrl, HrlFile}, _CurrentFileSyntaxTree, _CurrentFile) ->
-    {HrlFile, 1, 1};
-find_element({function_use, Module, Function, Arity}, _CurrentFileSyntaxTree, _CurrentFile) ->
-    case lsp_syntax:module_syntax_tree(Module) of
-        undefined -> undefined;
-        {SyntaxTree, File} ->
-            case find_function(SyntaxTree, Function, Arity) of
-                {function, {Line, Column}, _Function, _Arity, _Clauses} -> {File, Line, Column};
-                _ -> undefined
-            end
-    end;
-find_element({function_use, Module, Function, Arity, Args}, _CurrentFileSyntaxTree, _CurrentFile) ->
-    case lsp_syntax:module_syntax_tree(Module) of
-        undefined -> undefined;
-        {SyntaxTree, File} ->
-            case find_function(SyntaxTree, Function, Arity) of
-                {function, {Line, Column}, _Function, _Arity, Clauses} ->
-                    case find_clause_location(Clauses, Args) of
-                        undefined -> {File, Line, Column};
-                        {ClauseLine, ClauseColumn} -> {File, ClauseLine, ClauseColumn}
-                    end;
-                _ -> undefined
-            end
-    end;
-find_element({gen_msg_use, GenMsg}, SyntaxTree, File) ->
-    case match_gen_msg(SyntaxTree, GenMsg) of
-        undefined -> undefined;
-        {ClauseLine, ClauseColumn} -> {File, ClauseLine, ClauseColumn}
-    end;
-find_element({record, Record}, CurrentFileSyntaxTree, _CurrentFile) ->
-    case find_record(CurrentFileSyntaxTree, Record) of
-        {{attribute, {Line, Column}, record, {Record, _}}, File} ->
-            {lsp_utils:to_string(File), Line, Column};
-        undefined ->
-            undefined
-    end;
-find_element({field, Record, Field}, CurrentFileSyntaxTree, _CurrentFile) ->
-    case find_record(CurrentFileSyntaxTree, Record) of
-        {{attribute, _, record, {Record, Fields}}, File} ->
-            find_record_field(Field, Fields, lsp_utils:to_string(File));
-        undefined ->
-            undefined
-    end;
-find_element({variable, Variable, Line, Column}, CurrentFileSyntaxTree, CurrentFile) ->
-    FunctionWithVariable = find_function_with_line(CurrentFileSyntaxTree, Line),
-    FunClausesShadowingVariable = lists:sort(erl_syntax_lib:fold(fun (SyntaxTree, SingleAcc) ->
-        case SyntaxTree of
-            {'fun', {_, _}, {clauses, Clauses}} ->
-                lists:foldl(fun (Clause, FunClauseAcc) ->
-                    FunHasVariable =
-                        variable_location_in_fun_clause(Variable, Line, Column, Clause) andalso
-                        variable_in_fun_clause_arguments(Variable, Clause),
-                    case FunHasVariable of
-                        true -> [Clause | FunClauseAcc];
-                        _ -> FunClauseAcc
-                    end
-                end, SingleAcc, Clauses);
-            {function, _, _, _, ClausesList} ->
-                matched_fun_clause(lists:reverse(ClausesList), Line);
-            _ ->
-                SingleAcc
-        end
-    end, [], FunctionWithVariable)),
-    case FunClausesShadowingVariable of
-        [] ->
-            case find_variable_occurrences(Variable, FunctionWithVariable) of
-                [{L, C} | _Tail] ->
-                    {CurrentFile, L, C};
-                _ ->
-                    undefined
-            end;
-        _ ->
-            [{L, C} | _] = find_variable_occurrences(Variable, lists:last(FunClausesShadowingVariable)),
-            {CurrentFile, L, C}
-    end;
-find_element({macro_use, Macro}, _CurrentFileSyntaxTree, CurrentFile) ->
-    lsp_syntax:find_macro_definition(Macro, CurrentFile);
-find_element(_, _CurrentFileSyntaxTree, _CurrentFile) ->
-    undefined.
-
-matched_fun_clause([{clause, {ClauseLine, _}, _, _, _} = Clause | _], Line) when ClauseLine =< Line -> [Clause];
-matched_fun_clause([_ | Tail], Line) -> matched_fun_clause(Tail, Line);
-matched_fun_clause([], _line) -> [].
 
 find_clause_location([{clause, Location, ClauseArgs, _, _} | TailClauses], Args) ->
     case comparison_args(Args, ClauseArgs) of
@@ -686,91 +608,33 @@ find_function_with_line(FileSyntaxTree, Line) ->
         _ -> undefined
     end.
 
-find_variable_occurrences(Variable, Tree) ->
-    lists:sort(find_variable_occurrences(Variable, Tree, [])).
+match_gen_msg(File, GenMsg) ->
+    find_in_syntax_tree(fun
+        ({function, _Position, _FoundFunction, _FoundArity, Clauses}, CurrentFile) when CurrentFile =:= File ->
+            find_clause_location(Clauses, GenMsg);
+        (_SyntaxTree, _CurrentFile) ->
+            undefined
+    end, File).
 
-find_variable_occurrences(Variable, {var, {Line, Column}, Variable}, Acc) ->
-    [{Line, Column} | Acc];
-find_variable_occurrences(Variable, T, Acc) when is_tuple(T) ->
-    find_variable_occurrences(Variable, tuple_to_list(T), Acc);
-find_variable_occurrences(Variable, [H | T], Acc) ->
-     find_variable_occurrences(Variable, T, find_variable_occurrences(Variable, H, Acc));
-find_variable_occurrences(_Variable, _, Acc) ->
-    Acc.
+function_clauses(File, Function, Arity) ->
+    lists:reverse(fold_in_syntax_tree(fun
+        ({function, _LC, FoundFunction, FoundArity, Clauses}, _CurrentfFile, Acc)
+                when FoundFunction =:= Function andalso (Arity =:= any orelse FoundArity == Arity) ->
+            [Clauses | Acc];
+        (_SyntaxTree, _CurrentFile, Acc) ->
+            Acc
+    end, [], File, gen_lsp_doc_server:get_syntax_tree(File))).
 
-variable_location_in_fun_clause(Variable, Line, Column, Clause) ->
-    lists:member({Line, Column}, find_variable_occurrences(Variable, Clause)).
-
-variable_in_fun_clause_arguments(Variable, {clause, {_, _}, Arguments, _, _}) ->
-    length(find_variable_occurrences(Variable, Arguments)) > 0.
-
-get_function_arities(Module, Function) ->
-    case lsp_syntax:module_syntax_tree(Module) of
-        {FileSyntaxTree, _File} ->
-            lists:sort(fold_in_file_syntax_tree(FileSyntaxTree, [], fun
-                ({function, _Position, FoundFunction, Arity, _Clauses}, Acc) when FoundFunction =:= Function ->
-                    [Arity | Acc];
-                (_, Acc) ->
-                    Acc
-            end));
-        _ ->
-            []
-    end.
-
-match_gen_msg(FileSyntaxTree, GenMsg) ->
-    Fun = fun(SyntaxTree, _File) ->
-        case SyntaxTree of 
-            {function, _Position, _FoundFunction, _FoundArity, Clauses} ->
-                find_clause_location(Clauses, GenMsg);
-            _ -> undefined
-        end
-    end,
-    {Location, _File} = find_in_file_syntax_tree(FileSyntaxTree, Fun),
-    Location.
-
-find_function(FileSyntaxTree, Function, Arity) ->
-    Fun = fun (SyntaxTree, DefaultTree, _File) ->
-        case SyntaxTree of 
-        {function, _Position, FoundFunction, FoundArity, _Clauses} when FoundFunction =:= Function ->
-            case FoundArity of
-                Arity -> {SyntaxTree, undefined};
-                _ -> {undefined, SyntaxTree}
-            end;
-        _ ->
-            {undefined, DefaultTree}
-        end
-    end,
-    {SyntaxTree1, _File} = find_in_file_syntax_tree(FileSyntaxTree, {function, Fun}),
-    case SyntaxTree1 of
-        {undefined, SyntaxTree} -> skip;
-        {SyntaxTree, _} -> skip
-    end,
-    SyntaxTree.
-
-find_module(FileSyntaxTree, Module) ->
-    case lists:keyfind(module, 3, FileSyntaxTree) of
-    {attribute, Position, module, Module} -> {attribute, Position, Module};
-    _ -> undefined
-    end.
-
-find_record(FileSyntaxTree, Record) ->
-    Fun = fun (SyntaxTree, _File) ->
-        case SyntaxTree of
-            {attribute, _, record, {Record, _}} -> SyntaxTree;
-            _ -> undefined
-        end
-    end,
-    find_in_file_syntax_tree(FileSyntaxTree, Fun).
-
-find_record_field(_Field, [], _CurrentFile) ->
-    undefined;
-find_record_field(Field, [{typed_record_field, {record_field, _, {atom, {Line, Column}, Field}}, _} | _], CurrentFile) ->
-    {CurrentFile, Line, Column};
-find_record_field(Field, [{typed_record_field, {record_field, _, {atom, {Line, Column}, Field}, _}, _} | _], CurrentFile) ->
-    {CurrentFile, Line, Column};
-find_record_field(Field, [{record_field, _, {atom, {Line, Column}, Field}} | _], CurrentFile) ->
-    {CurrentFile, Line, Column};
-find_record_field(Field, [{record_field, _, {atom, {Line, Column}, Field}, _} | _], CurrentFile) ->
-    {CurrentFile, Line, Column};
-find_record_field(Field, [_ | Tail], CurrentFile) ->
-    find_record_field(Field, Tail, CurrentFile).
+fold_references(Fun, Init, File, FileSyntaxTree) ->
+    fold_in_syntax_tree(fun
+        (_Syntax, CurrentFile, Acc) when CurrentFile =/= File ->
+            Acc;
+        ({call, {_, _}, {remote, {_, _}, {atom, {ModuleLine, ModuleColumn}, Module}, {atom, {_L, FunctionColumn}, Function}}, Args}, _CurrentFile, Acc) ->
+            End = FunctionColumn + length(atom_to_list(Function)),
+            Fun({function, Module, Function, length(Args)}, ModuleLine, ModuleColumn, End, Acc);
+        ({'fun', {_, _}, {function, {atom, {ModuleLine, ModuleColumn}, Module}, {atom, {_, _}, Function}, {integer, {_, Start}, Arity}}}, _CurrentFile, Acc) ->
+            End = Start + length(integer_to_list(Arity)),
+            Fun({function, Module, Function, Arity}, ModuleLine, ModuleColumn, End, Acc);
+        (_Syntax, _CurrentFIle, Acc) ->
+            Acc
+    end, Init, File, FileSyntaxTree).

@@ -3,28 +3,78 @@
 -behavior(gen_server).
 -export([start_link/0]).
 
+-export([document_opened/2, document_changed/2, document_closed/1, opened_documents/0, get_document_contents/1, parse_document/1]).
+-export([project_file_added/1, project_file_changed/1, project_file_deleted/1]).
+-export([get_syntax_tree/1, get_dodged_syntax_tree/1, get_references/1]).
+-export([root_available/0, project_modules/0, get_module_file/1, get_build_dir/0, find_source_file/1]).
 -export([init/1,handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
--export([set_document_attribute/3, remove_document/1, get_document_attribute/2, get_documents/0]).
--export([root_available/0, project_modules/0, add_project_file/1, remove_project_file/1, get_module_file/1, get_module_beam/1, get_build_dir/0]).
 
 -define(SERVER, ?MODULE).
 
--record(state, {opened, project_modules}).
+-record(state, {project_modules, files_to_parse}).
 
-start_link() ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, [],[]).
+document_opened(File, Contents) ->
+    ets:insert(document_contents, {File, Contents}).
 
-set_document_attribute(File, Attribute, Value) -> 
-    gen_server:call(?SERVER, {set_document_attribute, File, Attribute, Value}).
+document_changed(File, Contents) ->
+    ets:insert(document_contents, {File, Contents}).
 
-remove_document(File) ->
-    gen_server:cast(?SERVER, {remove, File}).
+document_closed(File) ->
+    ets:delete(document_contents, File).
 
-get_document_attribute(File, Attribute) ->
-    gen_server:call(?SERVER, {get_document_attribute, File, Attribute}).
+opened_documents() ->
+    [File || {File, _Contents} <- ets:tab2list(document_contents)].
 
-get_documents() ->
-    gen_server:call(?SERVER, get_documents).
+get_document_contents(File) ->
+    case ets:lookup(document_contents, File) of
+        [{File, Contents}] -> Contents;
+        _ -> undefined
+    end.
+
+parse_document(File) ->
+    case filename:extension(File) of
+        ".erl" ->
+            case get_document_contents(File) of
+                undefined ->
+                    error_logger:error_msg("Cannot find contents of document ~p~n", [File]);
+                Contents ->
+                    ContentsFile = lsp_utils:make_temporary_file(Contents),
+                    parse_and_store(File, ContentsFile),
+                    file:delete(ContentsFile)
+            end;
+        _ ->
+            ok
+    end.
+
+project_file_added(File) ->
+    gen_server:cast(?SERVER, {project_file_added, File}).
+
+project_file_changed(File) ->
+    gen_server:cast(?SERVER, {project_file_changed, File}).
+
+project_file_deleted(File) ->
+    gen_server:cast(?SERVER, {project_file_deleted, File}).
+
+get_syntax_tree(File) ->
+    case get_tree(syntax_tree, File) of
+        undefined ->
+            parse_and_store(File, File),
+            get_tree(syntax_tree, File);
+        SyntaxTree ->
+            SyntaxTree
+    end.
+
+get_dodged_syntax_tree(File) ->
+    case get_tree(dodged_syntax_tree, File) of
+        undefined ->
+            parse_and_store(File, File),
+            get_tree(dodged_syntax_tree, File);
+        SyntaxTree ->
+            SyntaxTree
+    end.
+
+get_references(Reference) ->
+    ets:match(references, {'$1', Reference, '$2', '$3', '$4'}).
 
 root_available() ->
     gen_server:cast(?SERVER, root_available).
@@ -32,37 +82,48 @@ root_available() ->
 project_modules() ->
     gen_server:call(?SERVER, project_modules).
 
-add_project_file(File) ->
-    gen_server:cast(?SERVER, {add_project_file, File}).
-
-remove_project_file(File) ->
-    gen_server:cast(?SERVER, {remove_project_file, File}).
-
 get_module_file(Module) ->
     gen_server:call(?SERVER, {get_module_file, Module}).
 
-get_module_beam(Module) ->
-    gen_server:call(?SERVER, {get_module_beam, Module}).
+get_build_dir() ->
+    ConfigFilename = filename:join([gen_lsp_config_server:root(), "rebar.config"]),
+    case filelib:is_file(ConfigFilename) of
+        true ->
+            Default = "_build",
+            case file:consult(ConfigFilename) of
+                {ok, Config} ->
+                    proplists:get_value(base_dir, Config, Default);
+                {error, _} ->
+                    Default
+            end;
+        false ->
+            undefined
+    end.
+
+find_source_file(File) ->
+    BuildDir = filename:join(gen_lsp_config_server:root(), gen_lsp_doc_server:get_build_dir()),
+    Result = lists:filter(fun (Path) ->
+        string:prefix(Path, BuildDir) =:= nomatch
+    end, filelib:wildcard(as_string(filename:join([gen_lsp_config_server:root(), "**", File])))),
+    case Result of
+        [AFile | _] -> AFile;
+        [] -> undefined
+    end.
+
+as_string(Text) when is_binary(Text) ->
+    binary_to_list(Text);
+as_string(Text) -> 
+    Text.
+
+start_link() ->
+    safe_new_table(document_contents, set),
+    safe_new_table(syntax_tree, set),
+    safe_new_table(dodged_syntax_tree, set),
+    safe_new_table(references, bag),
+    gen_server:start_link({local, ?SERVER}, ?MODULE, [],[]).
 
 init(_Args) ->
-    {ok, #state{opened = #{}, project_modules = #{}}}.
-
-handle_call({get_document_attribute, File, Attribute}, _From, State) ->
-    {reply, proplists:get_value(Attribute, maps:get(File, State#state.opened, [])), State};
-
-handle_call({set_document_attribute, File, Attribute, Value},_From, State) ->
-    Opened = State#state.opened,
-    Attributes = maps:get(File, Opened, []),
-    UpdatedAttributes = case proplists:is_defined(Attribute, Attributes) of
-        true ->
-            lists:keyreplace(Attribute, 1, Attributes, {Attribute, Value});
-        _ ->
-            [{Attribute, Value} | Attributes]
-    end,
-    {reply, ok, State#state{opened = Opened#{File => UpdatedAttributes}}};
-
-handle_call(get_documents, _From, State) ->
-    {reply, maps:keys(State#state.opened), State};
+    {ok, #state{project_modules = #{}, files_to_parse = []}}.
 
 handle_call(project_modules, _From, State) ->
     {reply, maps:keys(State#state.project_modules), State};
@@ -73,70 +134,61 @@ handle_call({get_module_file, Module},_From, State) ->
     SearchExclude = lsp_utils:search_exclude_globs_to_regexps(SearchExcludeConf),
     %% Select a non-excluded file
     Files = maps:get(atom_to_list(Module), State#state.project_modules, []),
-    File =
-        case [F || F<-Files, not lsp_utils:is_path_excluded(F, SearchExclude)] of
-            []          -> 
-                %try to find in erlang source files
-                case filelib:wildcard(code:lib_dir()++"/**/" ++ atom_to_list(Module) ++ ".erl") of
-                    [] -> undefined;
-                    [OneFile]   -> OneFile;
-                    [AFile | _] -> AFile
-                end;
-            [OneFile]   -> OneFile;
-            [AFile | _] -> AFile
-        end,
-    {reply, File, State};
-
-handle_call({get_module_beam, Module},_From, State) ->
-    %% Get search.exclude setting of Visual Studio Code
-    SearchExcludeConf = gen_lsp_config_server:search_exclude(),
-    SearchExclude = lsp_utils:search_exclude_globs_to_regexps(SearchExcludeConf),
-    %% Select a non-excluded file
-    Files = maps:get(atom_to_list(Module), State#state.project_modules, []),
-    {ExceptExcluded, Excluded} = lists:partition(fun (File) ->
-        not lsp_utils:is_path_excluded(File, SearchExclude)
-    end, Files),
-    BeamFiles = lists:filtermap(fun (File) ->
-        case find_existing_beam(File) of
-            undefined -> false;
-            BeamFile -> {true, BeamFile}
-        end
-    end, ExceptExcluded ++ Excluded),
-    BeamFile = case BeamFiles of
+    File = case [F || F <- Files, not lsp_utils:is_path_excluded(F, SearchExclude)] of
         [] ->
-            %try to find in erlang source files
-            case filelib:wildcard(code:lib_dir()++"/**/" ++ atom_to_list(Module) ++ ".erl") of
-                [] -> undefined;
-                [AFile | _] -> find_existing_beam(AFile)
+            case find_module_source_in_dir(Module, code:lib_dir()) of
+                undefined ->
+                    BuildDir = filename:join(gen_lsp_config_server:root(), gen_lsp_doc_server:get_build_dir()),
+                    find_module_source_in_dir(Module, BuildDir);
+                Result ->
+                    Result
             end;
+        [OneFile] ->
+            OneFile;
         [AFile | _] ->
             AFile
     end,
-    {reply, BeamFile, State};
+    {reply, File, State};
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
-
-handle_cast({remove, File}, State) ->
-    Opened = State#state.opened,
-    {noreply, State#state{opened = maps:remove(File, Opened)}};
 
 handle_cast(stop, State) ->
     {stop, normal, State};
 
 handle_cast(root_available, State) ->
     BuildDir = get_build_dir(),
-    Fun = fun(File, ProjectModules) ->
-        do_add_project_file(File, ProjectModules, BuildDir)
+    FullBuildDir = filename:join(gen_lsp_config_server:root(), BuildDir),
+    Fun = fun(File, {ProjectModules, FilesToParse}) ->
+        UpdatedFilesToParse = case string:prefix(File, FullBuildDir) of
+            nomatch -> [File | FilesToParse];
+            _ -> FilesToParse
+        end,
+        {do_add_project_file(File, ProjectModules, BuildDir), UpdatedFilesToParse}
     end,
-    ProjectModules = filelib:fold_files(gen_lsp_config_server:root(), ".erl$", true, Fun, #{}),
-    {noreply, State#state{project_modules = ProjectModules}};
+    {ProjectModules, FilesToParse} = filelib:fold_files(gen_lsp_config_server:root(), ".erl$", true, Fun, {#{}, []}),
+    {noreply, parse_next_file_in_background(State#state{project_modules = ProjectModules, files_to_parse = FilesToParse})};
 
-handle_cast({add_project_file, File}, State) ->
+handle_cast({project_file_added, File}, State) ->
     UpdatedProjectModules = do_add_project_file(File, State#state.project_modules, get_build_dir()),
-    {noreply, State#state{project_modules = UpdatedProjectModules}};
+    FilesToParse = [File | State#state.files_to_parse],
+    UpdatedState = State#state{project_modules = UpdatedProjectModules, files_to_parse = FilesToParse},
+    {noreply, parse_next_file_in_background(UpdatedState)};
 
-handle_cast({remove_project_file, File}, State) ->
+handle_cast({project_file_changed, File}, State) ->
+    case ets:lookup(document_contents, File) of
+        [_FileContents] ->
+            {noreply, State};
+        _ ->
+            FilesToParse = [File | State#state.files_to_parse],
+            {noreply, parse_next_file_in_background(State#state{files_to_parse = FilesToParse})}
+    end;
+
+handle_cast({project_file_deleted, File}, State) ->
+    ets:delete(document_contents, File),
+    ets:delete(syntax_tree, File),
+    ets:delete(dodged_syntax_tree, File),
+    ets:delete(references, File),
     Module = filename:rootname(filename:basename(File)),
     UpdatedFiles = lists:delete(File, maps:get(Module, State#state.project_modules, [])),
     UpdatedProjectModules = case UpdatedFiles of
@@ -145,6 +197,12 @@ handle_cast({remove_project_file, File}, State) ->
     end,
     {noreply, State#state{project_modules = UpdatedProjectModules}}.
 
+handle_info({worker_result, File, _Result}, State) ->
+    gen_lsp_server:lsp_log("Parsed in background: ~s~n", [File]),
+    {noreply, parse_next_file_in_background(State)};
+handle_info({worker_error, File, _Exception}, State) ->
+    gen_lsp_server:lsp_log("Parse in background failed: ~s~n", [File]),
+    {noreply, parse_next_file_in_background(State)};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -167,30 +225,46 @@ concat_project_files(File, OldFiles, BuildDir) ->
         false -> [File | OldFiles]
     end.
 
-find_existing_beam(SourceFile) ->
-    case lists:reverse(filename:split(SourceFile)) of
-        [FilenameErl, "src" | T] ->
-            RootBeamName = filename:join(lists:reverse([filename:rootname(FilenameErl), "ebin" | T])),
-            case filelib:is_regular(RootBeamName ++ ".beam") of
-                true -> RootBeamName;
-                false -> undefined
-            end;
+safe_new_table(Name, Type) ->
+    case ets:whereis(Name) of
+        undefined -> ets:new(Name, [Type, named_table, public]);
+        _ -> Name
+    end.
+
+parse_and_store(File, ContentsFile) ->
+    {SyntaxTree, DodgedSyntaxTree} = lsp_parse:parse_source_file(File, ContentsFile),
+    case SyntaxTree of
+        undefined ->
+            ok;
+        _ ->
+            ets:insert(syntax_tree, {File, SyntaxTree}),
+            ets:delete(references, File),
+            lsp_navigation:fold_references(fun (Reference, Line, Column, End, _) ->
+                ets:insert(references, {File, Reference, Line, Column, End})
+            end, undefined, File, SyntaxTree)
+    end,
+    case DodgedSyntaxTree of
+        undefined -> ok;
+        _ -> ets:insert(dodged_syntax_tree, {File, DodgedSyntaxTree})
+    end.
+
+get_tree(TreeType, File) ->
+    case ets:lookup(TreeType, File) of
+        [{File, SyntaxTree}] ->
+            SyntaxTree;
         _ ->
             undefined
     end.
 
--spec get_build_dir() -> string() | undefined.
-get_build_dir() ->
-    ConfigFilename = filename:join([gen_lsp_config_server:root(), "rebar.config"]),
-    case filelib:is_file(ConfigFilename) of
-        true ->
-            Default = "_build",
-            case file:consult(ConfigFilename) of
-                {ok, Config} ->
-                    proplists:get_value(base_dir, Config, Default);
-                {error, _} ->
-                    Default
-            end;
-        false ->
-            undefined
+parse_next_file_in_background(#state{files_to_parse = []} = State) ->
+    State;
+parse_next_file_in_background(#state{files_to_parse = [File | Rest]} = State) ->
+    worker:start(fun () -> parse_and_store(File, File) end, File),
+    State#state{files_to_parse = Rest}.
+
+find_module_source_in_dir(Module, Dir) ->
+    case filelib:wildcard(Dir ++ "/**/" ++ atom_to_list(Module) ++ ".erl") of
+        [] -> undefined;
+        [OneFile]   -> OneFile;
+        [AFile | _] -> AFile
     end.
