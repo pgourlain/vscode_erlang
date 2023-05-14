@@ -71,7 +71,7 @@ inlayhints_info(File, {LS, _CS}, {LE,_CE}) ->
     %?LOG("inlayhint_info expected range:(~p,~p),(~p,~p)", [LS,CS, LE,CE]),
     % filter base on line
     FilteredRes = lists:filter(fun ({{L,_},_,_}) -> L >= LS andalso L =< LE end ,Res),
-    ?LOG("inlayhint_info result:~p, filtered:~p", [length(Res), length(FilteredRes)]),
+    %?LOG("inlayhint_info result:~p, filtered:~p", [length(Res), length(FilteredRes)]),
     FilteredRes.
 
 full_inlayhints_info(File, SyntaxTree) ->
