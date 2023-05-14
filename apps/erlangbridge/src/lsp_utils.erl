@@ -8,12 +8,20 @@
          to_string/1,
          is_erlang_lib_file/1,
          absolute_path/2,
-         make_temporary_file/1]).
+         make_temporary_file/1,
+         to_binary/1,
+         client_position/1]).
 
 client_range(Line, StartChar, EndChar) ->
     #{
         <<"start">> => #{line => Line - 1, character => StartChar - 1},
         <<"end">> => #{line => Line - 1, character => EndChar - 1}
+    }.
+
+client_position({Line, Column}) ->
+    #{
+        line => Line-1, 
+        character => Column-1
     }.
 
 file_uri_to_file(Uri) ->    
@@ -73,6 +81,15 @@ to_string(X) when is_atom(X) ->
     erlang:atom_to_list(X);
 
 to_string(X) ->
+    X.
+
+to_binary(X) when is_binary(X) ->
+    X;
+to_binary(X) when is_atom(X) ->
+    erlang:atom_to_binary(X);
+to_binary(X) when is_list(X) ->
+    erlang:list_to_binary(X);
+to_binary(X) -> 
     X.
 
 %% -------------------------------------------------------------------

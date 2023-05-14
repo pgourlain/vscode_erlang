@@ -12,8 +12,16 @@ This extension adds support for the Erlang language to Visual Studio Code, inclu
 - Hover help for standard functions
 - Hover for project functions showing head clauses
 - CodeLens showing exported functions and references
+- InlayHints showing parameters name in function calls
+  - disable by default : enable in configuration settings
+  - limits : only works with locals calls
 
 ![editing](images/vscode-erlang-editing.gif)
+
+InlayHints in function calls
+
+![inlayHints](images/vscode-erlang-inlayhints.png)
+- showing parameter name when it doesn't match with caller var name
 
 ## Build
 
@@ -79,6 +87,7 @@ Support for Erlang tools, including rebar3, EUnit and Dialyzer
 - `erlang.includePaths` - Include paths are read from rebar.config, and also standard set of paths is used. This setting is for special cases when the default behaviour is not enough
 - `erlang.linting` - Enable/disable dynamic validation of opened Erlang source files
 - `erlang.codeLensEnabled` - Enable/Disable CodeLens
+- `erlang.inlayHintsEnabled` - Enable/Disable InlayHints
 - `erlang.verbose` - Activate technical traces for use in the extension development
 
 ## Help
