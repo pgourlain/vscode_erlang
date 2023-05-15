@@ -2,9 +2,10 @@
 
 ## Version 0.9.1 (May 15, 2023)
 
-* [XX](https://github.com/pgourlain/vscode_erlang/issues/XX) : 
+* [260](https://github.com/pgourlain/vscode_erlang/issues/260) : 
   - Upgrade vscode engine to 1.52
   - Add inlayHints implementation (see Readme.md) 
+  - Fix in rebar when rebar produce line and column in output
 
 ## Version 0.9.0 (May 14, 2023)
 
