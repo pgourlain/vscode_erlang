@@ -66,7 +66,8 @@ codelens_info(File) ->
 inlayhints_info(File, {LS, _CS}, {LE,_CE}) ->
     %% Like syntax_tree, it should be store in ets, and update after each parse
 
-    Res = full_inlayhints_info(File,  gen_lsp_doc_server:get_syntax_tree(File)),
+    %Res = full_inlayhints_info(File,  gen_lsp_doc_server:get_syntax_tree(File)),
+    Res = gen_lsp_doc_server:get_inlayhints(File),
     %filter on provided range
     %?LOG("inlayhint_info expected range:(~p,~p),(~p,~p)", [LS,CS, LE,CE]),
     % filter base on line

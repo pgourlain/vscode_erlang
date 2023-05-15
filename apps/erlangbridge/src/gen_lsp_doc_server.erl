@@ -5,7 +5,7 @@
 
 -export([document_opened/2, document_changed/2, document_closed/1, opened_documents/0, get_document_contents/1, parse_document/1]).
 -export([project_file_added/1, project_file_changed/1, project_file_deleted/1]).
--export([get_syntax_tree/1, get_dodged_syntax_tree/1, get_references/1]).
+-export([get_syntax_tree/1, get_dodged_syntax_tree/1, get_references/1, get_inlayhints/1]).
 -export([root_available/0, project_modules/0, get_module_file/1, get_build_dir/0, find_source_file/1]).
 -export([init/1,handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
@@ -76,6 +76,12 @@ get_dodged_syntax_tree(File) ->
 get_references(Reference) ->
     ets:match(references, {'$1', Reference, '$2', '$3', '$4'}).
 
+get_inlayhints(File) ->
+    case ets:lookup(document_inlayhints, File) of
+        [{File, Inlays}] -> Inlays;
+        _ -> []
+    end.    
+
 root_available() ->
     gen_server:cast(?SERVER, root_available).
 
@@ -120,6 +126,7 @@ start_link() ->
     safe_new_table(syntax_tree, set),
     safe_new_table(dodged_syntax_tree, set),
     safe_new_table(references, bag),
+    safe_new_table(document_inlayhints, set),
     gen_server:start_link({local, ?SERVER}, ?MODULE, [],[]).
 
 init(_Args) ->
@@ -189,6 +196,7 @@ handle_cast({project_file_deleted, File}, State) ->
     ets:delete(syntax_tree, File),
     ets:delete(dodged_syntax_tree, File),
     ets:delete(references, File),
+    ets:delete(document_inlayhints, File),
     Module = filename:rootname(filename:basename(File)),
     UpdatedFiles = lists:delete(File, maps:get(Module, State#state.project_modules, [])),
     UpdatedProjectModules = case UpdatedFiles of
@@ -239,9 +247,11 @@ parse_and_store(File, ContentsFile) ->
         _ ->
             ets:insert(syntax_tree, {File, SyntaxTree}),
             ets:delete(references, File),
+            ets:delete(document_inlayhints, File),
             lsp_navigation:fold_references(fun (Reference, Line, Column, End, _) ->
                 ets:insert(references, {File, Reference, Line, Column, End})
-            end, undefined, File, SyntaxTree)
+            end, undefined, File, SyntaxTree),
+            ets:insert(document_inlayhints, {File, lsp_navigation:full_inlayhints_info(File,SyntaxTree)})
     end,
     case DodgedSyntaxTree of
         undefined -> ok;
