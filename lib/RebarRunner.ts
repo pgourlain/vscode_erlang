@@ -52,13 +52,17 @@ export class RebarRunner implements vscode.Disposable {
 	}
 
 	private runRebarCompile() {
+		const statusBarMessage = vscode.window.setStatusBarMessage('$(loading~spin) Building');
 		try {
 			const buildArgs = getElangConfigConfiguration().rebarBuildArgs;
 			this.runScript(buildArgs).then(data => {
+				//RebarRunner.RebarOutput.appendLine(`buildArgs: ${buildArgs}`);
 				this.diagnosticCollection.clear();
 				this.parseCompilationResults(data);
+				statusBarMessage.dispose();
 			});
 		} catch (e) {
+			statusBarMessage.dispose();
 			vscode.window.showErrorMessage('Couldn\'t execute rebar.\n' + e);
 		}
 	}
@@ -69,11 +73,22 @@ export class RebarRunner implements vscode.Disposable {
 			var m = regex.exec(data);
 			if (m) {
 				var fileName = m[1];
+				var line = Number(m[2]);
+				var column = 0;
+				var splittedFileName = fileName.split(':');
+				if (splittedFileName.length == 2)
+				{
+					//filename contains ':number'
+					column = line;
+					fileName = splittedFileName[0];
+					line = Number(splittedFileName[1]);
+				}
 				var peace = data.substring(m.index, regex.lastIndex);
 				data = data.replace(peace, "");
 
 				let message = m[m.length - 1];
-				let range = new vscode.Range(Number(m[2]) - 1, 0, Number(m[2]) - 1, peace.length - 1);
+
+				let range = new vscode.Range(line - 1, 0, line- 1, peace.length - 1);
 				let diagnostic = new vscode.Diagnostic(range, message, severity);
 				regex.lastIndex = 0;
 				if (!diagnostics[fileName]) {
@@ -86,7 +101,7 @@ export class RebarRunner implements vscode.Disposable {
 		return data;
 	}
 
-	private parseCompilationResults(data: string): void {
+	private parseCompilationResults(data: string): void {		
 		//how to test regexp : https://regex101.com/#javascript
 		var diagnostics: { [id: string]: vscode.Diagnostic[]; } = {};
 		//parsing warning at first
@@ -168,7 +183,7 @@ export class RebarRunner implements vscode.Disposable {
 				statusBarMessage.dispose();
             }, reject => {});
 		} catch (e) {
-			vscode.window.showErrorMessage('Couldn\'t execute rebar.\n' + e);
+			vscode.window.showErrorMessage('Couldn\'t execute Dialyzer.\n' + e);
 		}
 	}
 

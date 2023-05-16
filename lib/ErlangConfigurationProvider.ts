@@ -28,6 +28,7 @@ export function configurationChanged() : void {
         erlangPath: erlangConf.get<string>("erlangPath", null),
         rebarPath: erlangConf.get<string>("rebarPath", null),
         codeLensEnabled: erlangConf.get<boolean>('codeLensEnabled', false),
+        inlayHintsEnabled: erlangConf.get<boolean>('inlayHintsEnabled', false),
         debuggerRunMode: erlangConf.get<string>("debuggerRunMode", "Server"),
         includePaths: erlangConf.get("includePaths", []),
         linting: erlangConf.get<boolean>('linting', false),

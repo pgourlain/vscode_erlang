@@ -1,5 +1,11 @@
 # Change log
 
+## Version 0.9.1 (May 15, 2023)
+
+* [260](https://github.com/pgourlain/vscode_erlang/issues/260) : 
+  - Upgrade vscode engine to 1.52 : to recompile source extension you should run 'npm install', in order to update your local npm packages
+  - Add inlayHints implementation (see Readme.md) 
+  - Fix rebar compile parsing result, when rebar produce line and column in output
 
 ## Version 0.9.0 (May 14, 2023)
 

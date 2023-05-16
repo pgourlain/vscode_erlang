@@ -4,7 +4,8 @@
     workspace_didChangeConfiguration/2, workspace_didChangeWatchedFiles/2,
     textDocument_didOpen/2, textDocument_didClose/2, textDocument_didSave/2, textDocument_didChange/2,
     textDocument_definition/2, textDocument_references/2, textDocument_hover/2, textDocument_completion/2,
-    textDocument_formatting/2, textDocument_codeLens/2, textDocument_documentSymbol/2]).
+    textDocument_formatting/2, textDocument_codeLens/2, textDocument_documentSymbol/2,
+    textDocument_inlayHints/2]).
 
 initialize(_Socket, Params) ->
     % usefull when file is open instead of folder
@@ -22,7 +23,8 @@ initialize(_Socket, Params) ->
         hoverProvider => true,
         completionProvider => #{triggerCharacters => <<":#.">>},
         codeLensProvider => true,
-        documentSymbolProvider => true
+        documentSymbolProvider => true,
+        inlayHintProvider => true
     }}.
 
 initialized(Socket, _Params) ->
@@ -201,6 +203,27 @@ textDocument_codeLens(_Socket, Params) ->
                     {true, true} -> [ReferenceCL, ExportedCL | Acc]
                 end
             end, [], lsp_navigation:codelens_info(lsp_utils:file_uri_to_file(Uri)))
+    end.
+
+textDocument_inlayHints(_Socket, Params) ->
+    %gen_lsp_server:lsp_log("textDocument_inlayHints ~p", [Params]),
+    Uri = mapmapget(textDocument, uri, Params),
+    case gen_lsp_config_server:inlayHintsEnabled() of
+        false -> [];
+        _ ->
+            %#{range =>
+            %   #{'end' => #{character => 51,line => 73},
+            %     start => #{character => 0,line => 0}},
+            #{line:=LS, character:=CS} = mapmapget(range, start, Params),
+            #{line:=LE, character:=CE} = mapmapget(range, 'end', Params),
+            lists:map(fun ({Position, Label, Kind}) ->
+                #{
+                    position => lsp_utils:client_position(Position),
+                    kind => lsp_utils:to_binary(Kind), %"type" or "parameter"
+                    label => lsp_utils:to_binary(Label)
+                }
+                end, 
+                lsp_navigation:inlayhints_info(lsp_utils:file_uri_to_file(Uri), {LS,CS}, {LE,CE}))
     end.
 
 textDocument_documentSymbol(_Socket, Params) ->
