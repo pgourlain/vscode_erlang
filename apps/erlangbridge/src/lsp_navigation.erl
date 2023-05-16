@@ -61,16 +61,13 @@ codelens_info(File) ->
     end, Functions).
 
 %
-% return { Position, Label} => {{1,1}, "sample"}
+% return { Position, Label} => {{0,0}, "sample"}
 %
 inlayhints_info(File, {LS, _CS}, {LE,_CE}) ->
-    %% Like syntax_tree, it should be store in ets, and update after each parse
-
-    %Res = full_inlayhints_info(File,  gen_lsp_doc_server:get_syntax_tree(File)),
+    %get inlayhints from store
     Res = gen_lsp_doc_server:get_inlayhints(File),
-    %filter on provided range
     %?LOG("inlayhint_info expected range:(~p,~p),(~p,~p)", [LS,CS, LE,CE]),
-    % filter base on line
+    % filter base on line number
     FilteredRes = lists:filter(fun ({{L,_},_,_}) -> L >= LS andalso L =< LE end ,Res),
     %?LOG("inlayhint_info result:~p, filtered:~p", [length(Res), length(FilteredRes)]),
     FilteredRes.

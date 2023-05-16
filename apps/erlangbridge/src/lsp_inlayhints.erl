@@ -4,8 +4,6 @@
 -export([inlayhint_analyze/3, generate_inlayhints/2]).
 
 
-
-
 inlayhint_analyze(SyntaxTree, _CurrentFile, #{defs := Defs, calls := Calls} = Dict) ->
     case SyntaxTree of
         %TODO, get args from spec if exists
@@ -30,7 +28,7 @@ inlayhint_analyze(SyntaxTree, _CurrentFile, #{defs := Defs, calls := Calls} = Di
     end.
 
 index_args(Args) ->
-    %%add index for each arg
+    %%add index for each arg, will use later to match with definition
     {LR, _} = lists:mapfoldl(fun(A, Acc) -> {{Acc, A}, Acc + 1} end, 0, Args),
     LR.
 
@@ -45,14 +43,14 @@ extract_function_args(Clauses) ->
         end,  Clauses),
     zip_args(ArgsList).
 
-%% match the better human readable args, by skipping '_xxx'
+%% match the better human readable args, by skipping '_xxx' var names
 zip_args([]) -> [];
 zip_args([Args]) -> 
     Args;
 zip_args([Args1,Args2|Tail]) -> 
     %?LOG("zip_args(~p,~p)",[Args1, Args2]),
     Res = lists:zipwith(fun (Arg1,Arg2) ->
-        %compare two args, if var is '_' => take next
+        %compare two args, if var is '_' => skip it
         case Arg1 of
             {var, _, VarName} -> choose_better_arg(lsp_utils:to_string(VarName), Arg1, Arg2);
             _ -> Arg2
@@ -89,20 +87,19 @@ filter_and_map_args([{Index, Call} | RestCalls], Defs) ->
     %get corresponding argument in definition
     D = lists:nth(Index + 1, Defs),
     %?LOG("try_match:~p, ~p", [Call, D]),
-    Result = try_match_parameter(Call, D),
-    Result ++ filter_and_map_args(RestCalls, Defs).
+    try_match_parameter(Call, D) ++ filter_and_map_args(RestCalls, Defs).
 
 try_match_parameter({var, _, VarName}, {var, _, DefVarName}) when VarName =:= DefVarName ->
     % call var name and definition var name are equal, no inlay for this argument
     [];
 try_match_parameter({_, Position, _}, DefArg) ->
-   try_match_inlay(Position, DefArg);
+   new_inlay(Position, DefArg);
 try_match_parameter({call, Position, _,_}, DefArg)  ->
-   try_match_inlay(Position, DefArg);
+   new_inlay(Position, DefArg);
 try_match_parameter(_, _)  ->
     [].
 
-try_match_inlay(Position, DefArg) ->
+new_inlay(Position, DefArg) ->
     Label = case DefArg of
         {match, _, _,_} ->  "match:";
         {map, _,_} -> "map:";
