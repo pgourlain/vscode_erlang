@@ -178,11 +178,16 @@ find_at(File, Line, Column) ->
                         Column =< End -> {{reference, {field, Record, Field}}, []};
                         true -> undefined
                     end;
-                ({function, {L, Start}, Function, Arity, _}, _CurrentFile) when L =:= Line andalso Start =< Column ->
-                    case column_in_atom(Function, Start, Column) of
-                        true -> {{definition, {function, FileModule, Function, Arity}}, []};
-                        false -> undefined
-                    end;
+                ({function, _LC, Function, Arity, Clauses}, _CurrentFile) ->
+                    lists:foldl(fun
+                        ({clause, {L, Start}, _, _, _}, undefined) when L =:= Line ->
+                            case column_in_atom(Function, Start, Column) of
+                                true -> {{definition, {function, FileModule, Function, Arity}}, []};
+                                false -> undefined
+                            end;
+                        (_Clause, Acc) ->
+                            Acc
+                    end, undefined, Clauses);
                 ({tuple, _LC, [{atom, {ModL, ModC}, ModAtom}, {atom, {FuncL, FuncC}, FuncAtom} | _]}, _CurrentFile) when ModL == Line; FuncL == Line ->
                     module_function_atoms({ModL, ModC}, ModAtom, {FuncL, FuncC}, FuncAtom, Line, Column);
                 (_SyntaxTree, _CurrentFile) ->
