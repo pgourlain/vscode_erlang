@@ -1,5 +1,12 @@
 # Change log
 
+## Version 0.9.2 (May 17, 2023)
+
+* [261](https://github.com/pgourlain/vscode_erlang/issues/261) : inlayhints improvements
+  - show inlayhints inside remote calls (only module contains in current project)
+
+---
+
 ## Version 0.9.1 (May 15, 2023)
 
 * [260](https://github.com/pgourlain/vscode_erlang/issues/260) : vscode engine upgrade & improvements
