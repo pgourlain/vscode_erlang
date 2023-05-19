@@ -2,7 +2,7 @@
 
 -export([definition/3, hover_info/3, function_description/2, function_description/3, references/3]).
 -export([codelens_info/1, symbol_info/1, record_fields/2, find_function_with_line/2, fold_references/4]).
--export([inlayhints_info/3, full_inlayhints_info/2]).
+-export([inlayhints_info/3, full_inlayhints_info/2, functions/2]).
 
 -define(LOG(S),
 	begin
@@ -73,12 +73,17 @@ inlayhints_info(File, {LS, _CS}, {LE,_CE}) ->
     FilteredRes.
 
 full_inlayhints_info(File, SyntaxTree) ->
-    #{defs := Defs, calls := Calls} = fold_in_syntax_tree(fun lsp_inlayhints:inlayhint_analyze/3,
-                #{defs => [], calls => []},
-                File, SyntaxTree),
-    %?LOG("full_inlayhints_info result:~p, ~p", [Defs, Calls]),
-    NewInlays = [X || X <- lsp_inlayhints:generate_inlayhints(Calls, Defs)],
-    NewInlays.
+    % return empty if not enabled -> optimize background parsing
+    case gen_lsp_config_server:inlayHintsEnabled() of
+    false -> [];
+    _ ->
+        #{defs := Defs, calls := Calls} = fold_in_syntax_tree(fun lsp_inlayhints:inlayhint_analyze/3,
+                    #{defs => [], calls => []},
+                    File, SyntaxTree),
+        %?LOG("full_inlayhints_info result:~p, ~p", [Defs, Calls]),
+        NewInlays = [X || X <- lsp_inlayhints:generate_inlayhints(Calls, Defs)],
+        NewInlays
+    end.
 
 symbol_info(File) ->
     lists:reverse(fold_in_syntax_tree(fun
@@ -92,6 +97,16 @@ symbol_info(File) ->
         (_SyntaxTree, _CurrentFile, Acc) ->
             Acc
     end, [], File, gen_lsp_doc_server:get_syntax_tree(File))).
+
+%return list of function for specified file
+functions(File, FunName) ->
+    fold_in_syntax_tree(fun
+            ({function, {_, _}, FName, _Arity, _}=F, _CurrentFile, Acc) when FName =:= FunName ->
+                [F | Acc];
+            (_SyntaxTree, _CurrentFile, Acc) ->
+                Acc
+        end,
+        [], File, gen_lsp_doc_server:get_syntax_tree(File)).
 
 record_fields(File, Record) ->
     RecordFields = find_in_syntax_tree(fun

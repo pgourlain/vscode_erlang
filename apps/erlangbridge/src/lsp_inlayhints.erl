@@ -1,7 +1,15 @@
 -module(lsp_inlayhints).
 
-
 -export([inlayhint_analyze/3, generate_inlayhints/2]).
+
+-define(LOG(S),
+	begin
+        gen_lsp_server:lsp_log("~p", [S])
+	end).
+-define(LOG(Fmt, Args),
+	begin
+        gen_lsp_server:lsp_log(Fmt, Args)
+	end).
 
 
 inlayhint_analyze(SyntaxTree, _CurrentFile, #{defs := Defs, calls := Calls} = Dict) ->
@@ -23,9 +31,49 @@ inlayhint_analyze(SyntaxTree, _CurrentFile, #{defs := Defs, calls := Calls} = Di
                 args => index_args(Args)
             },
             maps:put(calls, Calls ++ [F], Dict);
-        _ ->
+       % {remote,{32,15},{atom,{32,5},sample_lib},{atom,{32,16},fn_utils1}}
+       %{call,{32,5},{remote,{32,15},{atom,{32,5},sample_lib}, {atom,{32,16},fn_utils1}},[{var,{32,26},'X'}]}
+       {call, _LocationCall, {remote, _, {atom, _,ModuleName}, {atom, _, FName}}, Args} ->
+            %to avoid collision with local function name, add module as prefix 
+            FuncName = lists:flatten(io_lib:format("~s.~s", [ModuleName, FName])),
+            case get_remote_function_content(ModuleName, FName) of
+                {true, RemoteFuns} ->
+                    F = #{
+                        func_name => FuncName,
+                        args => index_args(Args)
+                    },
+                    NewDict = maps:put(calls, Calls ++ [F], Dict),
+                    FDefs = [#{
+                        func_name => FuncName,
+                        arity => Arity,
+                        args => extract_function_args(Content)
+                    } || {Arity, Content} <- RemoteFuns],
+                    %?LOG("remote_functions:~p <==> ~p",[F, FDefs]),
+                    maps:put(defs, Defs ++ FDefs, NewDict);
+                    
+            _ -> Dict
+            end;
+        _Other ->
             Dict
     end.
+
+get_remote_function_content(ModuleName, FName) ->
+    SModuleName = lsp_utils:to_string(ModuleName),
+    FilteredModules = lists:filter(fun (X) -> X =:= SModuleName end, 
+    gen_lsp_doc_server:project_modules()),
+    case FilteredModules of
+        [] -> undefined;
+        [_FindModule] ->
+            case gen_lsp_doc_server:get_module_file(ModuleName) of
+            undefined -> undefined;
+            SourceFile ->
+                %check is file under workspace
+                Functions = lsp_navigation:functions(SourceFile, FName),
+                {true, [{Arity, Content} || 
+                    {function, _, _FName, Arity, Content} <- Functions]}
+            end;
+        _ -> undefined
+    end.    
 
 index_args(Args) ->
     %%add index for each arg, will use later to match with definition
@@ -101,10 +149,10 @@ try_match_parameter(_, _)  ->
 
 new_inlay(Position, DefArg) ->
     Label = case DefArg of
-        {match, _, _,_} ->  "match:";
-        {map, _,_} -> "map:";
-        {cons, _,_,_} -> "cons:";
-        {var, _, DefVarName} -> lsp_utils:to_string(DefVarName) ++ ":";
+        {match, _, _,_} ->  "match: ";
+        {map, _,_} -> "map: ";
+        {cons, _,_,_} -> "cons: ";
+        {var, _, DefVarName} -> lsp_utils:to_string(DefVarName) ++ ": ";
         _ -> false
     end,
     if
