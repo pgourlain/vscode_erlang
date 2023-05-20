@@ -193,11 +193,16 @@ find_at(File, Line, Column) ->
                         Column =< End -> {{reference, {field, Record, Field}}, []};
                         true -> undefined
                     end;
-                ({function, {L, Start}, Function, Arity, _}, _CurrentFile) when L =:= Line andalso Start =< Column ->
-                    case column_in_atom(Function, Start, Column) of
-                        true -> {{definition, {function, FileModule, Function, Arity}}, []};
-                        false -> undefined
-                    end;
+                ({function, _LC, Function, Arity, Clauses}, _CurrentFile) ->
+                    lists:foldl(fun
+                        ({clause, {L, Start}, _, _, _}, undefined) when L =:= Line ->
+                            case column_in_atom(Function, Start, Column) of
+                                true -> {{definition, {function, FileModule, Function, Arity}}, []};
+                                false -> undefined
+                            end;
+                        (_Clause, Acc) ->
+                            Acc
+                    end, undefined, Clauses);
                 ({tuple, _LC, [{atom, {ModL, ModC}, ModAtom}, {atom, {FuncL, FuncC}, FuncAtom} | _]}, _CurrentFile) when ModL == Line; FuncL == Line ->
                     module_function_atoms({ModL, ModC}, ModAtom, {FuncL, FuncC}, FuncAtom, Line, Column);
                 (_SyntaxTree, _CurrentFile) ->
@@ -386,14 +391,21 @@ find_libdir(IncludeFileName) ->
     end.
 
 local_function_references(File, Function, Arity) ->
-    FunctionLength = length(atom_to_list(Function)),
-    fold_in_syntax_tree(fun
-        ({call, {L, C}, {atom, _, FunctionName}, Args}, CurrentFile, Acc)
-                when CurrentFile =:= File, Function =:= FunctionName, length(Args) == Arity ->
-            [{File, L, C, C + FunctionLength} | Acc];
-        (_SyntaxTree, _CurrentFile, Acc) ->
-            Acc
-    end, [], File, gen_lsp_doc_server:get_syntax_tree(File)).
+    FileModule = list_to_atom(filename:rootname(filename:basename(File))),
+    Definition = find_definition(File, {{reference, {function, FileModule, Function, Arity}}, []}),
+    case Definition of
+        undefined ->
+            []; % Probably BIF
+        _ ->
+            FunctionLength = length(atom_to_list(Function)),
+            fold_in_syntax_tree(fun
+                ({call, {L, C}, {atom, _, FunctionName}, Args}, CurrentFile, Acc)
+                        when CurrentFile =:= File, Function =:= FunctionName, length(Args) == Arity ->
+                    [{File, L, C, C + FunctionLength} | Acc];
+                (_SyntaxTree, _CurrentFile, Acc) ->
+                    Acc
+            end, [], File, gen_lsp_doc_server:get_syntax_tree(File))
+    end.
 
 find_definition(_File, {{_, {module, Module}}, _Details}) ->
     case gen_lsp_doc_server:get_module_file(Module) of

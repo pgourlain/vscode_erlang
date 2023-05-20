@@ -131,8 +131,8 @@ call_handler(Socket, Name, ArgsMap) ->
             safeApply(Function, Socket, ArgsMap)
     end.
 
-handler_name(<<"$/cancelRequest">>) ->
-    cancelRequest;
+handler_name(<<"$/", Name/binary>>) ->
+    list_to_atom(binary_to_list(Name));
 handler_name(Name) ->
     list_to_atom(binary_to_list(binary:replace(Name, <<"/">>, <<"_">>))).
 
