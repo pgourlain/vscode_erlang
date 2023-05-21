@@ -1,11 +1,15 @@
 # Change log
 
-## Version 0.9.3 (May 20, 2023)
+## Version 0.9.3 (May 21, 2023)
 
 * [262](https://github.com/pgourlain/vscode_erlang/issues/262) : Navigation fixes
   - References work not only from the first function clause
   - Better not to show BIF references at all than show them in single file only
 
+Thanks to
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+
+---
 
 ## Version 0.9.2 (May 17, 2023)
 
@@ -32,6 +36,9 @@
   - Code Lens show references in the project not only local
   - Some fixes in completion of record field names
   - Outline shows functions as functions not constructors
+
+Thanks to
+* [Wojtek Surowka](https://github.com/wojteksurowka)
 
 ---
 
