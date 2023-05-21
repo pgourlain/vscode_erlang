@@ -8,6 +8,15 @@
     textDocument_inlayHints/2]).
 -export([textDocument_inlineValues/2]).
 
+-define(LOG(S),
+	begin
+        gen_lsp_server:lsp_log("~p", [S])
+	end).
+-define(LOG(Fmt, Args),
+	begin
+        gen_lsp_server:lsp_log(Fmt, Args)
+	end).
+
 initialize(_Socket, Params) ->
     % usefull when file is open instead of folder
     RootPath = case maps:get(rootPath, Params) of
@@ -162,6 +171,7 @@ textDocument_completion(_Socket, Params) ->
     Contents = gen_lsp_doc_server:get_document_contents(File),
     LineText = lists:nth(Line + 1, binary:split(Contents, <<"\n">>, [global])),
     TextBefore = binary:part(LineText, 0, min(Character + 1, byte_size(LineText))),
+    ?LOG("textDocument_completion(L:~p,C:~p,T:~p,TB:~p)",[Line, Character, LineText, TextBefore]),
     auto_complete(File, Line + 1, TextBefore).
 
 textDocument_formatting(_Socket, Params) ->
