@@ -24,6 +24,11 @@ definition(File, Line, Column) ->
     find_definition(File, find_at(File, Line, Column)).
 
 hover_info(File, Line, Column) ->
+%%% can return a MarkupContent
+%%% #{
+%%%     kind => <<"markdown">>,
+%%%     value => <<"hover as markdown">>
+%%%  }
     case find_at(File, Line, Column) of
         {{reference, {function, Module, Function, Arity}}, _Details} ->
             function_description(Module, Function, Arity);

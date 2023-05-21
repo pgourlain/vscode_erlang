@@ -5,8 +5,7 @@
     textDocument_didOpen/2, textDocument_didClose/2, textDocument_didSave/2, textDocument_didChange/2,
     textDocument_definition/2, textDocument_references/2, textDocument_hover/2, textDocument_completion/2,
     textDocument_formatting/2, textDocument_codeLens/2, textDocument_documentSymbol/2,
-    textDocument_inlayHints/2]).
--export([textDocument_inlineValues/2]).
+    textDocument_inlayHints/2, textDocument_signatureHelp/2]).
 
 -define(LOG(S),
 	begin
@@ -35,9 +34,9 @@ initialize(_Socket, Params) ->
         codeLensProvider => true,
         documentSymbolProvider => true,
         inlayHintProvider => true,
-        %signatureHelpProvider => #{triggerCharacters => <<"(">>}
-        inlineValueProvider => true
-        %declarationProvider => true    
+        inlineValueProvider => true,  
+        signatureHelpProvider => #{triggerCharacters => <<"(">>}
+        %declarationProvider => true
     }}.
 
 initialized(Socket, _Params) ->
@@ -171,7 +170,6 @@ textDocument_completion(_Socket, Params) ->
     Contents = gen_lsp_doc_server:get_document_contents(File),
     LineText = lists:nth(Line + 1, binary:split(Contents, <<"\n">>, [global])),
     TextBefore = binary:part(LineText, 0, min(Character + 1, byte_size(LineText))),
-    ?LOG("textDocument_completion(L:~p,C:~p,T:~p,TB:~p)",[Line, Character, LineText, TextBefore]),
     auto_complete(File, Line + 1, TextBefore).
 
 textDocument_formatting(_Socket, Params) ->
@@ -274,6 +272,26 @@ textDocument_inlineValues(_Socket, Params) ->
         end, 
         lsp_navigation:inlinevalues_info(lsp_utils:file_uri_to_file(Uri), {LE,CE}))
     .
+textDocument_signatureHelp(_Socket, Params) ->
+    ?LOG("textDocument_signature",[Params]),
+    Uri = mapmapget(textDocument, uri, Params),
+    Line = mapmapget(position, line, Params),
+    Character = mapmapget(position, character, Params),
+    #{
+        signatures =>[
+            #{
+                label => <<"coming soon 1">>
+                },
+            #{
+                label => <<"coming soon 2">>,
+                documentation => #{
+                    kind => <<"markdown">>,
+                    value => <<"# Header \n Some text \n ```typescript\nsomecode();\n```">>
+                }
+            }
+                
+        ]
+    }.
 
 validate_file(Socket, File) ->
     case gen_lsp_config_server:linting() of
