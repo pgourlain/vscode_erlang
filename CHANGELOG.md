@@ -1,9 +1,16 @@
 # Change log
 
+## Version 0.9.3 (May 20, 2023)
+
+* [262](https://github.com/pgourlain/vscode_erlang/issues/262) : Navigation fixes
+  - References work not only from the first function clause
+  - Better not to show BIF references at all than show them in single file only
+
+
 ## Version 0.9.2 (May 17, 2023)
 
 * [261](https://github.com/pgourlain/vscode_erlang/issues/261) : inlayhints improvements
-  - show inlayhints inside remote calls (only module contains in current project)
+  - show inlayhints inside remote calls (only form project modules)
 
 ---
 
