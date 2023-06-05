@@ -1,5 +1,14 @@
 # Change log
 
+## Version 0.9.X (XXXX, 2023)
+
+* [264](https://github.com/pgourlain/vscode_erlang/issues/264) : Fix Go to definition at record name and field
+
+Thanks to
+* [Kornel Horvath](https://github.com/KornelH)
+
+---
+
 ## Version 0.9.3 (May 21, 2023)
 
 * [262](https://github.com/pgourlain/vscode_erlang/issues/262) : Navigation fixes
