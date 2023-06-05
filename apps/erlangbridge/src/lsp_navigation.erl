@@ -438,14 +438,14 @@ find_definition(File, {{gen_msg, GenMsg}, _Details}) ->
 find_definition(File, {{_, {record, Record}}, _Details}) ->
     find_in_syntax_tree(fun
         ({attribute, {L, Start}, record, {FoundRecord, _}}, CurrentFile) when Record =:= FoundRecord ->
-            {CurrentFile, L, Start, Start};
+            {lsp_utils:to_string(CurrentFile), L, Start, Start};
         (_SyntaxTree, _CurrentFile) ->
             undefined
     end, File);
 find_definition(File, {{_, {field, Record, Field}}, _Details}) ->
     find_in_syntax_tree(fun
         ({attribute, _, record, {FoundRecord, Fields}}, CurrentFile) when Record =:= FoundRecord ->
-            find_field_definition(Field, Fields, CurrentFile);
+            find_field_definition(Field, Fields, lsp_utils:to_string(CurrentFile));
         (_SyntaxTree, _CurrentFile) ->
             undefined
     end, File);
