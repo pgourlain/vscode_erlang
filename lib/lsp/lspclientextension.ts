@@ -245,7 +245,6 @@ export function activate(context: ExtensionContext) {
 		return new Promise<StreamInfo>(async (resolve, reject) => {
 			await compileErlangBridge(context.extensionPath);
 			let erlangLsp = new ErlangShellLSP(ErlangOutputAdapter(lspOutputChannel));
-			erlangLsp.erlangPath = erlangCfg.erlangPath;
 
 			getPort(async function (port) {
 				erlangLsp.Start("", erlangBridgePath, port, "src", "");

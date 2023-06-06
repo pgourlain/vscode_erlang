@@ -6,10 +6,24 @@ export class ErlangShellLSP extends GenericShell {
         super(whichOutput, null, getElangConfigConfiguration());
     }
     public Start(erlPath:string, startDir: string, listen_port: number, bridgePath: string, args: string): Promise<boolean> {
-        //var debugStartArgs = ["-pa", `"${bridgePath}"`, "-pa", "ebin", "-s", "int",
-        var debugStartArgs = ["-noshell", "-pa", "src", "-pa", "ebin", "-s", "int",
+        var debugStartArgs = [];
+        // Start as distributed node to be able to connect to the Erlang VM for investigation
+        if (this.erlangDistributedNode) {
+            debugStartArgs.push(
+                "-sname", "vscode_" + listen_port.toString(),
+                "-setcookie", "vscode_" + listen_port.toString());
+        }
+        // Use special command line arguments
+        if (this.erlangArgs) {
+            debugStartArgs = debugStartArgs.concat(this.erlangArgs)
+        }
+        debugStartArgs.push(
+            "-noshell",
+            "-pa", "src",
+            "-pa", "ebin",
+            "-s", "int",
             "-vscode_port", listen_port.toString(),
-            "-s", "vscode_lsp_entry", "start", listen_port.toString()];
+            "-s", "vscode_lsp_entry", "start", listen_port.toString());
         var processArgs = debugStartArgs.concat([args]);
 
         var result = this.LaunchProcess("erl", startDir, processArgs);

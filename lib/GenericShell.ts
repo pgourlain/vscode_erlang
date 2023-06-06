@@ -37,6 +37,8 @@ export class GenericShell extends EventEmitter {
     protected buffer: string = "";
     protected errbuf: string = "";
     public erlangPath: string = null;
+	public erlangArgs : string[] = [];
+	public erlangDistributedNode: boolean = false;
 
     //provide IGenericShellConfiguration, in order to avoid dependencies on vscode module (it doesn't works with debugger-adpater)
     constructor(logOutput?: ILogOutput, shellOutput?: IShellOutput, erlangConfiguration?: ErlangSettings) {
@@ -44,8 +46,8 @@ export class GenericShell extends EventEmitter {
         this.logOutput = logOutput;
         this.shellOutput = shellOutput;
 
-        // Find Erlang 'bin' directory
         if (erlangConfiguration) {
+            // Find Erlang 'bin' directory
             let erlangPath = erlangConfiguration.erlangPath;
             if (erlangPath) {
                 if (erlangPath.match(/^[A-Za-z]:/)) {
@@ -63,6 +65,8 @@ export class GenericShell extends EventEmitter {
                     }
                 }
             }
+            this.erlangArgs = erlangConfiguration.erlangArgs;
+            this.erlangDistributedNode = erlangConfiguration.erlangDistributedNode;
         }
     }
 

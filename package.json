@@ -165,6 +165,21 @@
 					"default": "",
 					"description": "Directory where erl/escript are located. Leave empty to use default."
 				},
+				"erlang.erlangArgs": {
+					"type": "array",
+					"items": {
+						"type": "string",
+						"title": "argument",
+						"default": ""
+					},
+					"default": [],
+					"description": "Arguments passed to Erlang backend. Leave empty unless you really have to tweak the Erlang VM."
+				},
+				"erlang.erlangDistributedNode": {
+					"type": "boolean",
+					"description": "Start the Erlang backend in a distributed Erlang node. Could be usefull for extension development. Note, it starts EPMD if not running yet.",
+					"default": false
+				},
 				"erlang.rebarPath": {
 					"type": "string",
 					"default": "",
