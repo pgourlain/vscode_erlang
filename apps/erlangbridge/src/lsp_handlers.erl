@@ -124,15 +124,11 @@ textDocument_definition(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),
     Line = mapmapget(position, line, Params),
     Character = mapmapget(position, character, Params),
-    case lsp_navigation:definition(lsp_utils:file_uri_to_file(Uri), Line + 1, Character + 1) of
-        {File, L, S, E} ->
-            #{
-                uri => lsp_utils:file_uri_to_vscode_uri(lsp_utils:file_to_file_uri(File)),
-                range => lsp_utils:client_range(L, S, E)
-            };
-        undefined ->
-            []
-    end.
+    Locations = lsp_navigation:definition(lsp_utils:file_uri_to_file(Uri), Line + 1, Character + 1),
+    [#{uri => lsp_utils:file_uri_to_vscode_uri(lsp_utils:file_to_file_uri(File)),
+       range => lsp_utils:client_range(L, S, E)
+     }
+     || {File, L, S, E}<-Locations].
 
 textDocument_references(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),
