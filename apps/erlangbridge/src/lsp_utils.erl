@@ -44,10 +44,14 @@ file_uri_to_vscode_uri(Uri) ->
       _ -> EncodeUri
     end.
 
+file_to_file_uri(<<"//", BinFile/binary>>) ->
+    <<"file://", BinFile/binary>>;
 file_to_file_uri("//" ++ File) ->
     BinFile = list_to_binary(File),
     <<"file://", BinFile/binary>>;
-file_to_file_uri(File) ->
+file_to_file_uri(BinFile) when is_binary(BinFile) ->
+    <<"file://", BinFile/binary>>;
+file_to_file_uri(File) when is_list(File) ->
     BinFile = list_to_binary(File),
     <<"file://", BinFile/binary>>.
 
