@@ -6,12 +6,16 @@
 -export([document_opened/2, document_changed/2, document_closed/1, opened_documents/0, get_document_contents/1, parse_document/1]).
 -export([project_file_added/1, project_file_changed/1, project_file_deleted/1]).
 -export([get_syntax_tree/1, get_dodged_syntax_tree/1, get_references/1, get_inlayhints/1]).
--export([root_available/0, project_modules/0, get_module_file/1, get_build_dir/0, find_source_file/1]).
+-export([root_available/0, config_change/0, project_modules/0, get_module_file/1, get_build_dir/0, find_source_file/1]).
 -export([init/1,handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 -define(SERVER, ?MODULE).
 
--record(state, {project_modules, files_to_parse}).
+-record(state,
+        {root_available = false :: boolean(),
+         project_modules = #{} :: #{atom() => [file:filename()]},
+         files_to_parse = [] :: [file:filename()]
+        }).
 
 document_opened(File, Contents) ->
     ets:insert(document_contents, {File, Contents}).
@@ -85,6 +89,9 @@ get_inlayhints(File) ->
 root_available() ->
     gen_server:cast(?SERVER, root_available).
 
+config_change() ->
+    gen_server:cast(?SERVER, config_change).
+
 project_modules() ->
     gen_server:call(?SERVER, project_modules).
 
@@ -130,14 +137,14 @@ start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [],[]).
 
 init(_Args) ->
-    {ok, #state{project_modules = #{}, files_to_parse = []}}.
+    {ok, #state{root_available = false, project_modules = #{}, files_to_parse = []}}.
 
 handle_call(project_modules, _From, State) ->
     {reply, maps:keys(State#state.project_modules), State};
 
 handle_call({get_module_file, Module},_From, State) ->
     %% Get search.exclude setting of Visual Studio Code
-    SearchExcludeConf = gen_lsp_config_server:search_exclude(),
+    SearchExcludeConf = gen_lsp_config_server:search_files_exclude(),
     SearchExclude = lsp_utils:search_exclude_globs_to_regexps(SearchExcludeConf),
     %% Select a non-excluded file
     Files = maps:get(atom_to_list(Module), State#state.project_modules, []),
@@ -164,17 +171,12 @@ handle_cast(stop, State) ->
     {stop, normal, State};
 
 handle_cast(root_available, State) ->
-    BuildDir = get_build_dir(),
-    FullBuildDir = filename:join(gen_lsp_config_server:root(), BuildDir),
-    Fun = fun(File, {ProjectModules, FilesToParse}) ->
-        UpdatedFilesToParse = case string:prefix(File, FullBuildDir) of
-            nomatch -> [File | FilesToParse];
-            _ -> FilesToParse
-        end,
-        {do_add_project_file(File, ProjectModules, BuildDir), UpdatedFilesToParse}
-    end,
-    {ProjectModules, FilesToParse} = filelib:fold_files(gen_lsp_config_server:root(), ".erl$", true, Fun, {#{}, []}),
-    {noreply, parse_next_file_in_background(State#state{project_modules = ProjectModules, files_to_parse = FilesToParse})};
+    {noreply, State#state{root_available = true}};
+
+handle_cast(config_change, State = #state{root_available = true}) ->
+    {noreply, scan_project_files(State)};
+handle_cast(config_change, State) ->
+    {noreply, State};
 
 handle_cast({project_file_added, File}, State) ->
     UpdatedProjectModules = do_add_project_file(File, State#state.project_modules, get_build_dir()),
@@ -192,18 +194,7 @@ handle_cast({project_file_changed, File}, State) ->
     end;
 
 handle_cast({project_file_deleted, File}, State) ->
-    ets:delete(document_contents, File),
-    ets:delete(syntax_tree, File),
-    ets:delete(dodged_syntax_tree, File),
-    ets:delete(references, File),
-    ets:delete(document_inlayhints, File),
-    Module = filename:rootname(filename:basename(File)),
-    UpdatedFiles = lists:delete(File, maps:get(Module, State#state.project_modules, [])),
-    UpdatedProjectModules = case UpdatedFiles of
-        [] -> maps:remove(Module, State#state.project_modules);
-        _ -> (State#state.project_modules)#{Module => UpdatedFiles}
-    end,
-    {noreply, State#state{project_modules = UpdatedProjectModules}}.
+    {noreply, delete_project_files([File], State)}.
 
 handle_info({worker_result, File, _Result}, State) ->
     gen_lsp_server:lsp_log("Parsed in background: ~s~n", [File]),
@@ -228,10 +219,120 @@ do_add_project_file(File, ProjectModules, BuildDir) ->
 concat_project_files(File, OldFiles, undefined) ->
     [File | OldFiles];
 concat_project_files(File, OldFiles, BuildDir) ->
-    case lists:member(BuildDir, filename:split(File)) of
+    case is_file_in_rebar_build_dir(File, BuildDir) of
         true  -> OldFiles ++ [File];
         false -> [File | OldFiles]
     end.
+
+%% @doc Check if a file is located under rebar3 build directory.
+-spec is_file_in_rebar_build_dir(File :: file:filename(),
+                                 BuildDir :: file:filename())
+                                -> boolean().
+is_file_in_rebar_build_dir(File, BuildDir) ->
+    lists:member(BuildDir, filename:split(File)).
+
+%%--------------------------------------------------------------------
+%% @doc Filter source files of a module that shall be parsed.
+%%
+%% Multiple source files could have been found for a module. For example after
+%% `rebar3 compile' the original source files are sym-linked from the build
+%% directory (`_build'). In this case ignore the linked file but parse the
+%% originals only.
+%% @end
+%%--------------------------------------------------------------------
+-spec module_files_to_parse(Files :: [file:filename()],
+                            BuildDir :: file:filename())
+                        -> FilesToParse :: [file:filename()].
+module_files_to_parse([], _BuildDir) ->
+    [];
+module_files_to_parse(Files, BuildDir) ->
+    IsRebarBuildFileFun =
+        fun(File) -> is_file_in_rebar_build_dir(File, BuildDir) end,
+    case lists:partition(IsRebarBuildFileFun, Files) of
+        {[], _NonBuildFiles} ->
+            %% All files are from this repo, parse them all
+            Files;
+        {_BuildFiles, []} ->
+            %% All files are from dependencies.
+            %% In case of multiple files are found for a module and all of them
+            %% are in the build directory (_build) then most probably those are
+            %% the same but located under different rebar3 relase targets.
+            %% Which one to choose? :S
+            %% Choose the first, if all are the same. (But are they?)
+            [hd(lists:sort(Files))]; % sort just to choose the 1st consistently
+        {_, NonBuildFiles} ->
+            %% Files are under both '_build' and repo. The files under
+            %% '_build' are sym-linked by rebar3, ignore these.
+            %% Parse the orignal ones only.
+            NonBuildFiles
+    end.
+
+%% @doc Scan workspace for project source files including dependencies too.
+-spec scan_project_files(#state{}) -> #state{}.
+scan_project_files(State = #state{project_modules = OldProjectModules}) ->
+    BuildDir = get_build_dir(), % relative to workspace root or 'undefined'
+    SearchExcludeConf = gen_lsp_config_server:search_files_exclude(),
+    SearchExclude = lsp_utils:search_exclude_globs_to_regexps(SearchExcludeConf),
+    %% Find all source (*.erl) files not exluded by any filter
+    CollectProjSrcFilesFun =
+        fun(File, AccProjectModules = #{}) ->
+            case lsp_utils:is_path_excluded(File, SearchExclude) of
+                true  -> AccProjectModules;
+                false -> do_add_project_file(File, AccProjectModules, BuildDir)
+            end
+        end,
+    AllProjectModules = filelib:fold_files(gen_lsp_config_server:root(), ".erl$",
+                                           true, CollectProjSrcFilesFun, #{}),
+    gen_lsp_server:lsp_log(
+        "~p: Project modules (~p) with all source files:~n  ~p~n",
+        [?MODULE, maps:size(AllProjectModules), AllProjectModules]),
+    %% Filter out source files sym-linked to the original ones by rebar3
+    %% from '_build' directory
+    ProjectModules =
+        maps:map(
+            fun(_Module, Files) -> module_files_to_parse(Files, BuildDir) end,
+            AllProjectModules),
+    gen_lsp_server:lsp_log(
+        "~p: Project modules (~p) without rebar3 duplicated source files:~n  ~p~n",
+        [?MODULE, maps:size(ProjectModules), ProjectModules]),
+    %% Get the complete list of source files (already scanned and newly found)
+    OldProjFiles = lists:usort(lists:append(maps:values(OldProjectModules))),
+    ProjFiles = lists:usort(lists:append(maps:values(ProjectModules))),
+    %% Drop unwanted files, e.g. newly excluded by a filter change
+    FilesToDrop = OldProjFiles -- ProjFiles,
+    gen_lsp_server:lsp_log(
+        "~p: Files to drop: (~p)~n  ~p~n",
+        [?MODULE, length(FilesToDrop), lists:sort(FilesToDrop)]),
+    State2 = delete_project_files(FilesToDrop, State),
+    %% Get files not parsed yet
+    FilesToParse = ProjFiles -- OldProjFiles,
+    gen_lsp_server:lsp_log(
+        "~p: Files to parse: (~p)~n  ~p~n",
+        [?MODULE, length(FilesToParse), lists:sort(FilesToParse)]),
+
+    %% Load the 1st source file (and continue later one-by-one ...)
+    NewState = State2#state{project_modules = ProjectModules,
+                            files_to_parse = FilesToParse},
+    parse_next_file_in_background(NewState).
+
+%% @doc Remove files from the navigation database.
+-spec delete_project_files(file:filename(), #state{}) -> #state{}.
+delete_project_files([], State) ->
+    State;
+delete_project_files([File | Files], State) ->
+    ets:delete(document_contents, File),
+    ets:delete(syntax_tree, File),
+    ets:delete(dodged_syntax_tree, File),
+    ets:delete(references, File),
+    ets:delete(document_inlayhints, File),
+    Module = filename:rootname(filename:basename(File)),
+    UpdatedFiles = lists:delete(File, maps:get(Module, State#state.project_modules, [])),
+    UpdatedProjectModules = case UpdatedFiles of
+        [] -> maps:remove(Module, State#state.project_modules);
+        _ -> (State#state.project_modules)#{Module => UpdatedFiles}
+    end,
+    NewState = State#state{project_modules = UpdatedProjectModules},
+    delete_project_files(Files, NewState).
 
 safe_new_table(Name, Type) ->
     case ets:whereis(Name) of

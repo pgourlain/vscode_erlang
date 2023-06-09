@@ -126,6 +126,7 @@ testnavigation(Config) ->
     gen_lsp_config_server:update_config(root, AppDir),
     % add all documents from root dir into documents server
     gen_lsp_doc_server:root_available(),
+    gen_lsp_doc_server:config_change(),
     dotestfiles(AppDir, navigation_datatests()),
     ok.
 

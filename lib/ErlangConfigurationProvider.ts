@@ -26,6 +26,8 @@ export function configurationChanged() : void {
     let erlangConf = workspace.getConfiguration("erlang");
     let settings : ErlangSettings = {
         erlangPath: erlangConf.get<string>("erlangPath", null),
+        erlangArgs: erlangConf.get("erlangArgs", []),
+        erlangDistributedNode: erlangConf.get("erlangDistributedNode", false),
         rebarPath: erlangConf.get<string>("rebarPath", null),
         codeLensEnabled: erlangConf.get<boolean>('codeLensEnabled', false),
         inlayHintsEnabled: erlangConf.get<boolean>('inlayHintsEnabled', false),

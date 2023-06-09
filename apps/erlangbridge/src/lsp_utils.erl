@@ -158,10 +158,15 @@ glob_wo_alternatives_to_regexp("*" ++ Chars) ->
     ["[^/]*" | glob_wo_alternatives_to_regexp(Chars)];
 glob_wo_alternatives_to_regexp("?" ++ Chars) ->
     ["[^/]" | glob_wo_alternatives_to_regexp(Chars)];
+%% Escape plain glob characters that have special meaning in regular expression
+glob_wo_alternatives_to_regexp("." ++ Chars) ->
+    ["\\." | glob_wo_alternatives_to_regexp(Chars)];
+%% Ordinary character
 glob_wo_alternatives_to_regexp([Char | Chars]) ->
     [Char | glob_wo_alternatives_to_regexp(Chars)].
 
-%% Translate glob alternations to regular expression alternations
+%% Translate glob alternations to regular expression alternations.
+%% `{Item1,...}' -> `(Item1|...)'
 -spec glob_alternations_to_regexp(Glob :: string()) -> RegExp :: string().
 glob_alternations_to_regexp(Glob) ->
     RE = "^(.*)\\{([^{}]+,[^{}]+)\\}(.*)$",

@@ -5,9 +5,9 @@
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([standard_modules/0, bifs/0]).
--export([update_config/2, root/0, tmpdir/0, codeLensEnabled/0, includePaths/0, linting/0, 
-        verbose/0, autosave/0, proxy/0, search_exclude/0, formatting_line_length/0,
-        inlayHintsEnabled/0]).
+-export([update_config/2, root/0, tmpdir/0, codeLensEnabled/0, includePaths/0, linting/0,
+        verbose/0, autosave/0, proxy/0, search_files_exclude/0, search_exclude/0,
+        formatting_line_length/0, inlayHintsEnabled/0]).
 
 -define(SERVER, ?MODULE).
 
@@ -59,8 +59,40 @@ proxy() ->
 tmpdir() ->
     get_config_entry(computed, tmpdir, "").
 
+%%--------------------------------------------------------------------
+%% @doc Exclude filters for search in workspace.
+%%
+%% It is a combination of Visual Studio Code settings `files.exclude' and
+%% `search.exclude' as Visual Studio Code GUI does merge these for searching
+%% but extensions get the pure settings and we have to merge them explicitly.
+%% @end
+%%--------------------------------------------------------------------
 search_exclude() ->
-    get_config_entry(search, exclude, #{}).
+    %% From https://code.visualstudio.com/docs/getstarted/settings
+    %% files.exclude:
+    %%   Configure glob patterns for excluding files and folders. For example,
+    %%   the File Explorer decides which files and folders to show or hide based
+    %%   on this setting. Refer to the `search.exclude` setting to define
+    %%   search-specific excludes.
+    %% search.exclude:
+    %%   Configure glob patterns for excluding files and folders in fulltext
+    %%   searches and quick open. Inherits all glob patterns from the
+    %%   `files.exclude` setting.
+    maps:merge(get_config_entry(files, exclude, #{}),
+               get_config_entry(search, exclude, #{})).
+
+%%--------------------------------------------------------------------
+%% @doc Exclude filters for searching project files.
+%%
+%% It is a combination of Visual Studio Code settings `files.exclude',
+%% `files.watcherExclude' and `search.exclude'.
+%% @end
+%%--------------------------------------------------------------------
+search_files_exclude() ->
+    %% From https://code.visualstudio.com/docs/getstarted/settings
+    %% files.watcherExclude:
+    %%   Configure paths or glob patterns to exclude from file watching.
+    maps:merge(get_config_entry(files, watcherExclude, #{}), search_exclude()).
 
 formatting_line_length() ->
     get_config_entry(erlang, formattingLineLength, 100).

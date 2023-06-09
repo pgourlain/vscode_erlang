@@ -1,5 +1,7 @@
 export interface ErlangSettings {
 	erlangPath : string;
+	erlangArgs : string[];
+	erlangDistributedNode: boolean;
 	rebarPath : string;
 	rebarBuildArgs : string[];
 	includePaths : string[];
