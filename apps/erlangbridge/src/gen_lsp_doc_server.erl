@@ -6,7 +6,7 @@
 -export([document_opened/2, document_changed/2, document_closed/1, opened_documents/0, get_document_contents/1, parse_document/1]).
 -export([project_file_added/1, project_file_changed/1, project_file_deleted/1]).
 -export([get_syntax_tree/1, get_dodged_syntax_tree/1, get_references/1, get_inlayhints/1]).
--export([root_available/0, config_change/0, project_modules/0, get_module_file/1, get_build_dir/0, find_source_file/1]).
+-export([root_available/0, config_change/0, project_modules/0, get_module_file/1, get_module_files/1, get_build_dir/0, find_source_file/1]).
 -export([init/1,handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 -define(SERVER, ?MODULE).
@@ -98,6 +98,9 @@ project_modules() ->
 get_module_file(Module) ->
     gen_server:call(?SERVER, {get_module_file, Module}).
 
+get_module_files(Module) ->
+    gen_server:call(?SERVER, {get_module_files, Module}).
+
 get_build_dir() ->
     ConfigFilename = filename:join([gen_lsp_config_server:root(), "rebar.config"]),
     case filelib:is_file(ConfigFilename) of
@@ -143,26 +146,13 @@ handle_call(project_modules, _From, State) ->
     {reply, maps:keys(State#state.project_modules), State};
 
 handle_call({get_module_file, Module},_From, State) ->
-    %% Get search.exclude setting of Visual Studio Code
-    SearchExcludeConf = gen_lsp_config_server:search_files_exclude(),
-    SearchExclude = lsp_utils:search_exclude_globs_to_regexps(SearchExcludeConf),
-    %% Select a non-excluded file
-    Files = maps:get(atom_to_list(Module), State#state.project_modules, []),
-    File = case [F || F <- Files, not lsp_utils:is_path_excluded(F, SearchExclude)] of
-        [] ->
-            case find_module_source_in_dir(Module, code:lib_dir()) of
-                undefined ->
-                    BuildDir = filename:join(gen_lsp_config_server:root(), gen_lsp_doc_server:get_build_dir()),
-                    find_module_source_in_dir(Module, BuildDir);
-                Result ->
-                    Result
-            end;
-        [OneFile] ->
-            OneFile;
-        [AFile | _] ->
-            AFile
-    end,
-    {reply, File, State};
+    case find_module_files(Module, State) of
+        [AFile | _] -> {reply, AFile, State};
+        []          -> {reply, undefined, State}
+    end;
+
+handle_call({get_module_files, Module}, _From, State) ->
+    {reply, find_module_files(Module, State), State};
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
@@ -373,9 +363,24 @@ parse_next_file_in_background(#state{files_to_parse = [File | Rest]} = State) ->
     worker:start(fun () -> parse_and_store(File, File) end, File),
     State#state{files_to_parse = Rest}.
 
-find_module_source_in_dir(Module, Dir) ->
-    case filelib:wildcard(Dir ++ "/**/" ++ atom_to_list(Module) ++ ".erl") of
-        [] -> undefined;
-        [OneFile]   -> OneFile;
-        [AFile | _] -> AFile
+%% @doc Find source files of a module
+-spec find_module_files(module(), #state{}) -> [file:filename()].
+find_module_files(Module, State) ->
+    case maps:get(atom_to_list(Module), State#state.project_modules, []) of
+        [_|_] = Files ->
+            Files;
+        [] ->
+            case find_module_files_under_dir(Module, code:lib_dir()) of
+                [] ->
+                    BuildDir = filename:join(gen_lsp_config_server:root(),
+                                             gen_lsp_doc_server:get_build_dir()),
+                    find_module_files_under_dir(Module, BuildDir);
+                [_|_] = LibFiles ->
+                    LibFiles
+            end
     end.
+
+%% @doc Find source files of a module under a certain path
+-spec find_module_files_under_dir(module(), file:filename()) -> [file:filename()].
+find_module_files_under_dir(Module, Dir) ->
+    filelib:wildcard(Dir ++ "/**/" ++ atom_to_list(Module) ++ ".erl").

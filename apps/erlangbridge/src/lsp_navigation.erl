@@ -13,6 +13,12 @@
         gen_lsp_server:lsp_log(Fmt, Args)
 	end).
 
+-type lsp_location() :: {File::file:filename(), LineNo::pos_integer(),
+                         FirstColumn::pos_integer(), LastColumn::pos_integer()}.
+
+-spec definition(File::file:filename(),
+                 Line::pos_integer(),
+                 Column::pos_integer()) -> [lsp_location()].
 definition(File, Line, Column) ->
     find_definition(File, find_at(File, Line, Column)).
 
@@ -181,6 +187,9 @@ find_at(File, Line, Column) ->
                     end;
                 ({record, _, _, Record, Fields}, _CurrentFile) ->
                     find_record_field(Record, Fields, Column, Line);
+                ({record_field, {L, RecordStart}, _, Record, {atom, {L, FieldStart}, _}}, _CurrentFile) when L == Line, RecordStart =< Column, Column < FieldStart-1 ->
+                    %% E.g. Foo#fo|o.bar ('|': cursor location)
+                    {{reference, {record, Record}}, []};
                 ({record_field, _, _, Record, {atom, {L, Start}, Field}}, _CurrentFile) when L == Line, Start =< Column ->
                     case column_in_atom(Field, Start, Column) of
                         true -> {{reference, {field, Record, Field}}, []};
@@ -217,14 +226,14 @@ fold_in_syntax_tree(_Fun, StartAcc, _File, undefined) ->
 fold_in_syntax_tree(Fun, StartAcc, File, SyntaxTree) ->
     {Result, _, _} = lists:foldl(fun (TopLevelElementSyntaxTree, Acc) ->
         erl_syntax_lib:fold(fun
-            ({attribute, _, file, {NewFile, _}} = Tree, {ValueAcc, _CurrentFile, undefined}) ->
-                {Fun(Tree, File, ValueAcc), File, NewFile};
-            ({attribute, _, file, {NewFile, _}} = Tree, {ValueAcc, _CurrentFile, FirstFile}) when NewFile =:= FirstFile ->
-                {Fun(Tree, File, ValueAcc), File, FirstFile};
-            ({attribute, _, file, {NewFile, _}} = Tree, {ValueAcc, _CurrentFile, FirstFile}) ->
-                {Fun(Tree, NewFile, ValueAcc), NewFile, FirstFile};
-            (Tree, {ValueAcc, CurrentFile, FirstFile}) ->
-                {Fun(Tree, CurrentFile, ValueAcc), CurrentFile, FirstFile}
+                        ({attribute, _, file, {NewFile, _}} = Tree, {ValueAcc, _CurrentFile, undefined}) ->
+                            {Fun(Tree, File, ValueAcc), File, NewFile};
+                        ({attribute, _, file, {NewFile, _}} = Tree, {ValueAcc, _CurrentFile, FirstFile}) when NewFile =:= FirstFile ->
+                            {Fun(Tree, File, ValueAcc), File, FirstFile};
+                        ({attribute, _, file, {NewFile, _}} = Tree, {ValueAcc, _CurrentFile, FirstFile}) ->
+                            {Fun(Tree, NewFile, ValueAcc), NewFile, FirstFile};
+                        (Tree, {ValueAcc, CurrentFile, FirstFile}) ->
+                            {Fun(Tree, CurrentFile, ValueAcc), CurrentFile, FirstFile}
         end, Acc, TopLevelElementSyntaxTree)
     end, {StartAcc, File, undefined}, SyntaxTree),
     Result.
@@ -347,18 +356,21 @@ find_macro_reference(LineContents, Column) ->
 find_include(File, LineContents, Column) ->
     case re:run(LineContents, <<"-(include|include_lib)\\(\"([^\"]+)\"\\)\\.">>, [global]) of
         {match, Matches} ->
-            IncludeFile = lists:foldl(fun
-                ([{Start, Len}, AttributePL, FilenamePL], undefined) when Column - 1 >= Start, Column < Start + Len ->
-                    case binary:part(LineContents, AttributePL) of
-                        <<"include">> -> resolve_include_file_path(File, binary:part(LineContents, FilenamePL));
-                        <<"include_lib">> -> find_libdir(binary:part(LineContents, FilenamePL))
-                    end;
-                (_, Acc) ->
-                    Acc
-            end, undefined, Matches),
-            case IncludeFile of
-                undefined -> undefined;
-                _ -> {include, IncludeFile}
+            IncludeFiles =
+                lists:foldl(
+                    fun([{Start, Len}, AttributePL, FilenamePL], []) when Column - 1 >= Start, Column < Start + Len ->
+                        case binary:part(LineContents, AttributePL) of
+                            <<"include">> -> resolve_include_file_paths(File, binary:part(LineContents, FilenamePL));
+                            <<"include_lib">> -> [find_libdir(binary:part(LineContents, FilenamePL))]
+                        end;
+                    (_, Acc) ->
+                        Acc
+                    end,
+                    [],
+                    Matches),
+            case [IncFile || IncFile<-IncludeFiles, IncFile /= undefined] of
+                [] -> undefined;
+                IncFiles -> {include, IncFiles}
             end;
         _ ->
             undefined
@@ -369,13 +381,10 @@ column_in_atom(_Atom, Start, Column) when Column < Start->
 column_in_atom(Atom, Start, Column) ->
     Column =< Start + length(atom_to_list(Atom)).
 
-resolve_include_file_path(File, IncludeFileName) ->
+resolve_include_file_paths(File, IncludeFileName) ->
     IncludePaths = lsp_parse:get_include_path(File),
     Candidates = [filename:join(Path, IncludeFileName) || Path <- IncludePaths],
-    case lists:filter(fun filelib:is_file/1, Candidates) of
-        [First|_] -> First;
-        _ -> IncludeFileName
-    end.
+    lists:filter(fun filelib:is_file/1, Candidates).
 
 find_libdir(IncludeFileName) ->
     case filename:split(IncludeFileName) of
@@ -384,7 +393,7 @@ find_libdir(IncludeFileName) ->
                 {error, bad_name} ->
                     gen_lsp_doc_server:find_source_file(IncludeFileName);
                 AbsLib ->
-                    filename:nativename(string:join([AbsLib | Remain], "/"))
+                    filename:nativename(filename:join([AbsLib | Remain]))
             end;
         _ ->
             undefined
@@ -394,7 +403,7 @@ local_function_references(File, Function, Arity) ->
     FileModule = list_to_atom(filename:rootname(filename:basename(File))),
     Definition = find_definition(File, {{reference, {function, FileModule, Function, Arity}}, []}),
     case Definition of
-        undefined ->
+        [] ->
             []; % Probably BIF
         _ ->
             FunctionLength = length(atom_to_list(Function)),
@@ -407,16 +416,19 @@ local_function_references(File, Function, Arity) ->
             end, [], File, gen_lsp_doc_server:get_syntax_tree(File))
     end.
 
+-spec find_definition(File, {ItemToFind, Details}) -> Result
+      when File :: file:filename(),
+           ItemToFind :: term(),
+           Details :: term(),
+           Result :: [lsp_location()].
 find_definition(_File, {{_, {module, Module}}, _Details}) ->
-    case gen_lsp_doc_server:get_module_file(Module) of
-        undefined -> undefined;
-        ModuleFile -> {ModuleFile, 1, 1, 1}
-    end;
-find_definition(_File, {{include, IncludedFile}, _Details}) ->
-    {IncludedFile, 1, 1, 1};
+    [{ModuleFile, 1, 1, 1}
+     || ModuleFile<-gen_lsp_doc_server:get_module_files(Module)];
+find_definition(_File, {{include, IncludedFiles = [_|_]}, _Details}) ->
+    [{IncludedFile, 1, 1, 1} || IncludedFile<-IncludedFiles];
 find_definition(_File, {{_, {function, Module, Function, Arity}}, Details}) ->
-    find_in_syntax_tree(fun
-        ({function, {L, Start}, FoundFunction, FoundArity, Clauses}, CurrentFile)
+    FindFun =
+        fun({function, {L, Start}, FoundFunction, FoundArity, Clauses}, CurrentFile)
                 when Function =:= FoundFunction andalso (Arity =:= any orelse Arity == FoundArity) ->
             case proplists:get_value(args, Details) of
                 undefined ->
@@ -429,48 +441,28 @@ find_definition(_File, {{_, {function, Module, Function, Arity}}, Details}) ->
             end;
         (_SyntaxTree, _CurrentFile) ->
             undefined
-    end, gen_lsp_doc_server:get_module_file(Module));
+        end,
+    Locations = [find_in_syntax_tree(FindFun, ModFile)
+                 || ModFile<-gen_lsp_doc_server:get_module_files(Module)],
+    [Location || Location<-Locations, Location /= undefined];
 find_definition(File, {{gen_msg, GenMsg}, _Details}) ->
     case match_gen_msg(File, GenMsg) of
-        undefined -> undefined;
-        {ClauseLine, ClauseColumn} -> {File, ClauseLine, ClauseColumn, ClauseColumn}
+        undefined -> [];
+        {ClauseLine, ClauseColumn} -> [{File, ClauseLine, ClauseColumn, ClauseColumn}]
     end;
 find_definition(File, {{_, {record, Record}}, _Details}) ->
-    find_in_syntax_tree(fun
-        ({attribute, {L, Start}, record, {FoundRecord, _}}, CurrentFile) when Record =:= FoundRecord ->
-            {lsp_utils:to_string(CurrentFile), L, Start, Start};
-        (_SyntaxTree, _CurrentFile) ->
-            undefined
-    end, File);
+    find_definitions(record, Record, File);
 find_definition(File, {{_, {field, Record, Field}}, _Details}) ->
-    find_in_syntax_tree(fun
-        ({attribute, _, record, {FoundRecord, Fields}}, CurrentFile) when Record =:= FoundRecord ->
-            find_field_definition(Field, Fields, lsp_utils:to_string(CurrentFile));
-        (_SyntaxTree, _CurrentFile) ->
-            undefined
-    end, File);
+    find_definitions(field, {Record, Field}, File);
 find_definition(File, {{variable, {Variable, Line, Column}}, _Details}) ->
     case variable_references(File, Variable, Line, Column) of
-        [] -> undefined;
-        [{L, C} | _] -> {File, L, C, C}
+        [] -> [];
+        [{L, C} | _] -> [{File, L, C, C}]
     end;
 find_definition(File, {{_, {macro, Macro}}, _Details}) ->
-    find_macro_definition(Macro, File);
+    find_definitions(macro, Macro, File);
 find_definition(_File, _What) ->
-    undefined.
-
-find_field_definition(_Field, [], _CurrentFile) ->
-    undefined;
-find_field_definition(Field, [{typed_record_field, {record_field, _, {atom, {Line, Column}, Field}}, _} | _], CurrentFile) ->
-    {CurrentFile, Line, Column, Column};
-find_field_definition(Field, [{typed_record_field, {record_field, _, {atom, {Line, Column}, Field}, _}, _} | _], CurrentFile) ->
-    {CurrentFile, Line, Column, Column};
-find_field_definition(Field, [{record_field, _, {atom, {Line, Column}, Field}} | _], CurrentFile) ->
-    {CurrentFile, Line, Column, Column};
-find_field_definition(Field, [{record_field, _, {atom, {Line, Column}, Field}, _} | _], CurrentFile) ->
-    {CurrentFile, Line, Column, Column};
-find_field_definition(Field, [_ | Tail], CurrentFile) ->
-    find_field_definition(Field, Tail, CurrentFile).
+    [].
 
 variable_references(File, Variable, Line, Column) ->
     FunctionWithVariable = find_function_with_line(gen_lsp_doc_server:get_syntax_tree(File), Line),
@@ -504,32 +496,103 @@ variable_references(File, Variable, Line, Column) ->
             []
     end.
 
-find_macro_definition(Macro, File) -> find_macro_definition_in_files(Macro, [File]).
+%% @doc Find all definition of a macro, record or record field.
+-spec find_definitions(Type, Name::atom(), File::file:filename())
+            -> [lsp_location()]
+      when Type :: macro | record | field.
+find_definitions(Type, Name, File) ->
+    find_definitions_in_files(Type, Name, [File], #{}).
 
-find_macro_definition_in_files(_Macro, []) -> undefined;
-find_macro_definition_in_files(Macro, [File | Tail]) ->
+-spec find_definitions_in_files(Type, Name, FilesToVisit, VisitedFiles)
+            -> [lsp_location()]
+      when Type :: macro | record | field,
+           Name :: atom(),
+           FilesToVisit :: [file:filename()],
+           VisitedFiles :: #{file:filename() => 1}.
+find_definitions_in_files(_Type, _Name, [], _VisitedFiles) ->
+    [];
+find_definitions_in_files(Type, Name, [File | Files], VisitedFiles) ->
     Forms = gen_lsp_doc_server:get_dodged_syntax_tree(File),
-    case find_macro_definition(Macro, File, Forms) of
+    case find_definition_in_file(Type, Name, File, Forms) of
         undefined ->
-            Included = lists:reverse(find_included_files(Forms, [])),
-            IncludePath = lsp_parse:get_include_path(File),
-            case find_macro_definition_in_files(Macro, [filename:join(Path, IncludedFile) || IncludedFile <- Included, Path <- IncludePath]) of
-                undefined -> find_macro_definition_in_files(Macro, Tail);
-                Result -> Result
-            end;
-        Result -> Result
+            %% Go deeper (check included files on the next level)
+            IncludedRelFiles = lists:reverse(find_included_files(Forms, [])),
+            IncludeDirs = lsp_parse:get_include_path(File),
+            PossibleIncludeFiles = [filename:join(Dir, IncludedRelFile)
+                                    || IncludedRelFile <- IncludedRelFiles,
+                                       Dir <- IncludeDirs] ++ Files,
+            IncludeFilesToVisit = [IncFile
+                                   || IncFile<-PossibleIncludeFiles,
+                                      not maps:is_key(File, VisitedFiles)],
+            find_definitions_in_files(Type, Name, IncludeFilesToVisit,
+                                      VisitedFiles#{File => 1});
+        Result ->
+            %% Don't go deeper (ignore included files on the next level) but
+            %% go sideway (check e.g. build target dependent alternative files)
+            [Result | find_definitions_in_files(Type, Name, Files,
+                                                VisitedFiles#{File => 1})]
     end.
 
-find_macro_definition(_Macro, _File, undefined) ->
+%% @doc Find macro, record or record field definition in a dodged AST
+-spec find_definition_in_file(Type, Name, File, AST) -> Result
+      when Type :: macro | record | field,
+           Name :: atom(),
+           File :: file:filename(),
+           AST :: undefined | [term()],
+           Result :: undefined | lsp_location().
+find_definition_in_file(_Type, _Name, _File, undefined) ->
     undefined;
-find_macro_definition(_Macro, _File, []) ->
+find_definition_in_file(_Type, _Name, _File, []) ->
     undefined;
-find_macro_definition(Macro, File, [{tree, attribute, _, {attribute, {atom, _, define}, [{_, Line, Macro}, _]}} | _]) ->
+find_definition_in_file(macro, MacroName, File,
+                        [{tree, attribute, _,
+                          {attribute, {atom, _, define},
+                           [{_, Line, MacroName}, _]}}
+                         | _Forms]) ->
     {File, Line, 1, 1};
-find_macro_definition(Macro, File, [{tree, attribute, _, {attribute, {atom, _, define}, [{_, _, _, {_, {_, Line, Macro}, _}}, _]}} | _]) ->
+find_definition_in_file(macro, MacroName, File,
+                        [{tree, attribute, _,
+                          {attribute, {atom, _, define},
+                           [{_, _, _, {_, {_, Line, MacroName}, _}}, _]}}
+                         | _Forms]) ->
     {File, Line, 1, 1};
-find_macro_definition(Macro, File, [_ | Tail]) ->
-    find_macro_definition(Macro, File, Tail).
+find_definition_in_file(record, RecordName, File,
+                        [{tree, attribute, _,
+                          {attribute, {tree, atom, _, record},
+                           [{tree, atom, {attr, Line, _, _}, RecordName}, _]}}
+                         | _Forms]) ->
+    {File, Line, 1, 1};
+find_definition_in_file(field, {RecordName, FieldName}, File,
+                        [{tree, attribute, _,
+                          {attribute, {tree, atom, _, record},
+                           [{tree, atom, _, RecordName},
+                            {tree, tuple, _, FieldTrees}]}}
+                         | _Forms]) ->
+    find_field_definition_in_file(FieldName, File, FieldTrees);
+find_definition_in_file(Type, Name, File, [_ | Forms]) ->
+    find_definition_in_file(Type, Name, File, Forms).
+
+%% @doc Find record field definition in a sub-list of dodged AST
+-spec find_field_definition_in_file(FieldName::atom(),
+                                    File::file:filename(),
+                                    AST::[term()])
+                            -> undefined | lsp_location().
+find_field_definition_in_file(_Name, _File, []) ->
+    undefined;
+find_field_definition_in_file(Name, File,
+                              [{tree, record_field, _,
+                                {record_field, {atom, Line, Name}, _}}
+                               | _Forms]) ->
+    {File, Line, 1, 1};
+find_field_definition_in_file(Name, File,
+                              [{tree,typed_record_field, _,
+                                {typed_record_field,
+                                 {tree, record_field, _,
+                                  {record_field, {atom, Line, Name}, _}}, _}}
+                               | _Forms]) ->
+    {File, Line, 1, 1};
+find_field_definition_in_file(Name, File, [_ | Forms]) ->
+    find_field_definition_in_file(Name, File, Forms).
 
 find_included_files(undefined, Acc) -> Acc;
 find_included_files([], Acc) -> Acc;
