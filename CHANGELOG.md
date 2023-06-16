@@ -1,9 +1,19 @@
 # Change log
 
+## Version 0.9.5 (June 16, 2023)
+
+* [266](https://github.com/pgourlain/vscode_erlang/issues/266) : Navigation updates, adding support to multiple source (.erl/.hrl) 
+
+Thanks to
+* [Kornel Horvath](https://github.com/KornelH)
+
+---
+
 ## Version 0.9.4 (June 9, 2023)
 
 * [264](https://github.com/pgourlain/vscode_erlang/issues/264) : Fix Go to definition at record name and field
 * [265](https://github.com/pgourlain/vscode_erlang/issues/265): Fine tuning of scannig for project files. configs 'files.exclude', 'files.watcherExclude' and 'search.exclude' are now used while scanning.
+
 
 Thanks to
 * [Kornel Horvath](https://github.com/KornelH)
