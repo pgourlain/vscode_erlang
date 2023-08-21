@@ -416,17 +416,24 @@ local_function_references(File, Function, Arity) ->
             end, [], File, gen_lsp_doc_server:get_syntax_tree(File))
     end.
 
--spec find_definition(File, {ItemToFind, Details}) -> Result
+find_definition(File, What) ->
+    FileModule = list_to_atom(filename:rootname(filename:basename(File))),
+    find_definition(File, FileModule, What).
+
+-spec find_definition(File, FileModule, {ItemToFind, Details}) -> Result
       when File :: file:filename(),
+           FileModule :: module(),
            ItemToFind :: term(),
            Details :: term(),
            Result :: [lsp_location()].
-find_definition(_File, {{_, {module, Module}}, _Details}) ->
+find_definition(File, Module, {{_, {module, Module}}, _Details}) ->
+    [{File, 1, 1, 1}];
+find_definition(_File, _FileModule, {{_, {module, Module}}, _Details}) ->
     [{ModuleFile, 1, 1, 1}
      || ModuleFile<-gen_lsp_doc_server:get_module_files(Module)];
-find_definition(_File, {{include, IncludedFiles = [_|_]}, _Details}) ->
+find_definition(_File, _FileModule, {{include, IncludedFiles = [_|_]}, _Details}) ->
     [{IncludedFile, 1, 1, 1} || IncludedFile<-IncludedFiles];
-find_definition(_File, {{_, {function, Module, Function, Arity}}, Details}) ->
+find_definition(File, FileModule, {{_, {function, Module, Function, Arity}}, Details}) ->
     FindFun =
         fun({function, {L, Start}, FoundFunction, FoundArity, Clauses}, CurrentFile)
                 when Function =:= FoundFunction andalso (Arity =:= any orelse Arity == FoundArity) ->
@@ -442,26 +449,31 @@ find_definition(_File, {{_, {function, Module, Function, Arity}}, Details}) ->
         (_SyntaxTree, _CurrentFile) ->
             undefined
         end,
-    Locations = [find_in_syntax_tree(FindFun, ModFile)
-                 || ModFile<-gen_lsp_doc_server:get_module_files(Module)],
+    ModFiles =
+        if  FileModule == Module -> [File];
+            true                 -> gen_lsp_doc_server:get_module_files(Module)
+        end,
+    Locations = [find_in_syntax_tree(FindFun, ModFile) || ModFile<-ModFiles],
     [Location || Location<-Locations, Location /= undefined];
-find_definition(File, {{gen_msg, GenMsg}, _Details}) ->
+find_definition(File, _FileModule, {{gen_msg, GenMsg}, _Details}) ->
     case match_gen_msg(File, GenMsg) of
         undefined -> [];
         {ClauseLine, ClauseColumn} -> [{File, ClauseLine, ClauseColumn, ClauseColumn}]
     end;
-find_definition(File, {{_, {record, Record}}, _Details}) ->
+find_definition(File, _FileModule, {{_, {record, Record}}, _Details}) ->
     find_definitions(record, Record, File);
-find_definition(File, {{_, {field, Record, Field}}, _Details}) ->
+find_definition(File, _FileModule, {{_, {field, Record, Field}}, _Details}) ->
     find_definitions(field, {Record, Field}, File);
-find_definition(File, {{variable, {Variable, Line, Column}}, _Details}) ->
+find_definition(File, _FileModule, {{variable, {Variable, Line, Column}}, _Details}) ->
     case variable_references(File, Variable, Line, Column) of
         [] -> [];
         [{L, C} | _] -> [{File, L, C, C}]
     end;
-find_definition(File, {{_, {macro, Macro}}, _Details}) ->
+find_definition(File, _FileModule, {{_, {macro, 'MODULE'}}, _Details}) ->
+    [{File, 1, 1, 1}];
+find_definition(File, _FileModule, {{_, {macro, Macro}}, _Details}) ->
     find_definitions(macro, Macro, File);
-find_definition(_File, _What) ->
+find_definition(_File, _FileModule, _What) ->
     [].
 
 variable_references(File, Variable, Line, Column) ->
