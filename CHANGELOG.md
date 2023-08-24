@@ -1,5 +1,16 @@
 # Change log
 
+## Version 0.9.6 (August 24, 2023)
+
+* [272](https://github.com/pgourlain/vscode_erlang/issues/272) : Go to definition of local functions is improved. Always jump to local
+function definition regardless of there are multiple source modules with
+the same name 
+
+Thanks to
+* [Kornel Horvath](https://github.com/KornelH)
+
+---
+
 ## Version 0.9.5 (June 16, 2023)
 
 * [266](https://github.com/pgourlain/vscode_erlang/issues/266) : Navigation updates, adding support to multiple source (.erl/.hrl) 
