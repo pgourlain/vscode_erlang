@@ -534,8 +534,8 @@ find_definitions_in_files(Type, Name, [File | Files], VisitedFiles) ->
                                     || IncludedRelFile <- IncludedRelFiles,
                                        Dir <- IncludeDirs] ++ Files,
             IncludeFilesToVisit = [IncFile
-                                   || IncFile<-PossibleIncludeFiles,
-                                      not maps:is_key(File, VisitedFiles)],
+                                   || IncFile <- PossibleIncludeFiles,
+                                      not maps:is_key(IncFile, VisitedFiles)],
             find_definitions_in_files(Type, Name, IncludeFilesToVisit,
                                       VisitedFiles#{File => 1});
         Result ->
