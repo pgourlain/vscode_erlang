@@ -389,7 +389,7 @@ resolve_include_file_paths(File, IncludeFileName) ->
 find_libdir(IncludeFileName) ->
     case filename:split(IncludeFileName) of
         [LibName | Remain] ->
-            case code:lib_dir(binary_to_atom(LibName)) of
+            case code:lib_dir(list_to_atom(binary_to_list(LibName))) of
                 {error, bad_name} ->
                     gen_lsp_doc_server:find_source_file(IncludeFileName);
                 AbsLib ->
@@ -498,14 +498,18 @@ variable_references(File, Variable, Line, Column) ->
         (_S, ClauseAcc) ->
             ClauseAcc
     end, #{}, FunctionWithVariable),
-    case VarLC2ClauseLC of
-        #{{Line, Column} := ClauseLC} ->
+
+    case maps:get({Line, Column}, VarLC2ClauseLC, none) of
+	    none -> [];
+	    ClauseLC -> 
+    % case VarLC2ClauseLC of
+        % #{{Line, Column} := ClauseLC} ->
             lists:usort(lists:filtermap(fun
                 ({VarLC, ThisClauseLC}) when ThisClauseLC =:= ClauseLC -> {true, VarLC};
                 (_) -> false
-            end, maps:to_list(VarLC2ClauseLC)));
-        _ ->
-            []
+            end, maps:to_list(VarLC2ClauseLC)))
+%        _ ->
+%            []
     end.
 
 %% @doc Find all definition of a macro, record or record field.
