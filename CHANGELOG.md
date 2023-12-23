@@ -1,5 +1,14 @@
 # Change log
 
+
+## Version 0.9.7 (October 7, 2023)
+
+* [273](https://github.com/pgourlain/vscode_erlang/issues/273) : find_definitions_in_files/4 avoid circular traversal 
+
+Thanks to
+* [Thien](https://github.com/HKThienYM)
+
+
 ## Version 0.9.6 (August 24, 2023)
 
 * [272](https://github.com/pgourlain/vscode_erlang/issues/272) : Go to definition of local functions is improved. Always jump to local
