@@ -1,5 +1,12 @@
 # Change log
 
+## Version 0.9.8 (January 2, 2024)
+
+* [275](https://github.com/pgourlain/vscode_erlang/issues/275) : Add support of inlinevalues while debugging 
+
+![debug-inlinevalues](images/vscode-erlang-inlinevalues.png)
+
+---
 
 ## Version 0.9.7 (October 7, 2023)
 
@@ -8,6 +15,7 @@
 Thanks to
 * [Thien](https://github.com/HKThienYM)
 
+---
 
 ## Version 0.9.6 (August 24, 2023)
 
