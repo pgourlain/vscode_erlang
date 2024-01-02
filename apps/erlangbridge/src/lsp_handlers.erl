@@ -6,6 +6,7 @@
     textDocument_definition/2, textDocument_references/2, textDocument_hover/2, textDocument_completion/2,
     textDocument_formatting/2, textDocument_codeLens/2, textDocument_documentSymbol/2,
     textDocument_inlayHints/2]).
+-export([textDocument_inlineValues/2]).
 
 initialize(_Socket, Params) ->
     % usefull when file is open instead of folder
@@ -24,7 +25,10 @@ initialize(_Socket, Params) ->
         completionProvider => #{triggerCharacters => <<":#.">>},
         codeLensProvider => true,
         documentSymbolProvider => true,
-        inlayHintProvider => true
+        inlayHintProvider => true,
+        %signatureHelpProvider => #{triggerCharacters => <<"(">>}
+        inlineValueProvider => true
+        %declarationProvider => true    
     }}.
 
 initialized(Socket, _Params) ->
@@ -243,6 +247,23 @@ textDocument_documentSymbol(_Socket, Params) ->
             }
         }
     end, lsp_navigation:symbol_info(lsp_utils:file_uri_to_file(Uri))).
+
+% provide inlive values while debugging (values are shown directly in editor)
+textDocument_inlineValues(_Socket, Params) ->
+    Uri = mapmapget(textDocument, uri, Params),
+    %#{line:=LS, character:=CS} = mapmapget(range, start, Params),
+    % no inlivevalues after 'stoppedLocation' 
+    %#{line:=LE, character:=CE} = mapmapget(range, 'end', Params),
+    #{line:=LE, character:=CE} = mapmapget(stoppedLocation, 'end', Params),
+    lists:map(fun ({Kind, Position, Label}) ->
+        #{
+            position => lsp_utils:client_position(Position),
+            kind => lsp_utils:to_binary(Kind), %"var" or "text" or "expression"
+            label => lsp_utils:to_binary(Label)
+        }
+        end, 
+        lsp_navigation:inlinevalues_info(lsp_utils:file_uri_to_file(Uri), {LE,CE}))
+    .
 
 validate_file(Socket, File) ->
     case gen_lsp_config_server:linting() of

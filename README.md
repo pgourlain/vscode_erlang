@@ -44,7 +44,7 @@ InlayHints in function calls
   - Conditional Breakpoints
   - Hit-Count Breakpoints
 
-![debug](images/vscode-erlang-debug.png)
+![debug-inlinevalues](images/vscode-erlang-inlinevalues.png)
 
 ## Running debugger
 
