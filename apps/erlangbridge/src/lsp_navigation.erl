@@ -3,6 +3,7 @@
 -export([definition/3, hover_info/3, function_description/2, function_description/3, references/3]).
 -export([codelens_info/1, symbol_info/1, record_fields/2, find_function_with_line/2, fold_references/4]).
 -export([inlayhints_info/3, full_inlayhints_info/2, functions/2]).
+-export([inlinevalues_info/2]).
 
 -define(LOG(S),
 	begin
@@ -90,6 +91,92 @@ full_inlayhints_info(File, SyntaxTree) ->
         NewInlays = [X || X <- lsp_inlayhints:generate_inlayhints(Calls, Defs)],
         NewInlays
     end.
+
+%
+% return { Kind, Position, Label} => {{0,0}, "sample"}
+%
+inlinevalues_info(File, {LS, _CS}) ->
+
+    Funs = fold_in_syntax_tree(
+        fun
+            ({function, {L, _}, _FName, _Arity, _}=Tree, _CurrentFile, Acc) 
+              when L =< LS  
+            -> [Tree | Acc];
+            (_, _, Acc) -> Acc
+        end, 
+        [],
+        File,
+        gen_lsp_doc_server:get_syntax_tree(File)
+    ),
+    case Funs of
+        [] -> 
+            %?LOG("no function found at stoppedLocation", []),
+            [];
+        [E|_] ->
+            Res = find_variables_and_expression(E),
+            %remove duplicates
+            Res1 = lists:usort(Res),
+            %?LOG("inlinevalues_info:~p", [Res1]),
+            Res1
+    end.
+
+%%inspired from erl_syntax_lib:variables
+find_variables_and_expression(Tree) ->
+    find_variables_and_expression(Tree, []).
+
+find_variables_and_expression(T, Acc) ->
+    case erl_syntax:type(T) of
+        variable ->
+            %filter based on line number
+            case T of
+                {_, {_, _}, _}  ->
+                    [T | Acc];
+                _ ->
+                    Acc
+            end;
+        macro ->
+            %% macro names are ignored, even if represented by variables
+            case erl_syntax:macro_arguments(T) of
+                none -> Acc;
+                As -> variables_2(As, Acc)
+            end;
+        application ->
+            % {call ,...} -> look for expressions
+            case erl_syntax:application_arguments(T) of
+                [] -> Acc;
+                As -> expressions_1(As, Acc)
+            end;
+        _ ->
+            case erl_syntax:subtrees(T) of
+                [] ->
+                    Acc;
+                Gs ->
+                    variables_1(Gs, Acc)
+            end
+    end.
+
+variables_1([L | Ls], S) ->
+    variables_1(Ls, variables_2(L, S));
+variables_1([], S) ->
+    S.
+
+variables_2([T | Ts], S) ->
+    variables_2(Ts, find_variables_and_expression(T, S));
+variables_2([], S) ->
+    S.
+
+expressions_1([T | Ts], S) ->
+    expressions_1(Ts, expressions_2(T, S));
+expressions_1([], S) ->
+    S.
+
+expressions_2({op, Position, _, _, _} = T, S) ->
+    [{expression, Position, erl_prettypr:format(T)} | S];
+expressions_2({op, Position, _, _, _, _} = T, S) ->
+    [{expression, Position, erl_prettypr:format(T)} | S];
+expressions_2(_, S) ->
+    S.
+
 
 symbol_info(File) ->
     lists:reverse(fold_in_syntax_tree(fun

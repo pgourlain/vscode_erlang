@@ -26,6 +26,7 @@ import * as Net from 'net';
 import * as lspcodelens from './lspcodelens';
 
 import * as lspInlay from './lsp-inlayhints';
+import * as lspValue from './lsp-inlinevalues';
 
 
 // import { ErlangShellForDebugging } from '../ErlangShellDebugger';
@@ -207,6 +208,8 @@ export function activate(context: ExtensionContext) {
 		lspOutputChannel = Window.createOutputChannel('Erlang Language Server');
 
 	lspInlay.activate(context, lspOutputChannel);
+	lspValue.activate(context, lspOutputChannel);
+	
 	let middleware: Middleware = {
 		workspace: {
 			configuration: Configuration.computeConfiguration
