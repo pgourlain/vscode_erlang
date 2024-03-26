@@ -91,7 +91,11 @@
 					".app.src",
 					"rebar.config"
 				],
-				"configuration": "./erlang.configuration.json"
+				"configuration": "./erlang.configuration.json",
+				"icon": {
+					"dark": "images/erlang-fileicon-dark.png",
+					"light": "images/erlang-fileicon-light.png"
+				}
 			}
 		],
 		"grammars": [
