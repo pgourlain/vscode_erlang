@@ -6,6 +6,7 @@
     textDocument_definition/2, textDocument_references/2, textDocument_hover/2, textDocument_completion/2,
     textDocument_formatting/2, textDocument_codeLens/2, textDocument_documentSymbol/2,
     textDocument_inlayHints/2, textDocument_signatureHelp/2]).
+-export([textDocument_inlineValues/2]).
 
 -define(LOG(S),
 	begin
