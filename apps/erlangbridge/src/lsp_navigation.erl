@@ -338,7 +338,7 @@ find_exported_function(CurrentModule, LineContents, Column) ->
         {match, Matches} ->
             case lists:filter(fun ([{Pos, Len}, _, _]) -> Column > Pos andalso Column =< Pos + Len end, Matches) of
                 [[_, {NamePos, NameLen}, {ArityPos, ArityLen}]] ->
-                    Function = binary_to_atom(binary:part(LineContents, NamePos, NameLen), latin1),
+                    Function = lsp_utils:bin_to_atom(binary:part(LineContents, NamePos, NameLen), latin1),
                     Arity = binary_to_integer(binary:part(LineContents, ArityPos, ArityLen)),
                     {{reference, {function, CurrentModule, Function, Arity}}, []};
                 _ ->
@@ -431,7 +431,7 @@ find_macro_reference(LineContents, Column) ->
         {match, Matches} ->
             case lists:filter(fun ([{Pos, Len}]) -> Column > Pos andalso Column =< Pos + Len end, Matches) of
                 [[{FoundPos, FoundLen}]] ->
-                    Macro = binary_to_atom(binary:part(LineContents, FoundPos + 1, FoundLen - 1), latin1),
+                    Macro = lsp_utils:bin_to_atom(binary:part(LineContents, FoundPos + 1, FoundLen - 1), latin1),
                     {reference, {macro, Macro}};
                 _ ->
                     undefined
@@ -476,7 +476,7 @@ resolve_include_file_paths(File, IncludeFileName) ->
 find_libdir(IncludeFileName) ->
     case filename:split(IncludeFileName) of
         [LibName | Remain] ->
-            case code:lib_dir(binary_to_atom(LibName)) of
+            case code:lib_dir(lsp_utils:bin_to_atom(LibName)) of
                 {error, bad_name} ->
                     gen_lsp_doc_server:find_source_file(IncludeFileName);
                 AbsLib ->
@@ -585,6 +585,11 @@ variable_references(File, Variable, Line, Column) ->
         (_S, ClauseAcc) ->
             ClauseAcc
     end, #{}, FunctionWithVariable),
+    variablelc_to_clauselc(VarLC2ClauseLC, Line, Column).
+
+
+-if(?OTP_RELEASE >= 23).
+variablelc_to_clauselc(VarLC2ClauseLC, Line, Column) ->
     case VarLC2ClauseLC of
         #{{Line, Column} := ClauseLC} ->
             lists:usort(lists:filtermap(fun
@@ -594,6 +599,18 @@ variable_references(File, Variable, Line, Column) ->
         _ ->
             []
     end.
+-else.
+% support for Erlang 22
+variablelc_to_clauselc(VarLC2ClauseLC, Line, Column) ->
+    case maps:get({Line, Column}, VarLC2ClauseLC, none) of
+	    none -> [];
+	    ClauseLC ->
+            lists:usort(lists:filtermap(fun
+                ({VarLC, ThisClauseLC}) when ThisClauseLC =:= ClauseLC -> {true, VarLC};
+                (_) -> false
+            end, maps:to_list(VarLC2ClauseLC)))
+    end.
+-endif.
 
 %% @doc Find all definition of a macro, record or record field.
 -spec find_definitions(Type, Name::atom(), File::file:filename())
