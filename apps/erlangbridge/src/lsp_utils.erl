@@ -10,6 +10,8 @@
          absolute_path/2,
          make_temporary_file/1,
          to_binary/1,
+         bin_to_atom/1,
+         bin_to_atom/2,
          client_position/1]).
 
 client_range(Line, StartChar, EndChar) ->
@@ -95,6 +97,19 @@ to_binary(X) when is_list(X) ->
     erlang:list_to_binary(X);
 to_binary(X) -> 
     X.
+
+-ifdef(OTP_RELEASE).
+-if(?OTP_RELEASE >= 23).
+bin_to_atom(Binary,Encoding) -> binary_to_atom(Binary,Encoding).
+bin_to_atom(Binary) -> binary_to_atom(Binary).
+-else.
+bin_to_atom(Binary, _) -> list_to_atom(binary_to_list(Binary)).
+bin_to_atom(Binary) -> list_to_atom(binary_to_list(Binary)).
+-endif.
+-else.
+bin_to_atom(Binary, _) -> list_to_atom(binary_to_list(Binary)).
+bin_to_atom(Binary) -> list_to_atom(binary_to_list(Binary)).
+-endif.
 
 %% -------------------------------------------------------------------
 %% @doc Replace file globs to regular expressions in search exclude filters
