@@ -1,5 +1,16 @@
 # Change log
 
+## Version 0.9.9 (March 29, 2024)
+
+* [276](https://github.com/pgourlain/vscode_erlang/issues/276) : Add configuration icons in languages sections (using official icons)
+* [277](https://github.com/pgourlain/vscode_erlang/issues/277) : Add some code snippets
+* [278](https://github.com/pgourlain/vscode_erlang/issues/278) : Add compatibility from Erlang 22  
+
+Thanks to
+* [Kornel Horvath](https://github.com/KornelH)
+
+---
+
 ## Version 0.9.8 (January 2, 2024)
 
 * [275](https://github.com/pgourlain/vscode_erlang/issues/275) : Add support of inlinevalues while debugging 
