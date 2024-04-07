@@ -36,7 +36,7 @@ initialize(_Socket, Params) ->
         documentSymbolProvider => true,
         inlayHintProvider => true,
         inlineValueProvider => true,  
-        signatureHelpProvider => #{triggerCharacters => <<"(">>}
+        signatureHelpProvider => #{triggerCharacters => <<"(,">>, retriggerCharacters => <<",">>}
         %declarationProvider => true
     }}.
 
@@ -168,10 +168,13 @@ textDocument_completion(_Socket, Params) ->
     Line = mapmapget(position, line, Params),
     Character = mapmapget(position, character, Params),
     File = lsp_utils:file_uri_to_file(Uri),
+    TextBefore = text_before_character(File, Line, Character),
+    auto_complete(File, Line + 1, TextBefore).
+
+text_before_character(File, Line, Character) ->
     Contents = gen_lsp_doc_server:get_document_contents(File),
     LineText = lists:nth(Line + 1, binary:split(Contents, <<"\n">>, [global])),
-    TextBefore = binary:part(LineText, 0, min(Character + 1, byte_size(LineText))),
-    auto_complete(File, Line + 1, TextBefore).
+    binary:part(LineText, 0, min(Character + 1, byte_size(LineText))).
 
 textDocument_formatting(_Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
@@ -273,26 +276,71 @@ textDocument_inlineValues(_Socket, Params) ->
         end, 
         lsp_navigation:inlinevalues_info(lsp_utils:file_uri_to_file(Uri), {LE,CE}))
     .
+
+% Params is like this :
+% [
+%     #{
+%         position => #{line => 28, character => 23},
+%         context =>
+%             #{
+%                 isRetrigger => false,
+%                 triggerCharacter => <<"(">>,
+%                 triggerKind => 2
+%             },
+%         textDocument =>
+%             #{
+%                 uri =>
+%                     <<"file:///..../sources/erlang/sample/src/sample.erl">>
+%             }
+%     }
+% ]
+% https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#signatureHelpParams
 textDocument_signatureHelp(_Socket, Params) ->
-    ?LOG("textDocument_signature",[Params]),
+    ?LOG("textDocument_signature", [Params]),
     Uri = mapmapget(textDocument, uri, Params),
     Line = mapmapget(position, line, Params),
     Character = mapmapget(position, character, Params),
-    #{
-        signatures =>[
+    IsRetrigger = mapmapget(context, isRetrigger, Params),
+    TriggerCharacter = mapmapfind(context, triggerCharacter, Params),
+    TriggerKind = mapmapget(context, triggerKind, Params), % 1: manual activation, 2: trigger by trigger character, 3: cursor move or content document changing
+    
+    File = lsp_utils:file_uri_to_file(Uri),
+    FileModule = list_to_atom(filename:rootname(filename:basename(File))),
+    SignatureHelp = case IsRetrigger of
+        true ->
+            % window is actually open 
+            ActiveSignatureHelp = mapmapfind(context, activeSignatureHelp, Params),
+            if 
+                ActiveSignatureHelp == not_found -> %% generate SignatureHelp
+                Signatures = lsp_navigation:signaturehelp_info( sample, "window is open, but no active signature was provided"),
+                #{
+                    signatures => Signatures 
+                };           
+                true -> %% ActiveSignatureHelp is partially filled
+                    ActiveSignatureHelp
+            end;
+        false -> 
+            %%if triggerkind ==1, tokens can be used to find method signature
+            TextBefore = text_before_character(File, Line, Character-1),
+            Signatures = case erl_scan:string(lsp_utils:to_string(TextBefore),{1,1}) of
+                {ok, Tokens, _} -> 
+                    lsp_signature:signature_help_fromtokens(FileModule, Tokens);
+                    %lsp_navigation:signaturehelp_info( sample, "tokens parsed");
+                {error, ErrorInfo, ErrLoc} -> 
+                    ExtraDoc = io_lib:format("~p/~p",[ErrorInfo,ErrLoc]),
+                    lsp_navigation:signaturehelp_info( sample, "tokens parsed with error "++ ExtraDoc)
+            end,
+            ?LOG("textDocument_signature, textbefore:~p", [TextBefore]),
+            %Signatures = lsp_navigation:signaturehelp_info( sample, "textberefore:"),
             #{
-                label => <<"coming soon 1">>
-                },
-            #{
-                label => <<"coming soon 2">>,
-                documentation => #{
-                    kind => <<"markdown">>,
-                    value => <<"# Header \n Some text \n ```typescript\nsomecode();\n```">>
-                }
-            }
-                
-        ]
-    }.
+                signatures => Signatures,
+                activeSignature => 0,
+                activeParameter => 0 
+            };
+        _ -> []
+    end,
+    SignatureHelp.
+    
 
 validate_file(Socket, File) ->
     case gen_lsp_config_server:linting() of
@@ -439,3 +487,13 @@ match_regex(_, []) ->
 
 mapmapget(Key1, Key2, Map) ->
     maps:get(Key2, maps:get(Key1, Map)).
+
+mapmapfind(Key1, Key2, Map) ->
+    case maps:find(Key1, Map) of
+        {ok, Value} ->
+            case maps:find(Key2, Value) of
+                {ok, Value1} -> Value1;
+                _ -> not_found
+                end;
+        _ -> not_found
+    end.

@@ -1,5 +1,18 @@
 -module(lsp_parse).
--export([parse_source_file/2, parse_config_file/2, get_include_path/1]).
+-export([parse_source_file/2, parse_config_file/2, get_include_path/1, scan_source_file/2]).
+
+%% @doc
+%% @param File is a reference to the real file (file opened by editor)
+%% @param ContentsFile is used for parsing (can be a temp file)
+scan_source_file(File, ContentsFile) ->
+    case epp_scan_file(ContentsFile, get_include_path(File), get_define_from_rebar_config(File)) of
+        {ok, FileSyntaxTree} ->
+            UpdatedSyntaxTree = update_file_in_forms(File, ContentsFile, FileSyntaxTree),
+            {UpdatedSyntaxTree, undefined};
+        _ ->
+            io:format("epp:scan_file could not parse ~p~n", [File]),
+            {undefined, undefined}
+    end.
 
 parse_source_file(File, ContentsFile) ->
     case epp_parse_file(ContentsFile, get_include_path(File), get_define_from_rebar_config(File)) of
@@ -148,6 +161,21 @@ find_rebar_config(Dir) ->
 	    _ ->
 		find_rebar_config(filename:join(lists:droplast(Elements)))
 	  end
+    end.
+
+
+epp_scan_file(File, IncludePath, Defines) ->
+    case otp_24_or_newer() of
+        true ->
+            case epp:scan_file(as_string(File), [{includes, IncludePath}, {macros, Defines}, {location, {1, 1}}]) of
+                {ok, Result, _Extra} ->
+                    {ok, Result};
+                _Err -> 
+                    gen_lsp_server:lsp_log("epp_parse_file error : ~p", [_Err]),
+                    {error, file_could_not_scanned}
+            end;
+        false ->
+            {error, scan_notimplemented_before_otp24}
     end.
 
 epp_parse_file(File, IncludePath, Defines) ->
