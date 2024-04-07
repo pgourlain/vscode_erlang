@@ -1,6 +1,6 @@
 -module(lsp_navigation).
 
--export([definition/3, hover_info/3, function_description/2, function_description/3, references/3]).
+-export([definition/3, hover_info/3, function_description/2, function_description/3, references/3, function_clauses/3]).
 -export([codelens_info/1, symbol_info/1, record_fields/2, find_function_with_line/2, fold_references/4]).
 -export([inlayhints_info/3, full_inlayhints_info/2, functions/2]).
 -export([inlinevalues_info/2]).
@@ -848,6 +848,8 @@ match_gen_msg(File, GenMsg) ->
             undefined
     end, File).
 
+%% @doc return functions clauses for a module
+%% @param Arity specify arity number or any to get all clauses for a function
 function_clauses(File, Function, Arity) ->
     lists:reverse(fold_in_syntax_tree(fun
         ({function, _LC, FoundFunction, FoundArity, Clauses}, _CurrentfFile, Acc)
