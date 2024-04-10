@@ -322,21 +322,17 @@ textDocument_signatureHelp(_Socket, Params) ->
         false -> 
             %%if triggerkind ==1, tokens can be used to find method signature
             TextBefore = text_before_character(File, Line, Character-1),
-            Signatures = case erl_scan:string(lsp_utils:to_string(TextBefore),{1,1}) of
+            case erl_scan:string(lsp_utils:to_string(TextBefore),{1,1}) of
                 {ok, Tokens, _} -> 
                     lsp_signature:signature_help_fromtokens(FileModule, Tokens);
-                    %lsp_navigation:signaturehelp_info( sample, "tokens parsed");
                 {error, ErrorInfo, ErrLoc} -> 
                     ExtraDoc = io_lib:format("~p/~p",[ErrorInfo,ErrLoc]),
-                    lsp_navigation:signaturehelp_info( sample, "tokens parsed with error "++ ExtraDoc)
-            end,
-            ?LOG("textDocument_signature, textbefore:~p", [TextBefore]),
-            %Signatures = lsp_navigation:signaturehelp_info( sample, "textberefore:"),
-            #{
-                signatures => Signatures,
-                activeSignature => 0,
-                activeParameter => 0 
-            };
+                    #{
+                        signatures => lsp_signature:signatures_sample( "tokens parsed with error "++ ExtraDoc),
+                        activeSignature => 0,
+                        activeParameter => 0 
+                    }                    
+            end;
         _ -> []
     end,
     SignatureHelp.
