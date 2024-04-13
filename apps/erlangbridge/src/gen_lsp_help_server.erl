@@ -4,7 +4,7 @@
 -export([start_link/0]).
 
 -export([init/1,handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
--export([get_help/2,get_help/4]).
+-export([get_help/2,get_help/5]).
 
 -define(SERVER, ?MODULE).
 
@@ -37,8 +37,8 @@ start_link() ->
 get_help(Module, Function) -> 
     gen_server:call(?SERVER, {get_help, Module, Function}).
 
-get_help(Module, Function, RenderModule, RenderFunction) -> 
-    gen_server:call(?SERVER, {get_help, Module, Function, RenderModule, RenderFunction}).
+get_help(Module, Function, CallBackState, RenderModule, RenderFunction) -> 
+    gen_server:call(?SERVER, {get_help, Module, Function, CallBackState, RenderModule, RenderFunction}).
 
 init(_Args) ->
     {ok, #state{modules=#{}}}.
@@ -46,9 +46,9 @@ init(_Args) ->
 handle_call({get_help, Module, Function}, _From, State) ->
     {reply, safe_get_help(Module, Function, fun eep48_render_fun_doc/4),State};
 
-handle_call({get_help, Module, Function, RenderModule, RenderFunction}, _From, State) ->
+handle_call({get_help, Module, Function, CallBackState, RenderModule, RenderFunction}, _From, State) ->
     Reply = safe_get_help(Module, Function, fun (M, F, FnDoc, Docs) ->
-            apply(RenderModule, RenderFunction, [M, F, FnDoc, Docs])
+            apply(RenderModule, RenderFunction, [M, F, FnDoc, Docs, CallBackState])
         end),
     {reply, Reply, State};
 
@@ -59,9 +59,7 @@ safe_get_help(Module, Function, Callback) ->
     case get_help_eep48(Module, Function, Callback) of
         {error, _} ->
             undefined;
-        Help ->
-            FlattenHelp = list_to_binary(lists:flatten(Help)),
-            FlattenHelp
+        Help -> Help
     end.
 
 -ifdef(OTP_RELEASE).
@@ -92,7 +90,7 @@ eep48_layout_doc(_Module, Function, #docs_v1{ docs = Docs } = _D, Callback) ->
     Callback(_Module, Function, FnDoc, Docs).
 
 eep48_render_fun_doc(_Module, _Function, FnDoc, Docs) ->
-    render_function(FnDoc, Docs).
+    list_to_binary(lists:flatten(render_function(FnDoc, Docs))).
 
 render_function([], _D) ->
     {error, function_missing};

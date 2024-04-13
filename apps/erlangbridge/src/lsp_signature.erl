@@ -1,7 +1,7 @@
 -module(lsp_signature).
 
 -export([signatures_sample/1]).
--export([eep48_render_signature/4]).
+-export([eep48_render_signature/5]).
 -export([disable_signature_help/0, signature_help_fromtokens/2]).
 
 -define(LOG(S), begin
@@ -16,6 +16,7 @@ disable_signature_help() ->
 
 signature_help_fromtokens(FileModule, Tokens) ->
     RTokens = lists:reverse(Tokens),
+    % find index and function name from tokens
     M = lists:foldl(
         fun
             ({atom, _, _} = Token, #{argLevel := Level} = Acc) when Level == 0 ->
@@ -38,7 +39,6 @@ signature_help_fromtokens(FileModule, Tokens) ->
         #{hasModule => false, argIndex => 0, argLevel => 1, function => null, module => null},
         RTokens
     ),
-    %?LOG(M),
     case M of
         #{function := Fun, module := Module, argIndex := Index} when Fun =/= null ->
             TargetModule =
@@ -46,9 +46,7 @@ signature_help_fromtokens(FileModule, Tokens) ->
                     Module == null -> FileModule;
                     true -> Module
                 end,
-            D = function_signature(TargetModule, Fun, any, Index),
-            ?LOG(D),
-            D;
+            function_signature(TargetModule, Fun, any, Index);
         _ ->
             disable_signature_help()
     end.
@@ -56,7 +54,7 @@ signature_help_fromtokens(FileModule, Tokens) ->
 function_signature(Module, Function, Arity, Index) ->
     case gen_lsp_doc_server:get_module_file(Module) of
         undefined ->
-            get_generic_help(Module, Function);
+            get_generic_help(Module, Function, Index);
         File ->
             case lsp_utils:is_erlang_lib_file(File) of
                 false ->
@@ -64,9 +62,7 @@ function_signature(Module, Function, Arity, Index) ->
                         {[],[]} ->
                             case lists:keyfind(Function, 1, erlang:module_info(exports)) of
                                 {Function, _} ->
-                                    gen_lsp_help_server:get_help(
-                                        erlang, Function, lsp_signature, eep48_render_signature
-                                    );
+                                    gen_lsp_help_server:get_help(erlang, Function, Index, lsp_signature, eep48_render_signature);
                                 _ ->
                                     <<>>
                             end;
@@ -75,31 +71,38 @@ function_signature(Module, Function, Arity, Index) ->
                             % % so get latest syntax tree and parse spec should be better solution
                             % EDOC = edoc:get_doc(File, [{hidden, true}, {private, true}]),
                             Merged = merge_spec_clauses(Function, ClausesList, SpecList),
-                            ActiveSignature = lsp_utils:index_of(fun 
-                                    ({{Fn, FnArity},_,_}) when Fn =:= Function andalso FnArity =:= Index+1 -> true;
-                                    (_) -> false 
-                                end, Merged),
-                            Signatures = lists:map(fun ({{_, _}, Args, _}=Fn) ->
-                                #{
-                                    label => function_label(Fn),
-                                    parameters => function_parameters(Args) 
-                                }
-                                end,Merged),
-                            #{
-                                signatures => Signatures,
-                                activeSignature => ActiveSignature,
-                                activeParameter => Index
-                            };
+                            spec_to_signatures(Function, Index, Merged);
                         Other ->
-                            ?LOG("other match clause"),
-                            ?LOG(Other),
-                            [#{label => "", parameters => "" }]
+                            %?LOG("other match clause : ~p",[Other]),
+                            #{
+                                signatures => [],
+                                activeSignature => 0,
+                                activeParameter => 0
+                            }
 
                     end;
                 _ ->
-                    get_generic_help(Module, Function)
+                    get_generic_help(Module, Function, Index)
             end
     end.
+
+spec_to_signatures(Function, Index, SpecList) ->
+    ActiveSignature = lsp_utils:index_of(fun 
+        ({{Fn, FnArity},_,_}) when Fn =:= Function andalso Index+1 =< FnArity -> true;
+        (_) -> false 
+    end, SpecList),
+    Signatures = lists:map(fun ({{_, _}, Args, _}=Fn) ->
+    #{
+        label => function_label(Fn),
+        parameters => function_parameters(Args) 
+    }
+    end, SpecList),
+    #{
+        signatures => Signatures,
+        activeSignature => ActiveSignature,
+        activeParameter => Index
+    }.
+
 
 function_doc_syntax(File, Function, Arity) ->
     % extract spec and clauses for a specific function
@@ -147,7 +150,10 @@ merge_spec_clauses(Function, ClausesList, SpecList) ->
 %% {{FunctionName, Arity}, [{ParamName, ParamType}], ReturnType}
 to_light_speclist(SpecList) ->
     lists:map(fun 
-        ({{FnName,Arity}, [{type, _, 'fun', Args}|_T]}) -> {{FnName,Arity}, map_spec_args(Args),  map_spec_res(Args)};
+        ({{FnName,Arity}, [{type, _, 'fun', Args}|TypeRes]}) -> {{FnName,Arity}, map_spec_args(Args),  map_spec_res(TypeRes)};
+        ({{FnName,Arity}, [{type,_, bounded_fun,[{type, _, 'fun', Args}|TypeArgs]}]}) -> 
+            TypeTuples = bounded_type_tuples(lists:flatten(TypeArgs)),            
+            {{FnName,Arity}, map_spec_args_from_bounded(Args, TypeTuples),  map_spec_res_from_bounded(Args, TypeTuples)};
         (_) -> undefined
         end, SpecList).
 clause_to_light_speclist(Function, ClausesList) ->
@@ -165,6 +171,7 @@ map_clause_args(Args) ->
 map_spec_args([{type,_,product,Args}|_T]) ->
     lists:map(fun 
         ({ann_type,_, [{_,_, ArgName},{_,_,ArgType,_}]}) -> { ArgName, ArgType};
+        ({var, _,ArgName}) -> {ArgName, undefined};
         (_) -> undefined
         end, Args);
 
@@ -178,26 +185,54 @@ map_spec_res(_Args) ->
     ?LOG(_Args),
     undefined.
 
-get_generic_help(Module, Function) ->
-    Help = gen_lsp_help_server:get_help(Module, Function, lsp_signature, eep48_render_signature),
+% extract all arg and result types
+bounded_type_tuples(TypeArgs) ->
+    lists:map(fun ({type,_, _Constraint, 
+                                [{_,_,_}, [{var,_,ArgName},{type,_,ArgType,_}]]}) -> {ArgName, ArgType};
+        (_) -> undefined
+        end, TypeArgs).
+
+map_spec_args_from_bounded([{type,_,product,Args}|_Res], TypeTuples) ->
+        lists:filtermap(fun({var,_,VarName}) ->
+            case lists:keyfind(VarName, 1, TypeTuples) of
+                false -> false;
+                Tuple -> {true, Tuple}
+            end
+            end, Args);
+map_spec_args_from_bounded(_, _) ->
+    [].
+
+map_spec_res_from_bounded([{type,_,product,_Args}|[{var, _, VarName}]], TypeTuples) ->
+    case lists:keyfind(VarName, 1, TypeTuples) of
+        {_, VarType} -> VarType;
+        _ -> undefined        
+    end;
+map_spec_res_from_bounded(_, _) ->
+    undefined.
+
+get_generic_help(Module, Function, Index) ->
+    Help = gen_lsp_help_server:get_help(Module, Function, Index, lsp_signature, eep48_render_signature),
     case Help of
         undefined -> <<>>;
         _ -> Help
     end.
 
-eep48_render_signature(_Module, Function, FnDoc, Docs) ->
-    % FnDoc = lists:filter(fun({{function, F, _},_Anno,_Sig,_Doc,_Meta}) ->
-    %                          F =:= Function;
-    %                     (_) ->
-    %                          false
-    %                  end, Docs),
-    #{
-        signatures => [
-            # {
-                label => <<"eep48_render_signature">>}],
-        activeSignature => 0,
-        activeParameter => 0
-    }.
+eep48_render_signature(_Module, Function, FDocs, _Docs, Index) ->
+    Grouping =
+        lists:foldl(
+          fun({Group,_Anno,_Sig,_Doc,#{ signature := Signature }} = _Func,Acc) ->
+                  Signatures = maps:get(Signature, Acc, []),
+                  Acc#{ Group => [Signature|Signatures] };
+             ({_Group, _Anno, _Sig, _Doc, _Meta} = _Func, Acc) -> Acc
+          end, #{}, lists:sort(FDocs)),
+    MAP = lists:flatten(lists:map(
+      fun({{_, _Fn, _FnArity} = _Group, Signatures}) ->
+        SpecList = lists:map(fun ({attribute, _, spec, {{_,_},_}=FnSpec}) ->
+                FnSpec
+            end, lists:flatten(Signatures)),
+        SpecList
+      end, maps:to_list(Grouping))),
+    spec_to_signatures(Function, Index, to_light_speclist(MAP)).
 
 signatures_sample(Documentation) ->
     [
