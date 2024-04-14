@@ -12,7 +12,8 @@
          to_binary/1,
          bin_to_atom/1,
          bin_to_atom/2,
-         client_position/1]).
+         client_position/1,
+         index_of/2]).
 
 client_range(Line, StartChar, EndChar) ->
     #{
@@ -273,3 +274,18 @@ make_temporary_file(Contents) ->
     filelib:ensure_dir(TempFile),
     file:write_file(TempFile, Contents),
     TempFile.
+
+index_of(Fun, List) -> 
+    case lists:foldl(fun 
+        (X, {not_found, I}) -> 
+            case Fun(X) of
+                true -> {ok, I+1};
+                _ -> {not_found, I+1}
+            end;
+        (_, Acc) -> Acc 
+        end,{not_found, -1}, List) 
+    of
+        {not_found, _} -> -1;
+        {ok, Index} -> Index
+    end.
+        

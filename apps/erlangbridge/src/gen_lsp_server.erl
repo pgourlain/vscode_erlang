@@ -100,7 +100,7 @@ remove_text_for_logging(Input) ->
     Input.
 
 do_contents(Socket, #{method := Method} = Input) ->
-    lsp_log("LSP received ~p", [remove_text_for_logging(Input)]),
+    lsp_log("LSP received ~p", [remove_text_for_logging(Input)]),    
     case call_handler(Socket, Method, maps:get(params, Input, undefined)) of
         {ok, Result} ->
             send_response_with_id(Socket, Input, #{result => Result});

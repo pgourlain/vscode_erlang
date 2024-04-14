@@ -5,8 +5,17 @@
     textDocument_didOpen/2, textDocument_didClose/2, textDocument_didSave/2, textDocument_didChange/2,
     textDocument_definition/2, textDocument_references/2, textDocument_hover/2, textDocument_completion/2,
     textDocument_formatting/2, textDocument_codeLens/2, textDocument_documentSymbol/2,
-    textDocument_inlayHints/2]).
+    textDocument_inlayHints/2, textDocument_signatureHelp/2]).
 -export([textDocument_inlineValues/2]).
+
+-define(LOG(S),
+	begin
+        gen_lsp_server:lsp_log("~p", [S])
+	end).
+-define(LOG(Fmt, Args),
+	begin
+        gen_lsp_server:lsp_log(Fmt, Args)
+	end).
 
 initialize(_Socket, Params) ->
     % usefull when file is open instead of folder
@@ -26,9 +35,9 @@ initialize(_Socket, Params) ->
         codeLensProvider => true,
         documentSymbolProvider => true,
         inlayHintProvider => true,
-        %signatureHelpProvider => #{triggerCharacters => <<"(">>}
-        inlineValueProvider => true
-        %declarationProvider => true    
+        inlineValueProvider => true,  
+        signatureHelpProvider => #{triggerCharacters => <<"(,">>, retriggerCharacters => <<",">>}
+        %declarationProvider => true
     }}.
 
 initialized(Socket, _Params) ->
@@ -159,10 +168,13 @@ textDocument_completion(_Socket, Params) ->
     Line = mapmapget(position, line, Params),
     Character = mapmapget(position, character, Params),
     File = lsp_utils:file_uri_to_file(Uri),
+    {TextBefore,_} = text_before_character(File, Line, Character),
+    auto_complete(File, Line + 1, TextBefore).
+
+text_before_character(File, Line, Character) ->
     Contents = gen_lsp_doc_server:get_document_contents(File),
     LineText = lists:nth(Line + 1, binary:split(Contents, <<"\n">>, [global])),
-    TextBefore = binary:part(LineText, 0, min(Character + 1, byte_size(LineText))),
-    auto_complete(File, Line + 1, TextBefore).
+    {binary:part(LineText, 0, min(Character + 1, byte_size(LineText))), LineText}.
 
 textDocument_formatting(_Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
@@ -264,6 +276,74 @@ textDocument_inlineValues(_Socket, Params) ->
         end, 
         lsp_navigation:inlinevalues_info(lsp_utils:file_uri_to_file(Uri), {LE,CE}))
     .
+
+% Params is like this :
+% [
+%     #{
+%         position => #{line => 28, character => 23},
+%         context =>
+%             #{
+%                 isRetrigger => false,
+%                 triggerCharacter => <<"(">>,
+%                 triggerKind => 2
+%             },
+%         textDocument =>
+%             #{
+%                 uri =>
+%                     <<"file:///..../sources/erlang/sample/src/sample.erl">>
+%             }
+%     }
+% ]
+% https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#signatureHelpParams
+textDocument_signatureHelp(_Socket, Params) ->
+    Uri = mapmapget(textDocument, uri, Params),
+    Line = mapmapget(position, line, Params),
+    Character = mapmapget(position, character, Params),
+    IsRetrigger = mapmapget(context, isRetrigger, Params),
+    %TriggerCharacter = mapmapfind(context, triggerCharacter, Params),
+    %TriggerKind = mapmapget(context, triggerKind, Params), % 1: manual activation, 2: trigger by trigger character, 3: cursor move or content document changing
+    
+    File = lsp_utils:file_uri_to_file(Uri),
+    FileModule = list_to_atom(filename:rootname(filename:basename(File))),
+    SignatureHelp = case IsRetrigger of
+        true ->
+            % activeSignature or empty
+            CurrentResult = mapmapfind(context, activeSignatureHelp, Params, fun lsp_signature:disable_signature_help/0),
+            case signature_from_location(FileModule, File, Line, Character) of
+                error -> CurrentResult;
+                Value -> Value
+            end;
+        false -> 
+            %%if triggerkind ==1, tokens can be used to find method signature
+            case signature_from_location(FileModule, File, Line, Character) of
+                error -> lsp_signature:disable_signature_help();
+                Value -> Value
+            end; 
+        _ -> []
+    end,
+    SignatureHelp.
+
+signature_from_location(FileModule, File, Line, Character) ->
+    %read text before location and take function
+    {TextBefore, LineText} = text_before_character(File, Line, Character-1),
+    case erl_scan:string(lsp_utils:to_string(LineText),{1,1}) of
+        {ok, Tokens, _} -> 
+            %filter tokens
+            FilteredTokens = lists:filter(fun 
+                ({_,{_,Col},_}) when Col =< Character  -> true;
+                ({_,{_,Col}}) when Col =< Character  -> true;                
+                (_) -> false 
+                end, Tokens),
+            lsp_signature:signature_help_fromtokens(FileModule, FilteredTokens);
+        {error, _, _} -> 
+            case erl_scan:string(lsp_utils:to_string(TextBefore),{1,1}) of
+                {ok, Tokens, _} -> 
+                    lsp_signature:signature_help_fromtokens(FileModule, Tokens);
+                {error, ErrorInfo, ErrLoc} -> 
+                    ?LOG("parse_error: ~p/~p",[ErrorInfo,ErrLoc]),
+                    error
+            end
+    end.    
 
 validate_file(Socket, File) ->
     case gen_lsp_config_server:linting() of
@@ -410,3 +490,13 @@ match_regex(_, []) ->
 
 mapmapget(Key1, Key2, Map) ->
     maps:get(Key2, maps:get(Key1, Map)).
+
+mapmapfind(Key1, Key2, Map, NotFound) ->
+    case maps:find(Key1, Map) of
+        {ok, Value} ->
+            case maps:find(Key2, Value) of
+                {ok, Value1} -> Value1;
+                _ -> NotFound()
+                end;
+        _ -> NotFound()
+    end.

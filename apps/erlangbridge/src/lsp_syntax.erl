@@ -1,6 +1,6 @@
 -module(lsp_syntax).
 
--export([validate_parsed_source_file/1]).
+-export([validate_parsed_source_file/1, fold_in_syntax_tree/4,find_in_syntax_tree/2]).
 
 validate_parsed_source_file(File) ->
     FileSyntaxTree = gen_lsp_doc_server:get_syntax_tree(File),
@@ -155,3 +155,27 @@ extract_info({{Line, Column}, Module, MessageBody}) ->
         character => Column,
         message => erlang:list_to_binary(lists:flatten(apply(Module, format_error, [MessageBody]), []))
     }.
+
+
+fold_in_syntax_tree(_Fun, StartAcc, _File, undefined) ->
+    StartAcc;
+fold_in_syntax_tree(Fun, StartAcc, File, SyntaxTree) ->
+    {Result, _, _} = lists:foldl(fun (TopLevelElementSyntaxTree, Acc) ->
+        erl_syntax_lib:fold(fun
+                        ({attribute, _, file, {NewFile, _}} = Tree, {ValueAcc, _CurrentFile, undefined}) ->
+                            {Fun(Tree, File, ValueAcc), File, NewFile};
+                        ({attribute, _, file, {NewFile, _}} = Tree, {ValueAcc, _CurrentFile, FirstFile}) when NewFile =:= FirstFile ->
+                            {Fun(Tree, File, ValueAcc), File, FirstFile};
+                        ({attribute, _, file, {NewFile, _}} = Tree, {ValueAcc, _CurrentFile, FirstFile}) ->
+                            {Fun(Tree, NewFile, ValueAcc), NewFile, FirstFile};
+                        (Tree, {ValueAcc, CurrentFile, FirstFile}) ->
+                            {Fun(Tree, CurrentFile, ValueAcc), CurrentFile, FirstFile}
+        end, Acc, TopLevelElementSyntaxTree)
+    end, {StartAcc, File, undefined}, SyntaxTree),
+    Result.
+
+find_in_syntax_tree(Fun, File) ->
+    fold_in_syntax_tree(fun
+        (SyntaxTree, CurrentFile, undefined) -> Fun(SyntaxTree, CurrentFile);
+        (_SyntaxTree, _CurrentFile, Value) -> Value
+    end, undefined, File, gen_lsp_doc_server:get_syntax_tree(File)).
