@@ -4,7 +4,7 @@
 -export([start_link/0]).
 
 -export([init/1,handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
--export([get_help/2,get_help/5]).
+-export([get_help/2,get_help/5, render_help_body/3]).
 
 -define(SERVER, ?MODULE).
 
@@ -40,6 +40,9 @@ get_help(Module, Function) ->
 get_help(Module, Function, CallBackState, RenderModule, RenderFunction) -> 
     gen_server:call(?SERVER, {get_help, Module, Function, CallBackState, RenderModule, RenderFunction}).
 
+render_help_body(Function, Arity, Doc) ->
+    gen_server:call(?SERVER, {render_help_body, Function, Arity, Doc}).
+
 init(_Args) ->
     {ok, #state{modules=#{}}}.
 
@@ -50,6 +53,10 @@ handle_call({get_help, Module, Function, CallBackState, RenderModule, RenderFunc
     Reply = safe_get_help(Module, Function, fun (M, F, FnDoc, Docs) ->
             apply(RenderModule, RenderFunction, [M, F, FnDoc, Docs, CallBackState])
         end),
+    {reply, Reply, State};
+
+handle_call({render_help_body, F, A, Doc}, _From, State) ->
+    Reply = render_docs(get_local_doc({F,A},Doc)),
     {reply, Reply, State};
 
 handle_call(_Request, _From, State) ->
@@ -72,12 +79,10 @@ safe_get_help(Module, Function, Callback) ->
         end.
     -else.
     get_help_eep48(_Module, _Function) ->
-        %gen_lsp_server:lsp_log("get_help_eep48 notsupported",[]),
         {error, eep48_not_supported}.
     -endif.
 -else.
     get_help_eep48(_Module, _Function) ->
-        %gen_lsp_server:lsp_log("get_help_eep48 notsupported",[]),
         {error, eep48_not_supported}.
 -endif.
 
@@ -212,14 +217,12 @@ render_element({br, _, BrContents}, State) ->
     render_elements(BrContents, State)
     ++"";
 render_element({ul, _Style, UlContents}, State) ->
-    % gen_lsp_server:lsp_log("ul element, style:~p", [_Style]),
     "\n" ++
     render_elements(UlContents, State)
     ++"";
 render_element({li, _Style, []}, _State) ->
     "";
 render_element({li, _Style, LiContents}, State) ->
-    % gen_lsp_server:lsp_log("li element, style:~p, content:~p", [_Style, LiContents]),
     "\n* " ++
     render_elements(LiContents, State)
     ++"";
