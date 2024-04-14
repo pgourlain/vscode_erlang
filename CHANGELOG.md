@@ -1,5 +1,13 @@
 # Change log
 
+## Version 1.0.0 (April 14, 2024)
+* [281](https://github.com/pgourlain/vscode_erlang/issues/281) : Add implementation of Signature help (https://code.visualstudio.com/Docs/languages/typescript#_signature-help)
+  - known issues
+    - is not working yet on function calls written on several lines calls
+    - parameters documentation is not yet implemented
+
+---
+
 ## Version 0.9.9 (March 29, 2024)
 
 * [276](https://github.com/pgourlain/vscode_erlang/issues/276) : Add configuration icons in languages sections (using official icons)
