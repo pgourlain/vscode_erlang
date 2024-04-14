@@ -101,7 +101,7 @@ export class ErlangInlayHintsProvider implements InlayHintsProvider {
     resolveInlayHint?(hint: InlayHint, token: CancellationToken): ProviderResult<InlayHint> {
         //TODO: add tooltip,...
         //called when mouse is over the InlayHint
-        this.lspOutputChannel.appendLine(`resolveInlayHint : ${JSON.stringify(hint)}`);
+        //this.lspOutputChannel.appendLine(`resolveInlayHint : ${JSON.stringify(hint)}`);
         return hint;
     }
 }
