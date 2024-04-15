@@ -1,5 +1,15 @@
 # Change log
 
+## Version 1.0.1 (April 15, 2024)
+
+* [282](https://github.com/pgourlain/vscode_erlang/issues/281) : fix goto definition when function is imported via import attribute
+* [280](https://github.com/pgourlain/vscode_erlang/issues/281) : Otp 27 syntax updates
+
+Thanks to
+* [Kornel Horvath](https://github.com/KornelH)
+
+---
+
 ## Version 1.0.0 (April 14, 2024)
 * [281](https://github.com/pgourlain/vscode_erlang/issues/281) : Add implementation of Signature help (https://code.visualstudio.com/Docs/languages/typescript#_signature-help)
   - known issues
