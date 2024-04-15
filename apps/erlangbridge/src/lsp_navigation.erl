@@ -486,6 +486,22 @@ local_function_references(File, Function, Arity) ->
             end, [], File, gen_lsp_doc_server:get_syntax_tree(File))
     end.
 
+find_tuple(Tuple, List) ->
+    [X || X <- List, X == Tuple].
+match_import_module_file(File, Function, Arity) ->
+    case find_in_syntax_tree(fun
+        ({attribute,_ ,import, {ImportedModule, ImportedFunctions}}, _) ->
+            case find_tuple({Function, Arity}, ImportedFunctions) of
+                [] -> undefined;
+                _ -> [gen_lsp_doc_server:get_module_file(ImportedModule)]
+            end;
+        (_SyntaxTree, _CurrentFile) ->
+            undefined
+    end, File) of
+        undefined -> [];
+        L -> L
+    end.    
+
 find_definition(File, What) ->
     FileModule = list_to_atom(filename:rootname(filename:basename(File))),
     find_definition(File, FileModule, What).
@@ -519,10 +535,13 @@ find_definition(File, FileModule, {{_, {function, Module, Function, Arity}}, Det
         (_SyntaxTree, _CurrentFile) ->
             undefined
         end,
+    % get import file if match with function name and arity 
+    ImportFiles = match_import_module_file(File, Function, Arity),
     ModFiles =
-        if  FileModule == Module -> [File];
+        if  FileModule == Module -> [File | ImportFiles];
             true                 -> gen_lsp_doc_server:get_module_files(Module)
         end,
+    
     Locations = [find_in_syntax_tree(FindFun, ModFile) || ModFile<-ModFiles],
     [Location || Location<-Locations, Location /= undefined];
 find_definition(File, _FileModule, {{gen_msg, GenMsg}, _Details}) ->
