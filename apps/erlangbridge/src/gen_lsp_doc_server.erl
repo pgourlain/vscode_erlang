@@ -271,7 +271,7 @@ scan_project_files(State = #state{project_modules = OldProjectModules}) ->
                 false -> do_add_project_file(File, AccProjectModules, BuildDir)
             end
         end,
-    AllProjectModules = filelib:fold_files(gen_lsp_config_server:root(), ".erl$",
+    AllProjectModules = filelib:fold_files(gen_lsp_config_server:root(), "\\.erl$",
                                            true, CollectProjSrcFilesFun, #{}),
     gen_lsp_server:lsp_log(
         "~p: Project modules (~p) with all source files:~n  ~p~n",
