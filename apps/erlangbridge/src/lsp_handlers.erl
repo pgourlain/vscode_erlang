@@ -55,13 +55,13 @@ cancelRequest(_Socket, _Params) ->
 setTrace(_Socket, _Params) ->
     ok.
 
-configuration(Socket, [ErlangSection, FilesSection, ComputedSecton, HttpSection, SearchSection]) ->
+configuration(Socket, [ErlangSection, FilesSection, ComputedSection, HttpSection, SearchSection]) ->
     Documents = gen_lsp_doc_server:opened_documents(),
     gen_lsp_config_server:update_config(erlang, ErlangSection),
     %% because 'verbose' is stored in erlang section, loggin should be after update erlang config
     gen_lsp_server:lsp_log("configuration ~p", [Documents]),
     gen_lsp_config_server:update_config(files, FilesSection),
-    gen_lsp_config_server:update_config(computed, ComputedSecton),
+    gen_lsp_config_server:update_config(computed, ComputedSection),
     gen_lsp_config_server:update_config(http, HttpSection),
     gen_lsp_config_server:update_config(search, SearchSection),
     gen_lsp_server:lsp_log("vscode configuration:~n"
@@ -70,7 +70,7 @@ configuration(Socket, [ErlangSection, FilesSection, ComputedSecton, HttpSection,
                            " - computed: ~p~n"
                            " - http: ~p~n"
                            " - search: ~p",
-                           [ErlangSection, FilesSection, ComputedSecton,
+                           [ErlangSection, FilesSection, ComputedSection,
                             HttpSection, SearchSection]),
 
     %% Scan workspace for source files
