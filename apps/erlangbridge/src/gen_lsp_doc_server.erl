@@ -257,11 +257,86 @@ module_files_to_parse(Files, BuildDir) ->
             NonBuildFiles
     end.
 
+%%--------------------------------------------------------------------
+%% @doc Return automatic exclude filters in case of no corresponding
+%% configuration.
+%%
+%% If there is no exclude filter specified for some paths (neither by user, host
+%% or workspace) then we shall use some automatic exclude filters to exclude
+%% some usually unwanted paths from searching and parsing source files.
+%%
+%% Example:
+%% Bazel build system sym-links dependencies of test (maybe all) rules with
+%% unique paths through `bazel-*' subdirectories of the workspace.
+%% It can results large number of duplicated source files, like Erlang/OTP,
+%% that are parsed and stored in ETS tables and consumes huge amount of memory.
+%% We don't need to parse these files, at least not the duplicates. One
+%% occurrence per source file is enough but as every project is different, we
+%% cannot come up a universal exclude/include filter list, so let's exclude
+%% Bazel cache directories.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_auto_exclude_filters() -> [{Glob, DoExclude, InverseRegExpConditions}]
+      when Glob :: string(),
+           DoExclude :: boolean(),
+           InverseRegExpConditions :: [RegularExpression],
+           RegularExpression :: string().
+get_auto_exclude_filters() ->
+    [%% Bazel cache
+     {"**/bazel-*/**", true, ["^(.*[/\\\\])?bazel-[^/\\\\]+([/\\\\].*)?$"]}
+    ].
+
+%%--------------------------------------------------------------------
+%% @doc Exclude filters for searching and parsing project files.
+%%
+%% It is basically the same as
+%% {@link gen_lsp_config_server:search_files_exclude/0} with some extra exclude
+%% filters for special build systems or other tools if there is no corresponding
+%% configuration for those.
+%% @end
+%% @see get_auto_exclude_filters/0
+%% @see gen_lsp_config_server:search_files_exclude/0
+%%--------------------------------------------------------------------
+-spec get_scan_project_files_exclude_conf() ->
+        #{Glob :: atom() => DoExclude :: boolean()}.
+get_scan_project_files_exclude_conf() ->
+    SearchExcludeConf = gen_lsp_config_server:search_files_exclude(),
+    SearchExcludes = [{atom_to_list(Glob), DoExcl}
+                      || {Glob, DoExcl}<-maps:to_list(SearchExcludeConf)],
+    AutoExcludes = get_auto_exclude_filters(),
+    CompiledAutoExcludes =
+        [{Glob, DoExclude,
+          [begin {ok, MP} = re:compile(RE), MP end || RE<-InvRegExpConditions]}
+         || {Glob, DoExclude, InvRegExpConditions}<-AutoExcludes],
+    NewSearchExcludes =
+        lists:foldl(
+            fun({Glob, DoExclude, InverseREs}, AccSearchExcludes) ->
+                %% Check all exclude filter if matches to any regexp
+                HasMatchingGlob =
+                    lists:any(
+                        fun({AccGlob, _AccDoExclude}) ->
+                            lists:any(
+                                fun(RE) -> nomatch /= re:run(AccGlob, RE) end,
+                                InverseREs)
+                        end,
+                        AccSearchExcludes),
+                case HasMatchingGlob of
+                    true -> %% There are some matching globs, trust VSC settings
+                        AccSearchExcludes;
+                    false -> %% No glob is specified, add the automatic one
+                        [{Glob, DoExclude} | AccSearchExcludes]
+                end
+            end,
+            SearchExcludes,
+            CompiledAutoExcludes),
+    maps:from_list(
+        [{list_to_atom(Glob), DoExcl} || {Glob, DoExcl}<-NewSearchExcludes]).
+
 %% @doc Scan workspace for project source files including dependencies too.
 -spec scan_project_files(#state{}) -> #state{}.
 scan_project_files(State = #state{project_modules = OldProjectModules}) ->
     BuildDir = get_build_dir(), % relative to workspace root or 'undefined'
-    SearchExcludeConf = gen_lsp_config_server:search_files_exclude(),
+    SearchExcludeConf = get_scan_project_files_exclude_conf(),
     SearchExclude = lsp_utils:search_exclude_globs_to_regexps(SearchExcludeConf),
     %% Find all source (*.erl) files not exluded by any filter
     CollectProjSrcFilesFun =
