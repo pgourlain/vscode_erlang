@@ -246,14 +246,14 @@ module_files_to_parse(Files, BuildDir) ->
             %% All files are from dependencies.
             %% In case of multiple files are found for a module and all of them
             %% are in the build directory (_build) then most probably those are
-            %% the same but located under different rebar3 relase targets.
+            %% the same but located under different rebar3 release targets.
             %% Which one to choose? :S
             %% Choose the first, if all are the same. (But are they?)
             [hd(lists:sort(Files))]; % sort just to choose the 1st consistently
         {_, NonBuildFiles} ->
             %% Files are under both '_build' and repo. The files under
             %% '_build' are sym-linked by rebar3, ignore these.
-            %% Parse the orignal ones only.
+            %% Parse the original ones only.
             NonBuildFiles
     end.
 
@@ -263,7 +263,7 @@ scan_project_files(State = #state{project_modules = OldProjectModules}) ->
     BuildDir = get_build_dir(), % relative to workspace root or 'undefined'
     SearchExcludeConf = gen_lsp_config_server:search_files_exclude(),
     SearchExclude = lsp_utils:search_exclude_globs_to_regexps(SearchExcludeConf),
-    %% Find all source (*.erl) files not exluded by any filter
+    %% Find all source (*.erl) files not excluded by any filter
     CollectProjSrcFilesFun =
         fun(File, AccProjectModules = #{}) ->
             case lsp_utils:is_path_excluded(File, SearchExclude) of
@@ -271,7 +271,7 @@ scan_project_files(State = #state{project_modules = OldProjectModules}) ->
                 false -> do_add_project_file(File, AccProjectModules, BuildDir)
             end
         end,
-    AllProjectModules = filelib:fold_files(gen_lsp_config_server:root(), ".erl$",
+    AllProjectModules = filelib:fold_files(gen_lsp_config_server:root(), "\\.erl$",
                                            true, CollectProjSrcFilesFun, #{}),
     gen_lsp_server:lsp_log(
         "~p: Project modules (~p) with all source files:~n  ~p~n",
