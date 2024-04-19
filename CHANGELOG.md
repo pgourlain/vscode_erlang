@@ -1,5 +1,13 @@
 # Change log
 
+## Version 1.0.2 (April 19, 2024)
+
+* [284](https://github.com/pgourlain/vscode_erlang/issues/284) : Search for and parse only Erlang source files
+* [285](https://github.com/pgourlain/vscode_erlang/issues/285) : Fine tuning of scanning for project files
+
+Thanks to
+* [Kornel Horvath](https://github.com/KornelH)
+
 ## Version 1.0.1 (April 15, 2024)
 
 * [282](https://github.com/pgourlain/vscode_erlang/issues/281) : fix goto definition when function is imported via import attribute
