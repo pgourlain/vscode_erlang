@@ -2,15 +2,7 @@
 
 -export([inlayhint_analyze/3, generate_inlayhints/2]).
 
--define(LOG(S),
-	begin
-        gen_lsp_server:lsp_log("~p", [S])
-	end).
--define(LOG(Fmt, Args),
-	begin
-        gen_lsp_server:lsp_log(Fmt, Args)
-	end).
-
+-include("lsp_log.hrl").
 
 inlayhint_analyze(SyntaxTree, _CurrentFile, #{defs := Defs, calls := Calls} = Dict) ->
     case SyntaxTree of

@@ -3,12 +3,7 @@
 -export([eep48_render_signature/5]).
 -export([disable_signature_help/0, signature_help_fromtokens/2]).
 
--define(LOG(S), begin
-    gen_lsp_server:lsp_log("~p", [S])
-end).
--define(LOG(Fmt, Args), begin
-    gen_lsp_server:lsp_log(Fmt, Args)
-end).
+-include("lsp_log.hrl").
 
 disable_signature_help() ->
     [].
@@ -123,7 +118,7 @@ function_doc_syntax(File, Function, Arity) ->
             {AccClauses, [FnSpec | AccSpec]};
         (_SyntaxTree, _CurrentFile, Acc) ->
             Acc
-    end, {[], []}, File, gen_lsp_doc_server:get_syntax_tree(File)).
+    end, {[], []}, File).
 
 
 function_label({{FnName, _FnArity}, Args, ResType}) ->
