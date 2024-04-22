@@ -3,17 +3,10 @@
 -export([definition/3, hover_info/3, function_description/2, function_description/3, references/3, function_clauses/3]).
 -export([codelens_info/1, symbol_info/1, record_fields/2, find_function_with_line/2, fold_references/4]).
 -export([inlayhints_info/3, full_inlayhints_info/2, functions/2]).
--export([inlinevalues_info/2]).
--import(lsp_syntax,[fold_in_syntax_tree/4, find_in_syntax_tree/2]).
+-export([inlinevalues_info/2, local_function_references/3]).
+-import(lsp_syntax,[fold_in_syntax_tree/4, find_in_syntax_tree/2, fold_in_syntax_tree/3]).
 
--define(LOG(S),
-	begin
-        gen_lsp_server:lsp_log("~p", [S])
-	end).
--define(LOG(Fmt, Args),
-	begin
-        gen_lsp_server:lsp_log(Fmt, Args)
-	end).
+-include("lsp_log.hrl").
 
 -type lsp_location() :: {File::file:filename(), LineNo::pos_integer(),
                          FirstColumn::pos_integer(), LastColumn::pos_integer()}.
@@ -65,7 +58,7 @@ codelens_info(File) ->
             {FunAcc, UpdatedExportAcc};
         (_SyntaxTree, _CurrentFile, Acc) ->
             Acc
-    end, {[], #{}}, File, gen_lsp_doc_server:get_syntax_tree(File)),
+    end, {[], #{}}, File),
     FileModule = list_to_atom(filename:rootname(filename:basename(File))),
     lists:map(fun ({Function, Arity, L, Start}) ->
         RefCount = length(local_function_references(File, Function, Arity)) +
@@ -111,8 +104,7 @@ inlinevalues_info(File, {LS, _CS}) ->
             (_, _, Acc) -> Acc
         end, 
         [],
-        File,
-        gen_lsp_doc_server:get_syntax_tree(File)
+        File
     ),
     case Funs of
         [] -> 
@@ -195,7 +187,7 @@ symbol_info(File) ->
             [{Record, 23, L} | Acc];
         (_SyntaxTree, _CurrentFile, Acc) ->
             Acc
-    end, [], File, gen_lsp_doc_server:get_syntax_tree(File))).
+    end, [], File)).
 
 %return list of function for specified file
 functions(File, FunName) ->
@@ -205,7 +197,7 @@ functions(File, FunName) ->
             (_SyntaxTree, _CurrentFile, Acc) ->
                 Acc
         end,
-        [], File, gen_lsp_doc_server:get_syntax_tree(File)).
+        [], File).
 
 record_fields(File, Record) ->
     RecordFields = find_in_syntax_tree(fun
@@ -481,9 +473,12 @@ local_function_references(File, Function, Arity) ->
                 ({call, {L, C}, {atom, _, FunctionName}, Args}, CurrentFile, Acc)
                         when CurrentFile =:= File, Function =:= FunctionName, length(Args) == Arity ->
                     [{File, L, C, C + FunctionLength} | Acc];
+                ({'fun',{L, C}, {function, FnName, FnArity}}, _CurrentFile, Acc) 
+                        when FnName =:= Function, FnArity =:= Arity ->    
+                    [{File, L, 4+C, 4+C + FunctionLength} | Acc];            
                 (_SyntaxTree, _CurrentFile, Acc) ->
                     Acc
-            end, [], File, gen_lsp_doc_server:get_syntax_tree(File))
+            end, [], File)
     end.
 
 find_tuple(Tuple, List) ->
@@ -854,9 +849,18 @@ function_clauses(File, Function, Arity) ->
             [Clauses | Acc];
         (_SyntaxTree, _CurrentFile, Acc) ->
             Acc
-    end, [], File, gen_lsp_doc_server:get_syntax_tree(File))).
+    end, [], File)).
 
 fold_references(Fun, Init, File, FileSyntaxTree) ->
+    Imports = fold_in_syntax_tree(fun
+        (_Syntax, CurrentFile, Acc) when CurrentFile =/= File ->
+            Acc;
+        ({attribute, _, import, {ImportModuleName, FnImports}}, _CurrentFile, Acc) ->
+            [{{FnName, FnArity}, ImportModuleName} || {FnName ,FnArity} <- FnImports] ++ Acc;
+        (_Syntax, _CurrentFIle, Acc) ->
+            Acc        
+    end, [], File, FileSyntaxTree),
+
     fold_in_syntax_tree(fun
         (_Syntax, CurrentFile, Acc) when CurrentFile =/= File ->
             Acc;
@@ -866,6 +870,15 @@ fold_references(Fun, Init, File, FileSyntaxTree) ->
         ({'fun', {_, _}, {function, {atom, {ModuleLine, ModuleColumn}, Module}, {atom, {_, _}, Function}, {integer, {_, Start}, Arity}}}, _CurrentFile, Acc) ->
             End = Start + length(integer_to_list(Arity)),
             Fun({function, Module, Function, Arity}, ModuleLine, ModuleColumn, End, Acc);
+        ({call, {_, _}, {atom, {ModuleLine, FunctionColumn}, Function}, Args}, _CurrentFile, Acc) ->
+            Arity = length(Args),
+            case lists:keyfind({Function, Arity}, 1, Imports) of
+                {_, ModuleName} -> 
+                    %if local call is present in import references should be updated
+                    End = FunctionColumn + length(atom_to_list(Function)),
+                    Fun({function, ModuleName, Function, Arity}, ModuleLine, FunctionColumn, End, Acc);
+                false -> Acc
+            end;                
         (_Syntax, _CurrentFIle, Acc) ->
             Acc
     end, Init, File, FileSyntaxTree).

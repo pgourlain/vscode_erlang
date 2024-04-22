@@ -1,6 +1,7 @@
 -module(lsp_syntax).
 
 -export([validate_parsed_source_file/1, fold_in_syntax_tree/4,find_in_syntax_tree/2]).
+-export([fold_in_syntax_tree/3]).
 
 validate_parsed_source_file(File) ->
     FileSyntaxTree = gen_lsp_doc_server:get_syntax_tree(File),
@@ -156,7 +157,8 @@ extract_info({{Line, Column}, Module, MessageBody}) ->
         message => erlang:list_to_binary(lists:flatten(apply(Module, format_error, [MessageBody]), []))
     }.
 
-
+fold_in_syntax_tree(Fun, StartAcc, File) ->
+    fold_in_syntax_tree(Fun, StartAcc, File, gen_lsp_doc_server:get_syntax_tree(File)).
 fold_in_syntax_tree(_Fun, StartAcc, _File, undefined) ->
     StartAcc;
 fold_in_syntax_tree(Fun, StartAcc, File, SyntaxTree) ->
