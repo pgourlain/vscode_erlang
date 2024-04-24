@@ -53,20 +53,25 @@ end_per_testcase(_TestCase, Config) ->
 %% test cases %%
 %%%%%%%%%%%%%%%%
 
-check_result(Result, ExpectedStart, ExpectedEnd, ExpectedModuleName) ->
+check_result(Result, ExpectedStart, ExpectedEnd, ExpectedModuleName) when is_tuple(Result) ->
     error_logger:info_msg("check_result: ~p ~p ~p ~p~n", [Result, ExpectedStart, ExpectedEnd, ExpectedModuleName]),
     {FilePath, Line, _StartColumn, _EndColumn} = Result,
     ?assertEqual(ExpectedStart, Line - 1),
     ?assertEqual(ExpectedEnd, Line - 1),
     BaseName = filename:basename(FilePath),
-    ?assertEqual(ExpectedModuleName, BaseName).
+    ?assertEqual(ExpectedModuleName, BaseName);
+check_result([Result], ExpectedStart, ExpectedEnd, ExpectedModuleName) when is_tuple(Result) ->
+    check_result(Result, ExpectedStart, ExpectedEnd, ExpectedModuleName).
 
-check_result(Result, ExpectedStart, ExpectedEnd) ->
+check_result(Result, ExpectedStart, ExpectedEnd) when is_tuple(Result) ->
+     error_logger:info_msg("check_result/3: ~p ~p ~p~n", [Result, ExpectedStart, ExpectedEnd]),
     {_File, Line, _StartColumn, _EndColumn} = Result,
 
     ?assertEqual(ExpectedStart, Line - 1),
     ?assertEqual(ExpectedEnd, Line - 1),
-    ok.
+    ok;
+check_result([Result], ExpectedStart, ExpectedEnd) when is_tuple(Result) ->
+    check_result(Result, ExpectedStart, ExpectedEnd).
 
 dotestfiles(AppDir, [{FileName, LocationTests}|T]) ->
     dotestfile(filename:join(AppDir,FileName), LocationTests),
