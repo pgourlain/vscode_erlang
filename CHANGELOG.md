@@ -3,7 +3,7 @@
 ## Version 1.0.3 (April 24, 2024)
 
 * Revert part of #285, more details here : [287](https://github.com/pgourlain/vscode_erlang/issues/287)
-  - a deep analyse is in progress
+  - a deep analysis is in progress
 
 ---
 
