@@ -1,5 +1,12 @@
 # Change log
 
+## Version 1.0.3 (April 24, 2024)
+
+* Revert part of #285, more details here : [287](https://github.com/pgourlain/vscode_erlang/issues/287)
+  - a deep analyse is in progress
+
+---
+
 ## Version 1.0.2 (April 19, 2024)
 
 * [284](https://github.com/pgourlain/vscode_erlang/issues/284) : Search for and parse only Erlang source files
@@ -7,6 +14,8 @@
 
 Thanks to
 * [Kornel Horvath](https://github.com/KornelH)
+
+---
 
 ## Version 1.0.1 (April 15, 2024)
 
