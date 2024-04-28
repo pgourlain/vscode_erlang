@@ -131,6 +131,7 @@ find_function_references(File, FnModule, Function, Arity) ->
     Result.
 
 extract_function_location_from_file(File, Module, Function, Arity) ->
+    FileModule = list_to_atom(filename:rootname(filename:basename(File))),
     Import = lsp_syntax:find_in_syntax_tree(
     fun   
         ({attribute, {_L, _C}, import, {ImportModuleName, Imports}}, _CurrentFile) 
@@ -149,7 +150,7 @@ extract_function_location_from_file(File, Module, Function, Arity) ->
         (_SyntaxTree, _CurrentFile) ->
             undefined
     end, File),
-    IsImported = Import =/= undefined,    
+    ProcessLocalCall = Import =/= undefined orelse FileModule =:= Module,    
     FromImport = if 
         Import =:= undefined -> [];
         true -> lists:flatten(Import)
@@ -184,9 +185,13 @@ extract_function_location_from_file(File, Module, Function, Arity) ->
             [{File, ModuleLine, Start, End} | Acc];
         ({'fun', {_, _}, {function, {atom, {ModuleLine, _}, FnModule}, {atom, {_, Start}, FnName}, {integer, {_, End}, FnArity}}}, _CurrentFile, Acc) 
                 when FnName =:= Function, FnArity =:= Arity, FnModule =:= Module ->
-            [{File, ModuleLine, Start, End} | Acc];
+            [{File, ModuleLine, Start, End-1} | Acc];
+        ({'fun',{L, Start}, {function, FnName, FnArity}}, _CurrentFile, Acc) 
+                when FnName =:= Function, FnArity =:= Arity ->
+            End = Start + length(atom_to_list(Function)),
+            [{File, L, Start+4, End+4} | Acc];        
         ({call, {_, _}, {atom, {ModuleLine, Start}, FnName}, Args}, _CurrentFile, Acc) 
-                when FnName =:= Function, length(Args) =:= Arity, IsImported ->
+                when ProcessLocalCall, FnName =:= Function, length(Args) =:= Arity ->
             % local call only if function is imported
             End = Start + length(atom_to_list(Function)),
             [{File, ModuleLine, Start, End} | Acc];              
@@ -205,13 +210,25 @@ parse_location_at(File, L, _C, Function, Arity) ->
     ExportLines = get_file_content(File, L, <<".">>),
     case erl_scan:string(ExportLines, {1, 1}) of
         {ok, Tokens, _} ->
-            case location_from_exports_tokens(Tokens, {Function, Arity}, []) of
+            case location_from_exports_tokens(multi_line_tokens(Tokens,{1,0, undefined}), {Function, Arity}, []) of
                 {ok, {Ls, Cs}} -> [{File, L + Ls - 1, Cs, Cs + length(atom_to_list(Function))}];
                 _ -> []
             end;
         _ ->
             []
     end.
+
+%% recalculate lines number in tokens with \n
+multi_line_tokens([{atom,{_L,C},n}|Tail], {CurLine, LastColumn, escape}) ->
+    [{atom,{CurLine,C-LastColumn},n}| multi_line_tokens(Tail, {CurLine+1, C, newline})];
+multi_line_tokens([{'\\',{_L,C}}|Tail], {CurLine, LastColumn, _}) ->
+    [{'\\',{CurLine,C-LastColumn}}| multi_line_tokens(Tail, {CurLine, LastColumn, escape})];
+multi_line_tokens([{Value,{_L,C}}|Tail], {CurLine, LastColumn,_}) ->
+    [{Value,{CurLine,C-LastColumn}}| multi_line_tokens(Tail, {CurLine, LastColumn, undefined})];
+multi_line_tokens([{Type,{_L,C}, Value}|Tail], {CurLine, LastColumn,_}) ->
+       [{Type,{CurLine,C-LastColumn}, Value}| multi_line_tokens(Tail, {CurLine, LastColumn, undefined})];
+multi_line_tokens([], {_, _,_}) ->
+    [].
 
 % tokens can be import or export tokens
 location_from_exports_tokens([{atom, {L, C}, FnName} | Tail], {Function, _Arity} = Options, _Acc) when
@@ -260,7 +277,7 @@ get_file_content(File) ->
 get_string_until([Line | Lines], Char, Acc) ->
     case binary:match(Line, Char, []) of
         nomatch ->
-            [Line | Acc] ++ get_string_until(Lines, Char, Acc);
+            [(<<Line/binary,"\\n"/utf8>>) | Acc] ++ get_string_until(Lines, Char, Acc);
         {Pos, _} ->
             %% Extract the characters from the beginning of the line to the specified character.
             case binary_part(Line, 0, Pos + 1) of
