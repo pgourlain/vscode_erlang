@@ -5,17 +5,10 @@
     textDocument_didOpen/2, textDocument_didClose/2, textDocument_didSave/2, textDocument_didChange/2,
     textDocument_definition/2, textDocument_references/2, textDocument_hover/2, textDocument_completion/2,
     textDocument_formatting/2, textDocument_codeLens/2, textDocument_documentSymbol/2,
-    textDocument_inlayHints/2, textDocument_signatureHelp/2]).
+    textDocument_inlayHints/2, textDocument_signatureHelp/2, textDocument_prepareRename/2, textDocument_rename/2]).
 -export([textDocument_inlineValues/2]).
 
--define(LOG(S),
-	begin
-        gen_lsp_server:lsp_log("~p", [S])
-	end).
--define(LOG(Fmt, Args),
-	begin
-        gen_lsp_server:lsp_log(Fmt, Args)
-	end).
+-include("lsp_log.hrl").
 
 initialize(_Socket, Params) ->
     % usefull when file is open instead of folder
@@ -27,17 +20,37 @@ initialize(_Socket, Params) ->
     gen_lsp_doc_server:root_available(),
     #{capabilities => #{
         textDocumentSync => 1, % Full
-        definitionProvider => true,
-        documentFormattingProvider => true,
-        referencesProvider => true,
-        hoverProvider => true,
         completionProvider => #{triggerCharacters => <<":#.">>},
-        codeLensProvider => true,
-        documentSymbolProvider => true,
-        inlayHintProvider => true,
-        inlineValueProvider => true,  
-        signatureHelpProvider => #{triggerCharacters => <<"(,">>, retriggerCharacters => <<",">>}
+        hoverProvider => true,
+        signatureHelpProvider => #{triggerCharacters => <<"(,">>, retriggerCharacters => <<",">>},
         %declarationProvider => true
+        definitionProvider => true,
+        typeDefinitionProvider => false,
+        implementationProvider => false,
+        referencesProvider => true,
+        documentHighlightProvider => false,
+        documentSymbolProvider => true,
+        codeActionProvider => false,
+        codeLensProvider => true,
+        documentLinkProvider => false,
+        colorProvider => false,
+        documentFormattingProvider => true,
+        documentRangeFormattingProvider => false,
+        documentOnTypeFormattingProvider => false,
+        renameProvider => #{ prepareProvider => true },
+        foldingRangeProvider => false,
+        executeCommandProvider => false,
+        selectionRangeProvider => false,
+        linkedEditingRangeProvider => false,
+        callHierarchyProvider => false,
+        semanticTokensProvider => false,
+        monikerProvider => false,
+        typeHierarchyProvider => false,
+        inlineValueProvider => true,
+        inlayHintProvider => true,
+        diagnosticProvider => false,
+        workspaceSymbolProvider => false
+
     }}.
 
 initialized(Socket, _Params) ->
@@ -322,6 +335,21 @@ textDocument_signatureHelp(_Socket, Params) ->
         _ -> []
     end,
     SignatureHelp.
+
+textDocument_prepareRename(_Socket, Params) ->
+    Uri = mapmapget(textDocument, uri, Params),
+    Line = mapmapget(position, line, Params),    
+    Character = mapmapget(position, character, Params),
+    File = lsp_utils:file_uri_to_file(Uri),
+    lsp_rename:prepareRename(File, Line+1, Character+1).
+
+textDocument_rename(_Socket, Params) ->
+    Uri = mapmapget(textDocument, uri, Params),
+    Line = mapmapget(position, line, Params),    
+    Character = mapmapget(position, character, Params),    
+    NewName = maps:get(newName, Params),
+    File = lsp_utils:file_uri_to_file(Uri),
+    lsp_rename:rename(Uri,File,Line+1, Character+1, NewName).
 
 signature_from_location(FileModule, File, Line, Character) ->
     %read text before location and take function

@@ -27,6 +27,7 @@ import * as lspcodelens from './lspcodelens';
 
 import * as lspInlay from './lsp-inlayhints';
 import * as lspValue from './lsp-inlinevalues';
+import * as lspRename from './lsp-rename';
 
 
 // import { ErlangShellForDebugging } from '../ErlangShellDebugger';
@@ -209,6 +210,7 @@ export function activate(context: ExtensionContext) {
 
 	lspInlay.activate(context, lspOutputChannel);
 	lspValue.activate(context, lspOutputChannel);
+	lspRename.activate(context, lspOutputChannel);
 	
 	let middleware: Middleware = {
 		workspace: {
@@ -224,7 +226,10 @@ export function activate(context: ExtensionContext) {
 			next(data);//call LSP
 			lspcodelens.onDocumentDidSave();
 		},
-		
+		// prepareRename: (document, position, token, next) => {
+		// 	return Promise.resolve(lspRename.onPrepareRename(document, position, token, next));
+			
+		// },		
 	};
 	// Options to control the language client
 	let clientOptions: LanguageClientOptions = {

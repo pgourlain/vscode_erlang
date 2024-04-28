@@ -24,6 +24,7 @@
 -ifdef(OTP_RELEASE).
 safeApply(Function, Socket, ArgsMap) ->
     try apply(lsp_handlers, Function, [Socket, ArgsMap]) of
+        {error, ErrorResult } -> {error, ErrorResult };
         Result -> {ok, Result}
     catch
         throw:Reason when is_binary(Reason) ->
@@ -40,6 +41,7 @@ safeApply(Function, Socket, ArgsMap) ->
 -else.
 safeApply(Function, Socket, ArgsMap) ->
     try apply(lsp_handlers, Function, [Socket, ArgsMap]) of
+        {error, ErrorResult } -> {error, ErrorResult };
         Result -> {ok, Result}
     catch
         throw:Reason when is_binary(Reason) ->
@@ -104,6 +106,8 @@ do_contents(Socket, #{method := Method} = Input) ->
     case call_handler(Socket, Method, maps:get(params, Input, undefined)) of
         {ok, Result} ->
             send_response_with_id(Socket, Input, #{result => Result});
+        {error, Result} ->
+            send_response_with_id(Socket, Input, #{error => Result});
         handler_not_found ->
             error_logger:error_msg("Method not handled: ~p", [Method]),
             send_response_with_id(Socket, Input, #{error => #{code => -32001, message => <<"Method not handled">>}});
@@ -114,6 +118,8 @@ do_contents(Socket, #{id := Id} = Input) ->
     lsp_log("LSP received ~p", [Input]),
     case call_handler(Socket, Id, maps:get(result, Input, undefined)) of
         {ok, _Result} ->
+            ok;
+        {error, _Result} ->
             ok;
         handler_not_found ->
             error_logger:error_msg("Notification not handled: ~p ~p", [Id, Input]);
