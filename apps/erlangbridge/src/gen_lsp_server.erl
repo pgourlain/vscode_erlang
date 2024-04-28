@@ -102,7 +102,7 @@ remove_text_for_logging(Input) ->
     Input.
 
 do_contents(Socket, #{method := Method} = Input) ->
-    %lsp_log("LSP received ~p", [remove_text_for_logging(Input)]),    
+    lsp_log("LSP received ~p", [remove_text_for_logging(Input)]),    
     case call_handler(Socket, Method, maps:get(params, Input, undefined)) of
         {ok, Result} ->
             send_response_with_id(Socket, Input, #{result => Result});
@@ -115,7 +115,7 @@ do_contents(Socket, #{method := Method} = Input) ->
             send_response_with_id(Socket, Input, #{error => #{code => -32001, message => Message}})
     end;
 do_contents(Socket, #{id := Id} = Input) ->
-    %lsp_log("LSP received ~p", [Input]),
+    lsp_log("LSP received ~p", [Input]),
     case call_handler(Socket, Id, maps:get(result, Input, undefined)) of
         {ok, _Result} ->
             ok;
@@ -151,7 +151,7 @@ send_response_with_id(Socket, Input, Response) ->
     end.
 
 send_to_client(Socket, Body) ->
-    %lsp_log("LSP sends ~p", [Body]),
+    lsp_log("LSP sends ~p", [Body]),
     {ok, Json} = vscode_jsone:encode(Body),
     Header = iolist_to_binary(io_lib:fwrite("Content-Length: ~p", [byte_size(Json)])),
     gen_tcp:send(Socket, <<Header/binary, "\r\n\r\n", Json/binary>>).
