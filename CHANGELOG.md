@@ -1,5 +1,13 @@
 # Change log
 
+## Version 1.0.4 (April 28, 2024)
+
+* [290](https://github.com/pgourlain/vscode_erlang/issues/290) : Add rename support via fn-F2
+  - today, only works on functions
+  - rename function implies modifications of: spec, imports, exports, call, remote call on all files at once. So undo action can revert at once also
+
+---
+
 ## Version 1.0.3 (April 24, 2024)
 
 * Revert part of #285, more details here : [287](https://github.com/pgourlain/vscode_erlang/issues/287)
