@@ -1,0 +1,25 @@
+name: pr-verify
+
+on: [push, pull_request]
+
+jobs:
+  pr-verify-job:
+    name: Node ${{ matrix.node }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: true
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+        node:
+          - 20
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v2
+      - name: Install Node ${{ matrix.node }}
+        uses: actions/setup-node@v1
+        with:
+          node-version: ${{ matrix.node }}
