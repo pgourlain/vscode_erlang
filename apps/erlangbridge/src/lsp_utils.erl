@@ -109,10 +109,6 @@ to_string(X) when is_atom(X) ->
 to_string(X) ->
     X.
 
--spec to_string(Fmt :: io:format(), Args :: [term()]) -> string().
-to_string(Fmt, Args) ->
-    lists:flatten(io_lib:format(Fmt, Args)).
-
 to_binary(X) when is_binary(X) ->
     X;
 to_binary(X) when is_atom(X) ->
