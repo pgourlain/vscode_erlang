@@ -194,7 +194,7 @@ check_if_remote_fun_exists(RootWorkspace, FnModule, FnName, FnArity, {Line, Colu
                             [
                             #{info =>
                                     #{line => Line,
-                                    message => lsp_utils:to_binary("undefine function (~p:~p/~p)", [FnModule,FnName,FnArity]),
+                                    message => lsp_utils:to_binary("function ~p:~p/~p undefined", [FnModule,FnName,FnArity]),
                                     character => Column,
                                     line_end => LE,
                                     character_end => LC},
@@ -212,7 +212,7 @@ check_if_remote_fun_exists(RootWorkspace, FnModule, FnName, FnArity, {Line, Colu
                             #{info =>
                                     #{line => Line,
                                     message =>
-                                        lsp_utils:to_binary(lsp_utils:to_string("exported function missing (~s/~p).",[FnName, FnArity])),
+                                        lsp_utils:to_binary(lsp_utils:to_string("function ~s:~s/~p  is missing in export.",[FnModule, FnName, FnArity])),
                                     character => Column,
                                     line_end => LE,
                                     character_end => LC},
@@ -229,7 +229,7 @@ check_if_remote_fun_exists(RootWorkspace, FnModule, FnName, FnArity, {Line, Colu
                                     ({exported, Fn, Fa}) -> {true, lsp_utils:to_string("~s/~p\n",[Fn, Fa])};
                                     (_) -> false
                                 end, NotMatchFns))),
-                            Message = lsp_utils:to_binary("function arity mismatch (~s:~s/~p).\nexposed functions are :\n ~s\n",
+                            Message = lsp_utils:to_binary("function ~s:~s/~p arity mismatch.\navailable arity are :\n ~s\n",
                                                         [FnModule, FnName, FnArity, AvailableFns]),
                             [
                             #{info =>
