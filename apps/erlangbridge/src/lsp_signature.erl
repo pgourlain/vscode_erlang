@@ -64,7 +64,7 @@ function_signature(EditingModule, TargetModule, Function, Arity, Index) ->
                             % % using edoc should be on compilable file...
                             % % so get latest syntax tree and parse spec should be better solution
                             % EDOC = edoc:get_doc(File, [{hidden, true}, {private, true}]),
-                            Merged = merge_spec_clauses(Function, ClausesList, SpecList),
+                            Merged = merge_spec_clauses(Function, ClausesList, SpecList),                            
                             spec_to_signatures(Function, Index, Merged,[]);
                         _Other ->                            
                             #{
@@ -130,11 +130,17 @@ function_parameters(Args) ->
         #{
             label => list_to_binary(spectype_to_string(N,T))
         }
+        ;(_) -> #{
+                label => <<"not yet implemented">>
+            }
         end, Args).
 
 function_label_parameters(Args) ->
     lists:flatten(lists:join(", ",
-        lists:map(fun({N,T}) -> spectype_to_string(N,T) end, Args))).
+        lists:map(fun
+            ({N,T}) -> spectype_to_string(N,T);
+            (_) -> "not yet implemented"
+        end, Args))).
 
 spectype_to_string(L) when is_list(L) ->
     Res = lists:flatten(
@@ -153,8 +159,23 @@ spectype_to_string(A) ->
 
 spectype_to_string(N,undefined) ->
     io_lib:format("~s",[N]);
-spectype_to_string(N,T) ->
-    io_lib:format("~s :: ~s",[N, spectype_to_string(T)]).
+spectype_to_string(N,T) when is_atom(N)->   
+    io_lib:format("~s :: ~s",[N, spectype_to_string(T)]);
+spectype_to_string(N,T) when is_list(N) ->
+    io_lib:format("{~s}",[tuplelisttype_to_string(N, spectype_to_string(T))]);
+spectype_to_string(N,T) ->   
+    io_lib:format("~p :: ~s",[N, spectype_to_string(T)]).
+
+tuplelisttype_to_string(List, Type)->
+    lists:join(", ", 
+        lists:map(fun (Item) ->
+            tupletype_to_string(Item, Type)
+        end, List)).
+
+tupletype_to_string({var, _, VarName}, Type) when is_atom(VarName) ->
+    io_lib:format("~s :: ~s",[VarName, Type]);
+tupletype_to_string({_, _, VarName}, Type) ->
+    io_lib:format("~p :: ~s",[VarName, Type]).
 
 merge_spec_clauses(Function, ClausesList, SpecList) ->
     LightSpecList = to_light_speclist(SpecList),
@@ -176,7 +197,6 @@ to_light_speclist(SpecList) ->
             {Args, Res} = one_type(Type, direct, []),
             {{FnName,Arity}, Args,  Res};
         ({{FnName,Arity}, [{type,_, bounded_fun,[{type, _, 'fun', _}=Type|TypeArgs]}]=_Bounded}) -> 
-            %?LOG("~p/~p\r\nType:~p\r\nTypeArgs:~p",[FnName,Arity,Type,lists:flatten(TypeArgs)]),
             Constraints = many_constraints(lists:flatten(TypeArgs)),
             {Args, Res} = one_type(Type, direct, Constraints),
             {{FnName,Arity}, Args,  Res};
@@ -185,15 +205,30 @@ to_light_speclist(SpecList) ->
 clause_to_light_speclist(Function, ClausesList) ->
     lists:map(fun
         ([{clause, _, Args, _,_}|_T]) -> {{Function, length(Args)}, map_clause_args(Args),any};
-        (_) -> undefined
+        (_Other) -> undefined
         end, ClausesList).
 
 map_clause_args(Args) ->
-    lists:map(fun 
+    lists:map(fun         
+        ({match, _, {tuple, _, _}, {var ,_ ,ArgName}}) -> {ArgName, tuple};
+        ({match, _, {cons, _, _, _}, {var ,_ ,ArgName}}) -> {ArgName, list};
+        ({match, _, {map, _, _}, {var ,_ ,ArgName}}) -> {ArgName, map};
+        ({match, _, {record, _, RecType, _}, {var ,_ ,ArgName}}) -> {ArgName, record_name(RecType)};
+        ({match, _, {nil, _}, {var ,_ ,ArgName}}) -> {ArgName, nil};
+        ({map, _,_}) -> {'Map', map};        
+        ({tuple, _, _}) -> {'Tuple', tuple};
+        ({record, _, RecType, _}) -> {'Record', record_name(RecType)};
+        ({tuple, _, _}) -> {'Tuple', tuple};
+        ({cons, _, _, _}) -> {'List', list};
+        ({nil, _}) -> {'List', nil};
         ({_,_,ArgName}) -> {ArgName, any};
-        (_) -> undefined
+        (_Other) -> 
+             ?LOG("unknown_clause_arg:~p",[_Other]),
+            {undefined, not_yet_implemented}
         end, Args).
 
+record_name(RecType) ->
+    list_to_atom(atom_to_list('#') ++ atom_to_list(RecType)).
 
 one_type({type, _, 'fun', [Args, Res]}, direct, _Contraints) ->
     {one_type(Args, direct, _Contraints), one_type(Res, direct, _Contraints)};
@@ -283,7 +318,6 @@ eep48_render_signature(_Module, Function, FDocs, _Docs,  _State) ->
                 Acc#{ Group => #{ signatures => [Signature|Signatures], docs => [FnDoc|FnDocs]} };
              ({_Group, _Anno, _Sig, _Doc, _Meta} = _Func, Acc) -> Acc
           end, #{}, lists:sort(FDocs)),
-    %?LOG("Grouping: ~p",[Grouping]),
     MAP = lists:flatten(lists:map(
       fun({{_, _Fn, _FnArity} = _Group, #{ signatures:= Signatures, docs := _FnDocs}}) ->
         SpecList = lists:map(fun ({attribute, _, spec, {{_,_},_}=FnSpec}) ->
