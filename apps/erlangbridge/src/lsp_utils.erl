@@ -1,6 +1,6 @@
 -module(lsp_utils).
 
--export([client_range/3,
+-export([client_range/3, client_range/4,
          file_uri_to_file/1, file_uri_to_vscode_uri/1, file_to_file_uri/1,
          glob_to_regexp/1,
          is_path_excluded/2,
@@ -10,15 +10,30 @@
          absolute_path/2,
          make_temporary_file/1,
          to_binary/1,
+         to_binary/2,
          bin_to_atom/1,
          bin_to_atom/2,
          client_position/1,
-         index_of/2]).
+         index_of/2,
+         try_get/3]).
+
+
+try_get(Key, Map, Default) ->
+    case maps:find(Key, Map) of
+        {ok, Value} -> Value;
+        _ -> Default
+    end.
 
 client_range(Line, StartChar, EndChar) ->
     #{
         <<"start">> => #{line => Line - 1, character => StartChar - 1},
         <<"end">> => #{line => Line - 1, character => EndChar - 1}
+    }.
+
+client_range(Line, StartChar, LineEnd, EndChar) ->
+    #{
+        <<"start">> => #{line => Line - 1, character => StartChar - 1},
+        <<"end">> => #{line => LineEnd - 1, character => EndChar - 1}
     }.
 
 client_position({Line, Column}) ->
@@ -102,6 +117,10 @@ to_binary(X) when is_list(X) ->
     erlang:list_to_binary(X);
 to_binary(X) -> 
     X.
+
+-spec to_binary(Fmt :: io:format(), Args :: [term()]) -> binary().
+to_binary(Fmt, Args) ->
+    to_binary(lists:flatten(io_lib:format(Fmt, Args))).
 
 -ifdef(OTP_RELEASE).
 -if(?OTP_RELEASE >= 23).

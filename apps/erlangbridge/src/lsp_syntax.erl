@@ -3,13 +3,17 @@
 -export([validate_parsed_source_file/1, fold_in_syntax_tree/4,find_in_syntax_tree/2]).
 -export([fold_in_syntax_tree/3]).
 
+-include("lsp_log.hrl").
+-define(LINTER, <<"erl lsplint">>).
+
 validate_parsed_source_file(File) ->
     FileSyntaxTree = gen_lsp_doc_server:get_syntax_tree(File),
     BehaviourModulea = behaviour_modules(FileSyntaxTree),
     ParseTranformModules = parse_transforms(FileSyntaxTree),
     ModulesToDelete = load_not_loaded_modules(BehaviourModulea ++ ParseTranformModules),
     NewFileSyntaxTree = parse_transform(FileSyntaxTree, ParseTranformModules),
-    Result = lint(NewFileSyntaxTree, File),
+    ErlLintResult = lint(NewFileSyntaxTree, File),
+    Result = combine_lint(ErlLintResult, NewFileSyntaxTree, File),
     code_delete(ModulesToDelete),
     Result.
 
@@ -113,6 +117,156 @@ lint(FileSyntaxTree, File) ->
         _Any ->
 	        #{parse_result => false, error_message => <<"lint error">>}
     end.
+
+combine_lint(LintResult, SyntaxTree, File) ->
+    case LintResult of
+        #{parse_result := ParseResult, errors_warnings := ErrorsWarnings} 
+            when ParseResult =:= true -> 
+              % combine only if previous parse is successfull
+              #{
+                parse_result => ParseResult, 
+                errors_warnings => lsp_lint(ErrorsWarnings, SyntaxTree, File)
+            };
+        _ -> LintResult
+    end.
+
+lsp_lint(PreviousLintResult, SyntaxTree, File) ->
+    RootWorkspace = gen_lsp_config_server:root(),
+    %%process remote call
+    fold_in_syntax_tree(fun
+        ({call, {_, _}, {remote, {_, _}, {atom, {Line, Column}, FnModule}, {atom, {_, _}, FnName}}, Args}, _CurrentFile, Acc)
+            -> 
+                % Incr = 1 for last right parenthesis
+                Acc ++ check_if_remote_fun_exists(RootWorkspace, FnModule, FnName, length(Args), range_of(Line, Column, FnModule, FnName, Args, 1));
+        ({'fun', {_, _}, {function, {atom, {Line, Column}, FnModule}, {atom, {_,_}, FnName}, {integer, {_, End}, FnArity}}}, _CurrentFile, Acc)
+             ->
+            Width = length(lsp_utils:to_string("~w",[FnArity])),
+            Acc ++ check_if_remote_fun_exists(RootWorkspace, FnModule, FnName, FnArity,{Line, Column, Line, End + Width});
+
+    (_, _, Acc) -> Acc
+    end,
+    PreviousLintResult, File, SyntaxTree).
+
+range_of(Line, Column, MName, FName, Args, Incr) ->
+    {L,C, NewIncr} = if 
+        length(Args) > 0 -> max_lc_root(lists:last(Args), {Line, Column, Incr});
+        true -> 
+            % +2 for parenthesis
+            {Line, Column, Incr + 2 + length(atom_to_list(MName)) +length(atom_to_list(FName))}
+    end,
+   {Line, Column, L, C+NewIncr}.
+
+
+max_lc_root({_,_,Atom}=Item, {Line, Column, Incr}) when is_atom(Atom) ->
+    max_lc(Item, {Line, Column, Incr + length(atom_to_list(Atom))});
+max_lc_root({_,_,Int}=Item, {Line, Column, Incr}) when is_number(Int) ->
+    ArgLength = length(lsp_utils:to_string("~w",[Int])),
+    max_lc(Item, {Line, Column, Incr + ArgLength});
+max_lc_root(Item, Acc) ->
+    max_lc(Item, Acc).
+
+-spec max_lc(Item:: term(), Acc :: term()) -> Acc1 :: term().
+max_lc({_, {L,C}, _}, {CL, CC, Incr}) when L > CL orelse (L =:= CL andalso C >= CC) ->
+    {L, C, Incr};
+max_lc({_, {_,_}, Item}, Acc) ->
+    max_lc(Item, Acc);
+max_lc({call, {L,C}, Remote, Args}, {CL, CC, Incr}) when L > CL orelse (L =:= CL andalso C >= CC) ->
+    if 
+        length(Args) > 0 -> max_lc_root(lists:last(Args), {L, C, Incr+1});
+        true -> 
+            case Remote of
+                {remote, _, {atom, _, _}, {atom,{RL, RC}, Atom}} -> {RL, RC, Incr + 1 + length(atom_to_list(Atom))};
+                _ -> {L, C, Incr}
+            end            
+    end;
+max_lc(_, Acc) -> 
+    Acc.
+
+check_if_remote_fun_exists(RootWorkspace, FnModule, FnName, FnArity, {Line, Column, LE,LC}) ->
+    % check if module is under workspace
+    case gen_lsp_doc_server:get_module_file(FnModule) of
+        undefined -> [];
+        TargetFile ->  
+            case string:str(TargetFile, RootWorkspace) of
+                1 ->
+                    case available_functions(TargetFile, FnName, FnArity) of
+                        {[],[],[]} -> % no match => function doesn't exists
+                            [
+                            #{info =>
+                                    #{line => Line,
+                                    message => lsp_utils:to_binary("function ~p:~p/~p undefined", [FnModule,FnName,FnArity]),
+                                    character => Column,
+                                    line_end => LE,
+                                    character_end => LC},
+                                type => <<"error">>,
+                                file => lsp_utils:to_binary(TargetFile),
+                                source => ?LINTER,
+                                correlation_data => #{ action => <<"create_function">>, arguments => [FnModule, FnName, FnArity]}
+                            }
+                            ];
+
+                        {MatchFns, _, _} when length(MatchFns) > 0 -> % function is found, so no error
+                            [];
+                        {_, DefMatchFns, _} when length(DefMatchFns) > 0 -> % function is found, but not exported
+                            [
+                            #{info =>
+                                    #{line => Line,
+                                    message =>
+                                        lsp_utils:to_binary(lsp_utils:to_string("function ~s:~s/~p  is missing in export.",[FnModule, FnName, FnArity])),
+                                    character => Column,
+                                    line_end => LE,
+                                    character_end => LC},
+                                type => <<"error">>,
+                                file => lsp_utils:to_binary(TargetFile),
+                                source => ?LINTER,
+                                correlation_data => #{ action => <<"export_function">>, arguments => [FnModule, FnName, FnArity]}
+                            }
+                            ];
+                        {[], [], NotMatchFns} when length(NotMatchFns) > 0 -> 
+                            %funtions with other arity
+                            AvailableFns = lists:flatten(lists:join(",",
+                                lists:filtermap(fun 
+                                    ({exported, Fn, Fa}) -> {true, lsp_utils:to_string("~s/~p\n",[Fn, Fa])};
+                                    (_) -> false
+                                end, NotMatchFns))),
+                            Message = lsp_utils:to_binary("function ~s:~s/~p arity mismatch.\navailable arity are :\n ~s\n",
+                                                        [FnModule, FnName, FnArity, AvailableFns]),
+                            [
+                            #{info =>
+                                    #{line => Line,
+                                    message => Message,
+                                    character => Column,
+                                    line_end => LE,
+                                    character_end => LC},
+                                type => <<"error">>,
+                                file => lsp_utils:to_binary(TargetFile),
+                                source => ?LINTER
+                            }];
+
+                        _ -> []
+                    end;
+                _ -> []
+            end     
+    end.
+
+% get functions that match and nearly match (by arity)
+available_functions(File, FunName, FunArity) ->
+    Functions =fold_in_syntax_tree(fun
+            ({function, {_, _}, FName, FnArity, _}, _CurrentFile, {M, DM, NM}) when FName =:= FunName, FnArity =:= FunArity ->
+                {M, [{definition_match, FName, FunArity} | DM], NM};
+            ({function, {_, _}, FName, Arity, _}, _CurrentFile, {M, DM, NM}) when FName =:= FunName ->
+                {M, DM, [{definition, FName, Arity} | NM]};
+            ({attribute, {_L, _C}, export, Exports}, _CurrentFile, {M, DM, NM}=Acc) ->
+            case lists:keyfind(FunName, 1, Exports)  of
+                {_, Arity} when Arity =:= FunArity -> {[{exported_match, FunName, FunArity} | M], DM, NM};
+                {_, Arity} -> {M, DM, [{exported, FunName, Arity} | NM]};
+                _ -> Acc
+            end; 
+            (_SyntaxTree, _CurrentFile, Acc) ->
+                Acc
+        end,
+        {[], [], []}, File),
+        Functions.
 
 filter_unused_functions({_, []}) ->
     [];

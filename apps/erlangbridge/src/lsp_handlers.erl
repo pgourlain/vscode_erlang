@@ -463,13 +463,22 @@ send_diagnostics(Socket, File, Diagnostics) ->
                 Info = maps:get(info, Diagnostic),
                 #{
                     severity => severity(maps:get(type, Diagnostic)),
-                    range => lsp_utils:client_range(maps:get(line, Info), maps:get(character, Info), 256),
+                    range => get_range(Info),
                     message => maps:get(message, Info),
-                    source => <<"erl">>
+                    source => lsp_utils:try_get(source, Diagnostic, <<"erl">>),
+                    data => lsp_utils:try_get(correlation_data, Diagnostic, null)
                 }
             end, Diagnostics)
         }
     }).
+
+get_range(Info) ->
+    LS = maps:get(line, Info),
+    CS = maps:get(character, Info),
+    LE = lsp_utils:try_get(line_end, Info, LS),
+    CE = lsp_utils:try_get(character_end, Info, 256),
+    lsp_utils:client_range(LS, CS, LE, CE).
+
 
 severity(<<"info">>) -> 3;
 severity(<<"warning">>) -> 2;
