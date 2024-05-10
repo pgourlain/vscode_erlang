@@ -1,6 +1,6 @@
 # Change log
 
-## Version 1.0.5 (April 28, 2024)
+## Version 1.0.5 (May 10, 2024)
 
 * [291](https://github.com/pgourlain/vscode_erlang/issues/291) : Fix exception throw on signature help
 * [292](https://github.com/pgourlain/vscode_erlang/issues/292) : Add custom rules on linter, to show errors on remote calls (only for calls in files under your workspace) 
