@@ -122,7 +122,7 @@ combine_lint(LintResult, SyntaxTree, File) ->
     case LintResult of
         #{parse_result := ParseResult, errors_warnings := ErrorsWarnings} 
             when ParseResult =:= true -> 
-              % combine only if previous 
+              % combine only if previous parse is successfull
               #{
                 parse_result => ParseResult, 
                 errors_warnings => lsp_lint(ErrorsWarnings, SyntaxTree, File)
@@ -130,7 +130,7 @@ combine_lint(LintResult, SyntaxTree, File) ->
         _ -> LintResult
     end.
 
-lsp_lint(PreviousResult, SyntaxTree, File) ->
+lsp_lint(PreviousLintResult, SyntaxTree, File) ->
     RootWorkspace = gen_lsp_config_server:root(),
     %%process remote call
     fold_in_syntax_tree(fun
@@ -145,7 +145,7 @@ lsp_lint(PreviousResult, SyntaxTree, File) ->
 
     (_, _, Acc) -> Acc
     end,
-    PreviousResult, File, SyntaxTree).
+    PreviousLintResult, File, SyntaxTree).
 
 range_of(Line, Column, MName, FName, Args, Incr) ->
     {L,C, NewIncr} = if 
