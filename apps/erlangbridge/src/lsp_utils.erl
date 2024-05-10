@@ -5,7 +5,7 @@
          glob_to_regexp/1,
          is_path_excluded/2,
          search_exclude_globs_to_regexps/1,
-         to_string/1,
+         to_string/1, to_string/2,
          is_erlang_lib_file/1,
          absolute_path/2,
          make_temporary_file/1,
@@ -81,6 +81,10 @@ string_prefix(String, Prefix) ->
     end.
 
 -endif.
+
+-spec to_string(Fmt :: io:format(), Args :: [term()]) -> string().
+to_string(Fmt, Args) ->
+    lists:flatten(io_lib:format(Fmt, Args)).
 
 to_string(X) when is_binary(X) ->
     erlang:binary_to_list(X);
