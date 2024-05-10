@@ -1,6 +1,12 @@
 # Erlang for Visual Studio Code
 
+[![Visual Studio Marketplace](https://img.shields.io/visual-studio-marketplace/v/pgourlain.erlang?style=for-the-badge&label=VS%20Marketplace&logo=visual-studio-code)](https://marketplace.visualstudio.com/items?itemName=pgourlain.erlang)
+[![Installs](https://img.shields.io/visual-studio-marketplace/i/pgourlain.erlang?style=for-the-badge)](https://marketplace.visualstudio.com/items?itemName=pgourlain.erlang)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/pgourlain/vscode_erlang/pr-verify.yml?branch=master&style=for-the-badge&logo=github)](https://github.com/pgourlain/vscode_erlang/actions?query=workflow:pr-verify)
+[![License](https://img.shields.io/github/license/pgourlain/vscode_erlang?style=for-the-badge&logo=erlang)](https://github.com/pgourlain/vscode_erlang/blob/master/LICENSE)
+
 This extension adds support for the Erlang language to Visual Studio Code, including editing, building and debugging.
+
 
 ## Editing support
 
@@ -68,7 +74,7 @@ Then, before debugging is started, modified files will be recompiled automatical
 Clone this repo, and try it :
 - [vscode-remote-try-erlang](https://github.com/pgourlain/vscode-remote-try-erlang)
 
-For more informaiton about vscode and containers :
+For more information about vscode and containers :
 - [setup vscode for containers](https://code.visualstudio.com/docs/containers/overview) and [remote container documentation](https://code.visualstudio.com/docs/remote/containers)
 
 ## Available commands
