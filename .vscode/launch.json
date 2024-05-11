@@ -36,14 +36,14 @@
 			"request": "launch",
 			"runtimeExecutable": "${execPath}",
 			"args": [
-				"${workspaceFolder}/test-temp/",
+				"${workspaceFolder}/test/test-fixtures/",
 				"--disable-extensions",
 				"--extensionDevelopmentPath=${workspaceFolder}",
 				"--extensionTestsPath=${workspaceRoot}/out/test/test-suite" 
 			],
 			"sourceMaps": true,
 			"outFiles": ["${workspaceFolder}/out/**/*.js"],
-			// "preLaunchTask": "prepareTest",
+			"preLaunchTask": "prepareTest",
 			// "postDebugTask": "cleanTestFolder"
 		}
 	]
