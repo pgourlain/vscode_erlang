@@ -22,7 +22,14 @@ jobs:
     steps:
       - run: sudo apt-get install erlang  
         if: runner.os == 'Linux'   
-      - run: port install erlang
+      - run: |
+          brew install erlang@26
+        if: runner.os =='macOS' 
+      - run: |
+          VERSION=$(ls /opt/homebrew/Cellar/erlang/)
+          export PATH=$PATH:/opt/homebrew/Cellar/erlang/$VERSION/bin
+          erl -version
+        name: setup path
         if: runner.os =='macOS' 
       - name: Checkout Source
         uses: actions/checkout@v4
