@@ -10,4 +10,5 @@ _build/
 /syntaxes/*.yaml-tmLanguage
 apps/erlangbridge/src/vscode_erlfmt_parse.erl
 dist
+.vscode-test
 
