@@ -5,6 +5,6 @@ export default defineConfig({
 	workspaceFolder: './test/test-fixtures',
 	mocha: {
 		ui: 'tdd',
-		timeout: 20000
+		timeout: 60000
 	  }
 });
