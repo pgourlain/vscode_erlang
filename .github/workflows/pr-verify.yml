@@ -20,6 +20,10 @@ jobs:
         node:
           - 20
     steps:
+      - run: apt-get install erlang  
+        if: runner.os == 'Linux'   
+      - run: brew install erlang
+        if: runner.os =='macOS' 
       - name: Checkout Source
         uses: actions/checkout@v4
       - name: Install Node ${{ matrix.node }}
