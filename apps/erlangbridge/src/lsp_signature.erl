@@ -218,7 +218,6 @@ map_clause_args(Args) ->
         ({map, _,_}) -> {'Map', map};        
         ({tuple, _, _}) -> {'Tuple', tuple};
         ({record, _, RecType, _}) -> {'Record', record_name(RecType)};
-        ({tuple, _, _}) -> {'Tuple', tuple};
         ({cons, _, _, _}) -> {'List', list};
         ({nil, _}) -> {'List', nil};
         ({_,_,ArgName}) -> {ArgName, any};

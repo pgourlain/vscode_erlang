@@ -1,7 +1,13 @@
 name: pr-verify
 
-on: [push, pull_request]
-
+on: 
+  push:
+    branches:
+      - master
+  pull_request: 
+    branches: 
+      - master
+  
 jobs:
   pr-verify-job:
     name: Node ${{ matrix.node }} on ${{ matrix.os }}
@@ -21,3 +27,8 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
       - run: npm install -g typescript "vsce"
+      - run: npm install
+      - run: xvfb-run -a npm test
+        if: runner.os == 'Linux'
+      - run: npm test
+        if: runner.os != 'Linux'      

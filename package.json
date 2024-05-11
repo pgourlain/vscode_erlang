@@ -221,7 +221,7 @@
 					"default": false,
 					"description": "Enable/disable references CodeLens on functions."
 				},
-				"erlang.inlayHintsEnabled" : {
+				"erlang.inlayHintsEnabled": {
 					"type": "boolean",
 					"default": false,
 					"description": "Enable/disable references InlayHints on functions."
@@ -280,9 +280,13 @@
 		"vscode:prepublish": "webpack --mode production",
 		"webpack": "webpack --mode development",
 		"webpack-dev": "webpack --mode development --watch",
-		"test-compile": "tsc -p ./"
+		"pretest": "npm run compile",
+		"test": "vscode-test",
+		"deploy": "vsce publish --no-yarn",
+		"compile": "tsc -p ./"
 	},
 	"dependencies": {
+		"fs-extra": "^8.1.0",
 		"vscode-debugadapter": "^1.41.0",
 		"vscode-debugprotocol": "^1.41.0",
 		"vscode-languageclient": "^7.0.0",
@@ -290,14 +294,19 @@
 		"vscode-uri": "^1.0.3"
 	},
 	"devDependencies": {
+		"@types/fs-extra": "^8.0.0",
 		"@types/glob": "^7.1.1",
 		"@types/mocha": "^5.2.6",
 		"@types/node": "^16.11.7",
 		"@types/vscode": "^1.52.0",
 		"@typescript-eslint/eslint-plugin": "^5.42.0",
 		"@typescript-eslint/parser": "^5.42.0",
+		"@vscode/test-cli": "^0.0.9",
+		"@vscode/test-electron": "^2.3.9",
+		"@vscode/vsce": "^2.26.1",
 		"eslint": "^8.26.0",
 		"glob": "^7.1.4",
+		"gulp": "^5.0.0",
 		"mocha": "^10.2.0",
 		"source-map-support": "^0.5.12",
 		"ts-loader": "^8.1.0",
