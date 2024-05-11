@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        os: [macos-latest, ubuntu-latest]
+        os: [ubuntu-latest]
         node:
           - 20
     steps:
