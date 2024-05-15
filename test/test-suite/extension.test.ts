@@ -4,25 +4,35 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { env } from 'process';
 import * as vscode from 'vscode';
+import * as vscodeclient from 'vscode-languageclient'
 import * as erlExtension from '../../lib/extension';
+
+
+
+function openTextDocument(fileRelativePath: string ) : Thenable<vscode.TextDocument>
+{
+	const wk = vscode.workspace.workspaceFolders[0];
+	if (!fileRelativePath.startsWith("/")) {
+		fileRelativePath = "/" + fileRelativePath;
+ 	}
+	const filepath = path.join(wk.uri.fsPath, fileRelativePath);
+	return vscode.workspace.openTextDocument(filepath);	
+}
 
 suite('Erlang Language Extension', () => {
 	after(() => {
 		vscode.window.showInformationMessage('All tests done!');
 	  });
-	test('Extension should be present', () => {
+	test('Extension should be present', async () => {
 		const myExtension = vscode.extensions.getExtension('pgourlain.erlang');
+		await myExtension.activate();
 		assert.ok(myExtension);
 	});
 
 	test('Diagnostics should be generated', async () => {
-		const extension = vscode.extensions.getExtension('pgourlain.erlang');
-		await extension.activate();
-
 		//use console.info('...') to write on output during test
-		const wk = vscode.workspace.workspaceFolders[0];
-		const filepath = path.join(wk.uri.fsPath, "/fixture1/fixture1.erl");
-		const document = await vscode.workspace.openTextDocument(filepath);	
+
+		const document = await openTextDocument("/fixture1/fixture1.erl");	
 		assert.ok(document != null);
 		assert.equal('erlang', document.languageId);
 
