@@ -42,4 +42,7 @@ jobs:
       - run: xvfb-run -a npm test
         if: runner.os == 'Linux'
       - run: npm test
-        if: runner.os != 'Linux'      
+        if: runner.os != 'Linux'
+      - run: |
+          ./rebar3 ct
+                
