@@ -22,7 +22,7 @@ export class ErlangLanguageClient extends LanguageClient {
   //
   // For user-interactive operations (e.g. applyFixIt, applyTweaks), we will
   // prompt up the failure to users.
-  outChannel: vscode.OutputChannel;
+  outChannel?: vscode.OutputChannel;
 
   handleFailedRequest<T>(type: MessageSignature, error: any,
     defaultValue: T): T {
@@ -43,7 +43,7 @@ export class ErlangLanguageClient extends LanguageClient {
 
 
   onReady(): Promise<void> {
-    this.outChannel.appendLine("LanguageClient is ready");
+    this.outChannel?.appendLine("LanguageClient is ready");
     clientIsReady = true;
     return super.onReady();
   }
