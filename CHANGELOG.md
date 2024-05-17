@@ -1,5 +1,11 @@
 # Change log
 
+## Version 1.0.5 (May 17, 2024)
+
+* [296](https://github.com/pgourlain/vscode_erlang/issues/296) : deactivate lsp lint, due to bad effect and performance on large project
+
+---
+
 ## Version 1.0.5 (May 10, 2024)
 
 * [291](https://github.com/pgourlain/vscode_erlang/issues/291) : Fix exception throw on signature help
