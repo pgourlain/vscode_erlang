@@ -18,30 +18,36 @@
          try_get/3]).
 
 
+-spec try_get(Key :: term(), Map :: map(), Default :: term()) -> term().
 try_get(Key, Map, Default) ->
     case maps:find(Key, Map) of
         {ok, Value} -> Value;
         _ -> Default
     end.
 
+-spec client_range(Line :: integer(), StartChar :: integer(), EndChar :: integer()) -> map().
 client_range(Line, StartChar, EndChar) ->
     #{
         <<"start">> => #{line => Line - 1, character => StartChar - 1},
         <<"end">> => #{line => Line - 1, character => EndChar - 1}
     }.
 
+
+-spec client_range(Line :: integer(), StartChar :: integer(), LineEnd :: integer(), EndChar :: integer()) -> map().
 client_range(Line, StartChar, LineEnd, EndChar) ->
     #{
         <<"start">> => #{line => Line - 1, character => StartChar - 1},
         <<"end">> => #{line => LineEnd - 1, character => EndChar - 1}
     }.
 
+-spec client_position({Line :: integer(), Column :: integer()}) -> map().
 client_position({Line, Column}) ->
     #{
         line => Line-1, 
         character => Column-1
     }.
 
+-spec file_uri_to_file(Uri :: binary()) -> binary().
 file_uri_to_file(Uri) ->    
     NewUri = re:replace(case Uri of
         <<"file:///", Drive, "%3A", Rest/binary>> -> <<Drive, ":", Rest/binary>>;
@@ -51,6 +57,7 @@ file_uri_to_file(Uri) ->
     end, <<"\\\\">>, <<"/">>, [global, {return, list}]),
     lists:flatten(string_replace(NewUri, "%20", " ")).
 
+-spec file_uri_to_vscode_uri(Uri :: binary()) -> binary().
 file_uri_to_vscode_uri(Uri) ->
     UriWithOutSpace = lists:flatten(string_replace(to_string(Uri), " ", "%20")),
     EncodeUri = if
@@ -62,6 +69,7 @@ file_uri_to_vscode_uri(Uri) ->
       _ -> EncodeUri
     end.
 
+-spec file_to_file_uri(File :: binary()) -> binary().
 file_to_file_uri(<<"//", BinFile/binary>>) ->
     <<"file://", BinFile/binary>>;
 file_to_file_uri("//" ++ File) ->

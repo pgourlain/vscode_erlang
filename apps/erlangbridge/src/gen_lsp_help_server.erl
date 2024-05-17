@@ -98,7 +98,9 @@ eep48_render_fun_doc(_Module, _Function, FnDoc, Docs) ->
     list_to_binary(lists:flatten(render_function(FnDoc, Docs))).
 
 render_function([], _D) ->
-    {error, function_missing};
+    %{error, function_missing};
+    % maps at (line:52, column:59), put cursor on iterator_order/0
+    ["function_documentation_missing"];
 render_function(FDocs, Docs) ->
     Grouping =
         lists:foldl(
