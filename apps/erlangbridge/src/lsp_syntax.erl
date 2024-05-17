@@ -12,8 +12,9 @@ validate_parsed_source_file(File) ->
     ParseTranformModules = parse_transforms(FileSyntaxTree),
     ModulesToDelete = load_not_loaded_modules(BehaviourModulea ++ ParseTranformModules),
     NewFileSyntaxTree = parse_transform(FileSyntaxTree, ParseTranformModules),
-    ErlLintResult = lint(NewFileSyntaxTree, File),
-    Result = combine_lint(ErlLintResult, NewFileSyntaxTree, File),
+    Result = lint(NewFileSyntaxTree, File),
+    % Too long and bad effect on performance with large project
+    %Result = combine_lint(ErlLintResult, NewFileSyntaxTree, File),
     code_delete(ModulesToDelete),
     Result.
 
