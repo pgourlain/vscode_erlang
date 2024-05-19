@@ -87,6 +87,10 @@ handle_info(_Data, State) ->
 lsp_log(Msg, Args) ->
     gen_lsp_config_server:verbose() andalso error_logger:info_msg(Msg, Args).
 
+lsp_log(Method, Msg, Args) ->
+    % Method can be excluded from verbose logging by adding it to verboseExcludeFilter in the config
+    gen_lsp_config_server:verbose() andalso gen_lsp_config_server:verbose_is_include(Method) andalso error_logger:info_msg(Msg, Args).
+
 remove_text_for_logging(#{params := #{contentChanges := ChangesList} = Params} = Input) ->
     Input#{params := Params#{contentChanges := lists:map(fun 
         (#{text := <<Text/binary>>} = Change) when byte_size(Text) > 20 ->
@@ -102,7 +106,7 @@ remove_text_for_logging(Input) ->
     Input.
 
 do_contents(Socket, #{method := Method} = Input) ->
-    lsp_log("LSP received ~p", [remove_text_for_logging(Input)]),    
+    lsp_log(Method, "LSP received ~p", [remove_text_for_logging(Input)]),    
     case call_handler(Socket, Method, maps:get(params, Input, undefined)) of
         {ok, Result} ->
             send_response_with_id(Socket, Input, #{result => Result});
@@ -142,19 +146,23 @@ handler_name(<<"$/", Name/binary>>) ->
 handler_name(Name) ->
     list_to_atom(binary_to_list(binary:replace(Name, <<"/">>, <<"_">>))).
 
-send_response_with_id(Socket, Input, Response) ->
+send_response_with_id(Socket, #{method := Method} = Input, Response) ->
     case maps:get(id, Input, undefined) of
         undefined ->
             ok;
         Id ->
-            send_to_client(Socket, Response#{id => Id})
+            send_to_client(Socket, Method, Response#{id => Id})
     end.
 
-send_to_client(Socket, Body) ->
-    lsp_log("LSP sends ~p", [Body]),
+send_to_client(Socket, Method, Body) ->
+    lsp_log(Method, "LSP sends ~p", [Body]),
     {ok, Json} = vscode_jsone:encode(Body),
     Header = iolist_to_binary(io_lib:fwrite("Content-Length: ~p", [byte_size(Json)])),
     gen_tcp:send(Socket, <<Header/binary, "\r\n\r\n", Json/binary>>).
+
+send_to_client(Socket, Body) ->
+    send_to_client(Socket, <<"unknown">>, Body).
+
 
 handle_tcp_data(Socket, Contents, State) ->
     StateWithContents = State#state{contents = <<(State#state.contents)/binary, Contents/binary>>},

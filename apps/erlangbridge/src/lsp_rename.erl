@@ -32,6 +32,7 @@ find_at(File, Line, Column) ->
                     fun
                         ({function, {L, Start}, FnName, FnArity, _}, _CurrentFile, _Acc) when
                             L == Line, Start =< Column ->
+                                lsp_fun_utils:get_function_infos(File, FnName, FnArity),
                                 find_at_result(Start, Column, CursorModule, FnName, FnArity);
                         ({'fun',{L, Start}, {function, FnName, FnArity}}, _CurrentFile, _Acc) when
                             L == Line, Start =< Column ->

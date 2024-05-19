@@ -7,8 +7,9 @@
 -export([standard_modules/0, bifs/0]).
 -export([update_config/2, root/0, tmpdir/0, codeLensEnabled/0, includePaths/0, linting/0,
         verbose/0, autosave/0, proxy/0, search_files_exclude/0, search_exclude/0,
-        formatting_line_length/0, inlayHintsEnabled/0]).
+        formatting_line_length/0, inlayHintsEnabled/0, verbose_is_include/1]).
 
+-include("lsp_log.hrl").
 -define(SERVER, ?MODULE).
 
 -record(state, {config, standard_modules, bifs}).
@@ -23,7 +24,19 @@ bifs() ->
     gen_server:call(?SERVER, {bifs}).
 
 update_config(Key, Value) ->
-    gen_server:call(?SERVER, {update_config, Key, Value}).
+    Res = gen_server:call(?SERVER, {update_config, Key, Value}),
+    compute_erlang_section(Key),
+    Res.
+
+compute_erlang_section(Key) ->
+    if 
+        Key =:= erlang ->
+            Excludes = get_config_entry(erlang, verboseExcludeFilter, ""),
+            Splitted = lists:map(fun(X) -> {lsp_utils:to_binary(X), false} end, lists:flatmap( fun(X) -> string:split(X, ",") end, string:split(Excludes, ";"))),
+            gen_server:call(?SERVER, {update_config, erlang_computed, #{ verboseExcludeFilter => maps:from_list(Splitted)}});
+        true -> ok
+    end.
+
 
 get_config() ->
     gen_server:call(?SERVER, get_config).
@@ -49,6 +62,10 @@ linting() ->
 
 verbose() ->
     get_config_entry(erlang, verbose, false).
+
+verbose_is_include(Method) ->
+    M = get_config_entry(erlang_computed, verboseExcludeFilter, #{}),
+    lsp_utils:try_get(Method, M, true).
 
 autosave() ->
     get_config_entry(computed, autosave, true).

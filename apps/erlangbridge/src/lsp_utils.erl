@@ -17,6 +17,11 @@
          index_of/2,
          try_get/3]).
 
+-export_type([lsp_position/0, lsp_range/0]).
+
+
+-type lsp_position() :: #{ line => pos_integer(), character => pos_integer()}.
+-type lsp_range() :: #{ 'start' => lsp_position(), 'end' => lsp_position()}.
 
 -spec try_get(Key :: term(), Map :: map(), Default :: term()) -> term().
 try_get(Key, Map, Default) ->
@@ -25,7 +30,7 @@ try_get(Key, Map, Default) ->
         _ -> Default
     end.
 
--spec client_range(Line :: integer(), StartChar :: integer(), EndChar :: integer()) -> map().
+-spec client_range(Line :: pos_integer(), StartChar :: pos_integer(), EndChar :: pos_integer()) -> lsp_range().
 client_range(Line, StartChar, EndChar) ->
     #{
         <<"start">> => #{line => Line - 1, character => StartChar - 1},
@@ -33,14 +38,14 @@ client_range(Line, StartChar, EndChar) ->
     }.
 
 
--spec client_range(Line :: integer(), StartChar :: integer(), LineEnd :: integer(), EndChar :: integer()) -> map().
+-spec client_range(Line :: pos_integer(), StartChar :: pos_integer(), LineEnd :: pos_integer(), EndChar :: pos_integer()) -> lsp_range().
 client_range(Line, StartChar, LineEnd, EndChar) ->
     #{
         <<"start">> => #{line => Line - 1, character => StartChar - 1},
         <<"end">> => #{line => LineEnd - 1, character => EndChar - 1}
     }.
 
--spec client_position({Line :: integer(), Column :: integer()}) -> map().
+-spec client_position({Line :: pos_integer(), Column :: pos_integer()}) -> lsp_position().
 client_position({Line, Column}) ->
     #{
         line => Line-1, 
