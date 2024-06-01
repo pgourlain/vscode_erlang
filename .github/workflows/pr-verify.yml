@@ -20,7 +20,9 @@ jobs:
         node:
           - 20
     steps:
-      - run: sudo apt-get install erlang  
+      - run: |
+          sudo apt-get update
+          sudo apt-get install erlang  
         if: runner.os == 'Linux'   
       - run: |
           brew install erlang@26
