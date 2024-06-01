@@ -1,13 +1,14 @@
-import { 
-	workspace, WorkspaceFolder, DebugConfiguration, DebugConfigurationProvider, CancellationToken, ProviderResult
-} from 'vscode'; 
+import {
+    workspace, WorkspaceFolder, DebugConfiguration, DebugConfigurationProvider, CancellationToken, ProviderResult, WorkspaceConfiguration
+} from 'vscode';
 import { ErlangSettings } from './erlangSettings';
+import { stringify } from 'querystring';
 //import { ErlangOutput } from './vscodeAdapter';
 
 export class ErlangDebugConfigurationProvider implements DebugConfigurationProvider {
     provideDebugConfigurations?(folder: WorkspaceFolder | undefined, token?: CancellationToken): ProviderResult<DebugConfiguration[]> {
         if (folder) {
-           return [];
+            return [];
         }
         return undefined;
     }
@@ -20,37 +21,59 @@ export class ErlangDebugConfigurationProvider implements DebugConfigurationProvi
     }
 };
 
-let currentSettings : ErlangSettings = null;
+let currentSettings: ErlangSettings = null;
 
-export function configurationChanged() : void {
+export function configurationChanged(): void {
     let erlangConf = workspace.getConfiguration("erlang");
-    let settings : ErlangSettings = {
-        erlangPath: erlangConf.get<string>("erlangPath", null),
+    let settings: ErlangSettings = {
+        erlangPath: resolveVariables(erlangConf.get<string>("erlangPath", null)),
         erlangArgs: erlangConf.get("erlangArgs", []),
         erlangDistributedNode: erlangConf.get("erlangDistributedNode", false),
-        rebarPath: erlangConf.get<string>("rebarPath", null),
+        rebarPath: resolveVariables(erlangConf.get<string>("rebarPath", null)),
         codeLensEnabled: erlangConf.get<boolean>('codeLensEnabled', false),
         inlayHintsEnabled: erlangConf.get<boolean>('inlayHintsEnabled', false),
         debuggerRunMode: erlangConf.get<string>("debuggerRunMode", "Server"),
         includePaths: erlangConf.get("includePaths", []),
         linting: erlangConf.get<boolean>('linting', false),
         rebarBuildArgs: erlangConf.get("rebarBuildArgs", ['compile']),
-        rootPath : extractRootPath(),
+        rootPath: extractRootPath(),
         verbose: erlangConf.get("verbose", false)
     };
     currentSettings = settings;
 }
 
-function extractRootPath() : string {
-    //workspace.rootPath is deprecated, and documentation notice that value is store in first workspace folder
+export function resolveErlangSettings(erlangSection : WorkspaceConfiguration): any {    
+    const erlangconfigAsJson = JSON.stringify(erlangSection);
+    const erlangConfiguration = JSON.parse(erlangconfigAsJson);
+    if (erlangConfiguration) {
+        erlangConfiguration.erlangPath = resolveVariables(erlangConfiguration.erlangPath);
+        erlangConfiguration.rebarPath = resolveVariables(erlangConfiguration.rebarPath);
+    }
+    return erlangConfiguration;
+}
+
+function getFirstWorkspaceFolderPath(): string {
     let folders = workspace.workspaceFolders;
     if (folders && folders.length > 0) {
         return folders[0].uri.fsPath;
     }
-    return undefined;
+    return "";
 }
 
-export function getElangConfigConfiguration() : ErlangSettings {
+function extractRootPath(): string {
+    const res = getFirstWorkspaceFolderPath();
+    return res != "" ? res : undefined;
+}
+
+function resolveVariables(value: string) : string {
+    //https://code.visualstudio.com/docs/editor/variables-reference#_predefined-variables
+    if (!value) return value;
+    value = value.replace('${workspaceFolder}', getFirstWorkspaceFolderPath);
+    return value;
+}
+
+
+export function getElangConfigConfiguration(): ErlangSettings {
     if (!currentSettings) {
         configurationChanged();
         // in order to debug
