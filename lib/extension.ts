@@ -42,7 +42,9 @@ export function activate(context: ExtensionContext) {
     eunit.activate(context);
 
     disposables.push(debug.registerDebugConfigurationProvider("erlang", new ErlangDebugConfigurationProvider()));
-    disposables.push(Workspace.onDidChangeConfiguration((e) => configurationChanged()));    
+    disposables.push(Workspace.onDidChangeConfiguration((e) => configurationChanged()));  
+    disposables.push(Workspace.onDidChangeWorkspaceFolders((e) => configurationChanged()));
+    
     let runMode = getElangConfigConfiguration().debuggerRunMode;
     let factory: DebugAdapterDescriptorFactory;
     switch (runMode) {

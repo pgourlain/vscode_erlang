@@ -37,7 +37,7 @@ import * as lspRename from './lsp-rename';
 // import { ErlangSettings } from '../erlangSettings';
 import RebarShell from '../RebarShell';
 import { ErlangOutputAdapter } from '../vscodeAdapter';
-import { getElangConfigConfiguration } from '../ErlangConfigurationProvider';
+import { getElangConfigConfiguration, resolveErlangSettings } from '../ErlangConfigurationProvider';
 import { ErlangLanguageClient, erlangDocumentSelector } from './lsp-context';
 
 /*
@@ -67,8 +67,6 @@ namespace Configuration {
 	// both client and server do use JSON the conversion is trivial. 
 	export function computeConfiguration(params: ConfigurationParams, _token: CancellationToken, _next: Function): any[] {
 
-		//lspOutputChannel.appendLine("computeConfiguration :"+ JSON.stringify(params));
-
 		if (!params.items) {
 			return null;
 		}
@@ -80,6 +78,8 @@ namespace Configuration {
 						autosave: Workspace.getConfiguration("files").get("autoSave", "afterDelay") === "afterDelay",
 						tmpdir: os.tmpdir()
 					});
+				} else if (item.section === "erlang") {
+					result.push(resolveErlangSettings(Workspace.getConfiguration(item.section)))
 				}
 				else {
 					result.push(Workspace.getConfiguration(item.section));
@@ -225,11 +225,7 @@ export function activate(context: ExtensionContext) {
 		didSave: (data: TextDocument, next: (data: TextDocument) => void) => {
 			next(data);//call LSP
 			lspcodelens.onDocumentDidSave();
-		},
-		// prepareRename: (document, position, token, next) => {
-		// 	return Promise.resolve(lspRename.onPrepareRename(document, position, token, next));
-			
-		// },		
+		},	
 	};
 	// Options to control the language client
 	let clientOptions: LanguageClientOptions = {
