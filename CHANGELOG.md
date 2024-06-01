@@ -1,6 +1,13 @@
 # Change log
 
-## Version 1.0.5 (May 17, 2024)
+## Version 1.0.7 (June 1, 2024)
+
+* [299](https://github.com/pgourlain/vscode_erlang/issues/299) : implementation of [298](https://github.com/pgourlain/vscode_erlang/issues/298) 
+  - resolve ${workspaceFolder} if specified in configuration (erlangPath, rebarPath)
+
+---
+
+## Version 1.0.6 (May 17, 2024)
 
 * [296](https://github.com/pgourlain/vscode_erlang/issues/296) : deactivate lsp lint, due to bad effect and performance on large project
 
