@@ -189,10 +189,17 @@ handle_cast({project_file_deleted, File}, State) ->
     {noreply, delete_project_files([File], State)}.
 
 handle_info({worker_result, File, _Result}, State) ->
+<<<<<<< HEAD
     ?LOG("Parsed in background: ~s~n", [unicode:characters_to_binary(File)]),
     {noreply, parse_next_file_in_background(State)};
 handle_info({worker_error, File, _Exception}, State) ->
     ?LOG("Parse in background failed: ~s~n", [unicode:characters_to_binary(File)]),
+=======
+    ?LOG("Parsed in background: ~s~n", [File]),
+    {noreply, parse_next_file_in_background(State)};
+handle_info({worker_error, File, _Exception}, State) ->
+    ?LOG("Parse in background failed: ~s~n", [File]),
+>>>>>>> b512635 (limit number of traces when more than 200 files in project)
     {noreply, parse_next_file_in_background(State)};
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -343,8 +350,12 @@ scan_project_files(State = #state{project_modules = OldProjectModules}) ->
     SearchExclude = lsp_utils:search_exclude_globs_to_regexps(SearchExcludeConf),
     %% Find all source (*.erl) files not excluded by any filter
     CollectProjSrcFilesFun =
+<<<<<<< HEAD
         fun(File, AccProjectModules = #{}) ->
             % File can contain unicode characters (e.g. smiley in the path, like in otp repo)            
+=======
+        fun(File, AccProjectModules = #{}) ->            
+>>>>>>> b512635 (limit number of traces when more than 200 files in project)
             case lsp_utils:is_path_excluded(unicode:characters_to_binary(File), SearchExclude) of
                 true  -> AccProjectModules;
                 false -> do_add_project_file(File, AccProjectModules, BuildDir)
