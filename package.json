@@ -234,7 +234,7 @@
 				"erlang.verboseExcludeFilter": {
 					"type": "string",
 					"default": "textDocument/inlayHints,textDocument/hover",
-					"description": "List of excluded methods (i.e: textDocument/hover,textDocument/inlayHints, ...) from technical traces."
+					"description": "List of excluded methods (i.e: textDocument/hover,textDocument/inlayHints, ...) from technical traces in the extension development."
 				},
 				"erlang.debuggerRunMode": {
 					"type": "string",
