@@ -177,17 +177,18 @@ expressions_2(_, S) ->
 
 
 symbol_info(File) ->
-    lists:reverse(fold_in_syntax_tree(fun
+    List = lists:reverse(fold_in_syntax_tree(fun
         (_SyntaxTree, CurrentFile, Acc) when CurrentFile =/= File ->
             Acc;
-        ({function, {L, _}, Function, Arity, _}, _CurrentFile, Acc) ->
+        ({function, {_, _}, Function, Arity, _}=F, _CurrentFile, Acc) ->
             FullName = iolist_to_binary(io_lib:format("~p/~p", [Function, Arity])),
-            [{FullName, 12, L} | Acc];
+            [{FullName, 12, lsp_fun_utils:get_function_range(F)} | Acc];
         ({attribute, {L, _}, record, {Record, _}}, _CurrentFile, Acc) ->
-            [{Record, 23, L} | Acc];
+            [{Record, 23, {L, 1, L, 1}} | Acc];
         (_SyntaxTree, _CurrentFile, Acc) ->
             Acc
-    end, [], File)).
+    end, [], File)),
+    List.
 
 %return list of function for specified file
 functions(File, FunName) ->
