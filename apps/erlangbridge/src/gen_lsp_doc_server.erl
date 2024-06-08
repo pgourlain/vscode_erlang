@@ -343,7 +343,8 @@ scan_project_files(State = #state{project_modules = OldProjectModules}) ->
     SearchExclude = lsp_utils:search_exclude_globs_to_regexps(SearchExcludeConf),
     %% Find all source (*.erl) files not excluded by any filter
     CollectProjSrcFilesFun =
-        fun(File, AccProjectModules = #{}) ->            
+        fun(File, AccProjectModules = #{}) ->
+            % File can contain unicode characters (e.g. smiley in the path, like in otp repo)            
             case lsp_utils:is_path_excluded(unicode:characters_to_binary(File), SearchExclude) of
                 true  -> AccProjectModules;
                 false -> do_add_project_file(File, AccProjectModules, BuildDir)
