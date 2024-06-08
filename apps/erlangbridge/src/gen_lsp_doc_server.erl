@@ -189,10 +189,10 @@ handle_cast({project_file_deleted, File}, State) ->
     {noreply, delete_project_files([File], State)}.
 
 handle_info({worker_result, File, _Result}, State) ->
-    ?LOG("Parsed in background: ~s~n", [File]),
+    ?LOG("Parsed in background: ~s~n", [unicode:characters_to_binary(File)]),
     {noreply, parse_next_file_in_background(State)};
 handle_info({worker_error, File, _Exception}, State) ->
-    ?LOG("Parse in background failed: ~s~n", [File]),
+    ?LOG("Parse in background failed: ~s~n", [unicode:characters_to_binary(File)]),
     {noreply, parse_next_file_in_background(State)};
 handle_info(_Info, State) ->
     {noreply, State}.
