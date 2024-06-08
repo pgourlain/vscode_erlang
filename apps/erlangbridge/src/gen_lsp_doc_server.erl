@@ -8,8 +8,10 @@
 -export([get_syntax_tree/1, get_dodged_syntax_tree/1, get_references/1, get_inlayhints/1]).
 -export([root_available/0, config_change/0, project_modules/0, get_module_file/1, get_module_files/1, get_build_dir/0, find_source_file/1]).
 -export([init/1,handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
+-include("./lsp_log.hrl").
 
 -define(SERVER, ?MODULE).
+-define(IIF(Cond, Then, Else), if Cond -> Then; true -> Else end).
 
 -record(state,
         {root_available = false :: boolean(),
@@ -187,10 +189,10 @@ handle_cast({project_file_deleted, File}, State) ->
     {noreply, delete_project_files([File], State)}.
 
 handle_info({worker_result, File, _Result}, State) ->
-    gen_lsp_server:lsp_log("Parsed in background: ~s~n", [File]),
+    ?LOG("Parsed in background: ~s~n", [File]),
     {noreply, parse_next_file_in_background(State)};
 handle_info({worker_error, File, _Exception}, State) ->
-    gen_lsp_server:lsp_log("Parse in background failed: ~s~n", [File]),
+    ?LOG("Parse in background failed: ~s~n", [File]),
     {noreply, parse_next_file_in_background(State)};
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -341,40 +343,47 @@ scan_project_files(State = #state{project_modules = OldProjectModules}) ->
     SearchExclude = lsp_utils:search_exclude_globs_to_regexps(SearchExcludeConf),
     %% Find all source (*.erl) files not excluded by any filter
     CollectProjSrcFilesFun =
-        fun(File, AccProjectModules = #{}) ->
-            case lsp_utils:is_path_excluded(File, SearchExclude) of
+        fun(File, AccProjectModules = #{}) ->            
+            case lsp_utils:is_path_excluded(unicode:characters_to_binary(File), SearchExclude) of
                 true  -> AccProjectModules;
                 false -> do_add_project_file(File, AccProjectModules, BuildDir)
             end
         end,
     AllProjectModules = filelib:fold_files(gen_lsp_config_server:root(), "\\.erl$",
                                            true, CollectProjSrcFilesFun, #{}),
-    gen_lsp_server:lsp_log(
+    NbFiles = maps:size(AllProjectModules),
+    LogAllProjectModules = ?IIF(NbFiles > 200, #{}, AllProjectModules),
+    ?LOG(
         "~p: Project modules (~p) with all source files:~n  ~p~n",
-        [?MODULE, maps:size(AllProjectModules), AllProjectModules]),
+        [?MODULE, NbFiles, LogAllProjectModules]),
     %% Filter out source files sym-linked to the original ones by rebar3
     %% from '_build' directory
     ProjectModules =
         maps:map(
             fun(_Module, Files) -> module_files_to_parse(Files, BuildDir) end,
             AllProjectModules),
-    gen_lsp_server:lsp_log(
+    
+    NbPrjFiles = maps:size(ProjectModules),
+    LogProjectModules = ?IIF(NbPrjFiles > 200, #{}, ProjectModules),
+    ?LOG(
         "~p: Project modules (~p) without rebar3 duplicated source files:~n  ~p~n",
-        [?MODULE, maps:size(ProjectModules), ProjectModules]),
+        [?MODULE, maps:size(ProjectModules), LogProjectModules]),
     %% Get the complete list of source files (already scanned and newly found)
     OldProjFiles = lists:usort(lists:append(maps:values(OldProjectModules))),
     ProjFiles = lists:usort(lists:append(maps:values(ProjectModules))),
     %% Drop unwanted files, e.g. newly excluded by a filter change
     FilesToDrop = OldProjFiles -- ProjFiles,
-    gen_lsp_server:lsp_log(
+    ?LOG(
         "~p: Files to drop: (~p)~n  ~p~n",
         [?MODULE, length(FilesToDrop), lists:sort(FilesToDrop)]),
     State2 = delete_project_files(FilesToDrop, State),
     %% Get files not parsed yet
     FilesToParse = ProjFiles -- OldProjFiles,
-    gen_lsp_server:lsp_log(
+    NbFileToParse = length(FilesToParse),
+    LogFilesToParse = ?IIF(NbFileToParse > 200, lists:sublist(FilesToParse,200), FilesToParse),
+    ?LOG(
         "~p: Files to parse: (~p)~n  ~p~n",
-        [?MODULE, length(FilesToParse), lists:sort(FilesToParse)]),
+        [?MODULE, length(FilesToParse), lists:sort(LogFilesToParse)]),
 
     %% Load the 1st source file (and continue later one-by-one ...)
     NewState = State2#state{project_modules = ProjectModules,
