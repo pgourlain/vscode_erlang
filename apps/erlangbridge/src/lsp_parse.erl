@@ -46,7 +46,8 @@ get_include_path(File) ->
         get_include_paths_from_rebar_config(File) ++
         get_standard_include_paths(),
     Paths = lists:filter(fun filelib:is_dir/1, Candidates),
-    gen_lsp_server:lsp_log("get_include_path: ~p", [Paths]),
+    % activate it only for debugging, on big projects it can generate a lot of logs
+    %gen_lsp_server:lsp_log("get_include_path: ~p", [Paths]),
     Paths.
 
 get_standard_include_paths() ->
