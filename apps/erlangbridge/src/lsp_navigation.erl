@@ -186,9 +186,8 @@ symbol_info(File) ->
             [{FullName, 12, lsp_fun_utils:get_function_range(F)} | Acc];
         ({attribute, {L, _}, record, {Record, _}}, _CurrentFile, Acc) ->
             [{Record, 23, {L, 1, L, 1}} | Acc];
-        ({attribute, {L, _}, type, {Type, _}}, _CurrentFile, Acc) ->
-            % type definition is equal to class
-            [{Type, 5, {L, 1, L, 1}} | Acc];
+        ({attribute, {_, _}, type, {Type, _, _}}=T, _CurrentFile, Acc) ->
+            [{Type, 5, lsp_fun_utils:get_type_range(T)} | Acc];
         (_SyntaxTree, _CurrentFile, Acc) ->
             Acc
     end, [], File)),
