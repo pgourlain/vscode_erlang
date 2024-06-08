@@ -177,6 +177,7 @@ expressions_2(_, S) ->
 
 
 symbol_info(File) ->
+    % documentation : https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#symbolKind
     List = lists:reverse(fold_in_syntax_tree(fun
         (_SyntaxTree, CurrentFile, Acc) when CurrentFile =/= File ->
             Acc;
@@ -185,6 +186,9 @@ symbol_info(File) ->
             [{FullName, 12, lsp_fun_utils:get_function_range(F)} | Acc];
         ({attribute, {L, _}, record, {Record, _}}, _CurrentFile, Acc) ->
             [{Record, 23, {L, 1, L, 1}} | Acc];
+        ({attribute, {L, _}, type, {Type, _}}, _CurrentFile, Acc) ->
+            % type definition is equal to class
+            [{Type, 5, {L, 1, L, 1}} | Acc];
         (_SyntaxTree, _CurrentFile, Acc) ->
             Acc
     end, [], File)),
