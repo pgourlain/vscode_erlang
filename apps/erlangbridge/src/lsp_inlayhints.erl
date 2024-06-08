@@ -4,7 +4,26 @@
 
 -include("lsp_log.hrl").
 
-inlayhint_analyze(SyntaxTree, _CurrentFile, #{defs := Defs, calls := Calls} = Dict) ->
+-ifdef(OTP_RELEASE).
+inlayhint_analyze(SyntaxTree, _CurrentFile, Dict) ->
+    %do not crash on error, just log, in order to avoid exception while parsing file
+    try
+        internal_inlayhint_analyze(SyntaxTree, _CurrentFile, Dict)
+    catch Error:Exception:StackStrace ->
+        ?LOG("inlayhint_analyze error ~p:~p, stacktrace:~p", [Error, Exception, StackStrace]),
+        Dict
+    end.
+-else.
+inlayhint_analyze(SyntaxTree, _CurrentFile, Dict) ->
+    try
+        internal_inlayhint_analyze(SyntaxTree, _CurrentFile, Dict)
+    catch Error:Exception ->
+        ?LOG("inlayhint_analyze error ~p:~p, stacktrace:~p", [Error, Exception, erlang:get_stacktrace()]),
+        Dict
+    end.
+-endif.
+
+internal_inlayhint_analyze(SyntaxTree, _CurrentFile, #{defs := Defs, calls := Calls} = Dict) ->
     case SyntaxTree of
         %TODO, get args from spec if exists
         {function, _Location, FuncName, Arity, Content} when Arity > 0 ->
