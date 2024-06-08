@@ -428,7 +428,7 @@ parse_and_store(File, ContentsFile) ->
             lsp_navigation:fold_references(fun (Reference, Line, Column, End, _) ->
                 ets:insert(references, {File, Reference, Line, Column, End})
             end, undefined, File, SyntaxTree),
-            ets:insert(document_inlayhints, {File, lsp_navigation:full_inlayhints_info(File,SyntaxTree)})
+            ets:insert(document_inlayhints, {File, lsp_navigation:full_inlayhints_info(File,SyntaxTree, DodgedSyntaxTree)})
     end,
     case DodgedSyntaxTree of
         undefined -> ok;

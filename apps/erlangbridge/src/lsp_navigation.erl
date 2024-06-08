@@ -2,7 +2,7 @@
 
 -export([definition/3, hover_info/3, function_description/2, function_description/3, references/3, function_clauses/3]).
 -export([codelens_info/1, symbol_info/1, record_fields/2, find_function_with_line/2, fold_references/4]).
--export([inlayhints_info/3, full_inlayhints_info/2, functions/2]).
+-export([inlayhints_info/3, full_inlayhints_info/3, functions/2]).
 -export([inlinevalues_info/2, local_function_references/3]).
 -import(lsp_syntax,[fold_in_syntax_tree/4, find_in_syntax_tree/2, fold_in_syntax_tree/3]).
 
@@ -78,16 +78,19 @@ inlayhints_info(File, {LS, _CS}, {LE,_CE}) ->
     %?LOG("inlayhint_info result:~p, filtered:~p", [length(Res), length(FilteredRes)]),
     FilteredRes.
 
-full_inlayhints_info(File, SyntaxTree) ->
+full_inlayhints_info(File, SyntaxTree, DodgedSyntaxTree) ->
     % return empty if not enabled -> optimize background parsing
     case gen_lsp_config_server:inlayHintsEnabled() of
     false -> [];
     _ ->
+        % should be considered to be optimized using only the dodged syntax tree
+        % in order to get inlay hints for the whole file
+        Macros = lsp_syntax:get_macros(DodgedSyntaxTree),
         #{defs := Defs, calls := Calls} = fold_in_syntax_tree(fun lsp_inlayhints:inlayhint_analyze/3,
                     #{defs => [], calls => []},
                     File, SyntaxTree),
         %?LOG("full_inlayhints_info result:~p, ~p", [Defs, Calls]),
-        NewInlays = [X || X <- lsp_inlayhints:generate_inlayhints(Calls, Defs)],
+        NewInlays = [X || X <- lsp_inlayhints:generate_inlayhints(Calls, Defs, Macros)],
         NewInlays
     end.
 
