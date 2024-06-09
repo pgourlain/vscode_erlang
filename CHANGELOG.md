@@ -1,5 +1,14 @@
 # Change log
 
+## Version 1.0.8 (June 9, 2024)
+
+* [302](https://github.com/pgourlain/vscode_erlang/issues/302)
+  - Fix [300](https://github.com/pgourlain/vscode_erlang/issues/300) : Support vscode's sticky scroll feature
+    * only works when vscode setting is set to 'outlineModel'
+  - Fix [301](https://github.com/pgourlain/vscode_erlang/issues/301) : Wrong inlayHints display for macroses
+
+---
+
 ## Version 1.0.7 (June 1, 2024)
 
 * [299](https://github.com/pgourlain/vscode_erlang/issues/299) : implementation of [298](https://github.com/pgourlain/vscode_erlang/issues/298) 
