@@ -17,31 +17,42 @@
          index_of/2,
          try_get/3]).
 
+-export_type([lsp_position/0, lsp_range/0]).
 
+
+-type lsp_position() :: #{ line => pos_integer(), character => pos_integer()}.
+-type lsp_range() :: #{ 'start' => lsp_position(), 'end' => lsp_position()}.
+
+-spec try_get(Key :: term(), Map :: map(), Default :: term()) -> term().
 try_get(Key, Map, Default) ->
     case maps:find(Key, Map) of
         {ok, Value} -> Value;
         _ -> Default
     end.
 
+-spec client_range(Line :: pos_integer(), StartChar :: pos_integer(), EndChar :: pos_integer()) -> lsp_range().
 client_range(Line, StartChar, EndChar) ->
     #{
         <<"start">> => #{line => Line - 1, character => StartChar - 1},
         <<"end">> => #{line => Line - 1, character => EndChar - 1}
     }.
 
+
+-spec client_range(Line :: pos_integer(), StartChar :: pos_integer(), LineEnd :: pos_integer(), EndChar :: pos_integer()) -> lsp_range().
 client_range(Line, StartChar, LineEnd, EndChar) ->
     #{
         <<"start">> => #{line => Line - 1, character => StartChar - 1},
         <<"end">> => #{line => LineEnd - 1, character => EndChar - 1}
     }.
 
+-spec client_position({Line :: pos_integer(), Column :: pos_integer()}) -> lsp_position().
 client_position({Line, Column}) ->
     #{
         line => Line-1, 
         character => Column-1
     }.
 
+-spec file_uri_to_file(Uri :: binary()) -> binary().
 file_uri_to_file(Uri) ->    
     NewUri = re:replace(case Uri of
         <<"file:///", Drive, "%3A", Rest/binary>> -> <<Drive, ":", Rest/binary>>;
@@ -51,6 +62,7 @@ file_uri_to_file(Uri) ->
     end, <<"\\\\">>, <<"/">>, [global, {return, list}]),
     lists:flatten(string_replace(NewUri, "%20", " ")).
 
+-spec file_uri_to_vscode_uri(Uri :: binary()) -> binary().
 file_uri_to_vscode_uri(Uri) ->
     UriWithOutSpace = lists:flatten(string_replace(to_string(Uri), " ", "%20")),
     EncodeUri = if
@@ -62,6 +74,7 @@ file_uri_to_vscode_uri(Uri) ->
       _ -> EncodeUri
     end.
 
+-spec file_to_file_uri(File :: binary()) -> binary().
 file_to_file_uri(<<"//", BinFile/binary>>) ->
     <<"file://", BinFile/binary>>;
 file_to_file_uri("//" ++ File) ->
