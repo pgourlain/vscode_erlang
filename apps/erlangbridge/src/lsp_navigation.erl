@@ -2,7 +2,7 @@
 
 -export([definition/3, hover_info/3, function_description/2, function_description/3, references/3, function_clauses/3]).
 -export([codelens_info/1, symbol_info/1, record_fields/2, find_function_with_line/2, fold_references/4]).
--export([inlayhints_info/3, full_inlayhints_info/2, functions/2]).
+-export([inlayhints_info/3, full_inlayhints_info/3, functions/2]).
 -export([inlinevalues_info/2, local_function_references/3]).
 -import(lsp_syntax,[fold_in_syntax_tree/4, find_in_syntax_tree/2, fold_in_syntax_tree/3]).
 
@@ -78,16 +78,19 @@ inlayhints_info(File, {LS, _CS}, {LE,_CE}) ->
     %?LOG("inlayhint_info result:~p, filtered:~p", [length(Res), length(FilteredRes)]),
     FilteredRes.
 
-full_inlayhints_info(File, SyntaxTree) ->
+full_inlayhints_info(File, SyntaxTree, DodgedSyntaxTree) ->
     % return empty if not enabled -> optimize background parsing
     case gen_lsp_config_server:inlayHintsEnabled() of
     false -> [];
     _ ->
+        % should be considered to be optimized using only the dodged syntax tree
+        % in order to get inlay hints for the whole file
+        Macros = lsp_syntax:get_macros(DodgedSyntaxTree),
         #{defs := Defs, calls := Calls} = fold_in_syntax_tree(fun lsp_inlayhints:inlayhint_analyze/3,
                     #{defs => [], calls => []},
                     File, SyntaxTree),
         %?LOG("full_inlayhints_info result:~p, ~p", [Defs, Calls]),
-        NewInlays = [X || X <- lsp_inlayhints:generate_inlayhints(Calls, Defs)],
+        NewInlays = [X || X <- lsp_inlayhints:generate_inlayhints(Calls, Defs, Macros)],
         NewInlays
     end.
 
@@ -177,17 +180,21 @@ expressions_2(_, S) ->
 
 
 symbol_info(File) ->
-    lists:reverse(fold_in_syntax_tree(fun
+    % documentation : https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#symbolKind
+    List = lists:reverse(fold_in_syntax_tree(fun
         (_SyntaxTree, CurrentFile, Acc) when CurrentFile =/= File ->
             Acc;
-        ({function, {L, _}, Function, Arity, _}, _CurrentFile, Acc) ->
+        ({function, {_, _}, Function, Arity, _}=F, _CurrentFile, Acc) ->
             FullName = iolist_to_binary(io_lib:format("~p/~p", [Function, Arity])),
-            [{FullName, 12, L} | Acc];
+            [{FullName, 12, lsp_fun_utils:get_function_range(F)} | Acc];
         ({attribute, {L, _}, record, {Record, _}}, _CurrentFile, Acc) ->
-            [{Record, 23, L} | Acc];
+            [{Record, 23, {L, 1, L, 1}} | Acc];
+        ({attribute, {_, _}, type, {Type, _, _}}=T, _CurrentFile, Acc) ->
+            [{Type, 5, lsp_fun_utils:get_type_range(T)} | Acc];
         (_SyntaxTree, _CurrentFile, Acc) ->
             Acc
-    end, [], File)).
+    end, [], File)),
+    List.
 
 %return list of function for specified file
 functions(File, FunName) ->
@@ -660,13 +667,13 @@ find_definition_in_file(_Type, _Name, _File, []) ->
 find_definition_in_file(macro, MacroName, File,
                         [{tree, attribute, _,
                           {attribute, {atom, _, define},
-                           [{_, Line, MacroName}, _]}}
+                           [{_, {Line,_C}, MacroName}, _]}}
                          | _Forms]) ->
     {File, Line, 1, 1};
 find_definition_in_file(macro, MacroName, File,
                         [{tree, attribute, _,
                           {attribute, {atom, _, define},
-                           [{_, _, _, {_, {_, Line, MacroName}, _}}, _]}}
+                           [{_, _, _, {_, {_, {Line,_C}, MacroName}, _}}, _]}}
                          | _Forms]) ->
     {File, Line, 1, 1};
 find_definition_in_file(record, RecordName, File,
@@ -694,14 +701,14 @@ find_field_definition_in_file(_Name, _File, []) ->
     undefined;
 find_field_definition_in_file(Name, File,
                               [{tree, record_field, _,
-                                {record_field, {atom, Line, Name}, _}}
+                                {record_field, {atom, {Line,_C}, Name}, _}}
                                | _Forms]) ->
     {File, Line, 1, 1};
 find_field_definition_in_file(Name, File,
                               [{tree,typed_record_field, _,
                                 {typed_record_field,
                                  {tree, record_field, _,
-                                  {record_field, {atom, Line, Name}, _}}, _}}
+                                  {record_field, {atom, {Line,_C}, Name}, _}}, _}}
                                | _Forms]) ->
     {File, Line, 1, 1};
 find_field_definition_in_file(Name, File, [_ | Forms]) ->

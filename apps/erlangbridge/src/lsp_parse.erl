@@ -18,7 +18,7 @@ parse_source_file(File, ContentsFile) ->
     case epp_parse_file(ContentsFile, get_include_path(File), get_define_from_rebar_config(File)) of
         {ok, FileSyntaxTree} ->
             UpdatedSyntaxTree = update_file_in_forms(File, ContentsFile, FileSyntaxTree),
-            case epp_dodger:parse_file(ContentsFile) of
+            case epp_dodger_parse_file(ContentsFile) of
                 {ok, Forms} ->
                     {UpdatedSyntaxTree, Forms};
                 _ ->
@@ -28,6 +28,16 @@ parse_source_file(File, ContentsFile) ->
         _ ->
             io:format("epp:parse_file could not parse ~p~n", [File]),
             {undefined, undefined}
+    end.
+
+%% in order to have LMine and column information in syntax tree, we need to parse file with epp_dodger
+epp_dodger_parse_file(File) ->
+    case file:open(File, [read]) of
+        {ok, Handle} ->
+            R = epp_dodger:parse(Handle, {1,1}),
+            file:close(Handle),            
+            R;
+        Error -> Error
     end.
 
 parse_config_file(File, ContentsFile) ->
@@ -46,7 +56,8 @@ get_include_path(File) ->
         get_include_paths_from_rebar_config(File) ++
         get_standard_include_paths(),
     Paths = lists:filter(fun filelib:is_dir/1, Candidates),
-    gen_lsp_server:lsp_log("get_include_path: ~p", [Paths]),
+    % activate it only for debugging, on big projects it can generate a lot of logs
+    %gen_lsp_server:lsp_log("get_include_path: ~p", [Paths]),
     Paths.
 
 get_standard_include_paths() ->

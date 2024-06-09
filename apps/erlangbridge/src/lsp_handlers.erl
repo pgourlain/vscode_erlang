@@ -262,13 +262,13 @@ textDocument_inlayHints(_Socket, Params) ->
 
 textDocument_documentSymbol(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),
-    lists:map(fun ({Name, Kind, Line}) ->
+    lists:map(fun ({Name, Kind, {L, C, L1, C1}}) ->
         #{
             name => Name,
             kind => Kind, 
             location => #{ 
                 uri => Uri, 
-                range => lsp_utils:client_range(Line, 1, 1)
+                range => lsp_utils:client_range(L, C, L1, C1)
             }
         }
     end, lsp_navigation:symbol_info(lsp_utils:file_uri_to_file(Uri))).

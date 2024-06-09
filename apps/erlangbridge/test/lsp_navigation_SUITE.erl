@@ -18,7 +18,7 @@
         error_logger:info_msg("~p\n", [S])).
 
 % Specify a list of all unit test functions
-all() -> [testnavigation, test2].
+all() -> [testnavigation, test_macros].
 
 % required, but can just return Config. this is a suite level setup function.
 init_per_suite(Config) ->
@@ -106,7 +106,7 @@ navigation_datatests() ->
         {16, 10, 17, 0},
         {8, 28, 3, 6},
         {6, 37, 3, 0, "mod_test.erl"},
-        {24, 18, 7, 0, "data_goods.erl"},
+        {24, 18, 9, 0, "data_goods.erl"},
         {24, 24, 20, 0}
         ]
     },
@@ -135,4 +135,19 @@ testnavigation(Config) ->
     dotestfiles(AppDir, navigation_datatests()),
     ok.
 
-test2(_Config) -> ok.
+test_macros(Config) -> 
+    % write standard erlang code to test whatever you want
+    % use pattern matching to specify expected return values
+    AppDir = (?config(data_dir, Config)),
+    % set root config, induce readline all filename from AppDir
+    gen_lsp_config_server:update_config(root, AppDir),
+    % add all documents from root dir into documents server
+    gen_lsp_doc_server:root_available(),
+    gen_lsp_doc_server:config_change(),
+
+    % test macros
+    SyntaxTree = gen_lsp_doc_server:get_dodged_syntax_tree(filename:join(AppDir,"data_goods.erl")),
+    Macros = lsp_syntax:get_macros(SyntaxTree),
+    ?assertEqual(true, is_list(Macros)),
+    ?assertEqual([{{14,11},'DEFAULT',7}], Macros)    
+    .

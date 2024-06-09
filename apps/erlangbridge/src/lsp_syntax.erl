@@ -1,7 +1,7 @@
 -module(lsp_syntax).
 
 -export([validate_parsed_source_file/1, fold_in_syntax_tree/4,find_in_syntax_tree/2]).
--export([fold_in_syntax_tree/3]).
+-export([fold_in_syntax_tree/3, get_macros/1]).
 
 -include("lsp_log.hrl").
 -define(LINTER, <<"erl lsplint">>).
@@ -336,3 +336,17 @@ find_in_syntax_tree(Fun, File) ->
         (SyntaxTree, CurrentFile, undefined) -> Fun(SyntaxTree, CurrentFile);
         (_SyntaxTree, _CurrentFile, Value) -> Value
     end, undefined, File, gen_lsp_doc_server:get_syntax_tree(File)).
+
+% get all macros from syntax tree
+-spec get_macros(DodgedSyntaxTree :: erl_syntax:syntaxtree()) -> { erl_anno:location(), string(), integer() }.
+get_macros(DodgedSyntaxTree) ->
+    lists:foldl(fun (TopLevelElementSyntaxTree, Acc) ->
+        erl_syntax_lib:fold(fun find_macros_in_file/2, Acc, TopLevelElementSyntaxTree)
+    end, [], DodgedSyntaxTree).
+
+
+find_macros_in_file({tree, macro, {attr,LC,_,_},
+             {macro,{tree,variable, _, MacroName}, _}}, Acc) ->
+    Acc ++ [{LC, MacroName, length(atom_to_list(MacroName))}];
+find_macros_in_file(_, Acc) ->
+    Acc.

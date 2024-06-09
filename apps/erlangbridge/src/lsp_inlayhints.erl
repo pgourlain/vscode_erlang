@@ -1,10 +1,29 @@
 -module(lsp_inlayhints).
 
--export([inlayhint_analyze/3, generate_inlayhints/2]).
+-export([inlayhint_analyze/3, generate_inlayhints/3]).
 
 -include("lsp_log.hrl").
 
-inlayhint_analyze(SyntaxTree, _CurrentFile, #{defs := Defs, calls := Calls} = Dict) ->
+-ifdef(OTP_RELEASE).
+inlayhint_analyze(SyntaxTree, _CurrentFile, Dict) ->
+    %do not crash on error, just log, in order to avoid exception while parsing file
+    try
+        internal_inlayhint_analyze(SyntaxTree, _CurrentFile, Dict)
+    catch Error:Exception:StackStrace ->
+        ?LOG("inlayhint_analyze error ~p:~p, stacktrace:~p", [Error, Exception, StackStrace]),
+        Dict
+    end.
+-else.
+inlayhint_analyze(SyntaxTree, _CurrentFile, Dict) ->
+    try
+        internal_inlayhint_analyze(SyntaxTree, _CurrentFile, Dict)
+    catch Error:Exception ->
+        ?LOG("inlayhint_analyze error ~p:~p, stacktrace:~p", [Error, Exception, erlang:get_stacktrace()]),
+        Dict
+    end.
+-endif.
+
+internal_inlayhint_analyze(SyntaxTree, _CurrentFile, #{defs := Defs, calls := Calls} = Dict) ->
     case SyntaxTree of
         %TODO, get args from spec if exists
         {function, _Location, FuncName, Arity, Content} when Arity > 0 ->
@@ -106,9 +125,9 @@ choose_better_arg(VarName, Arg1, Arg2) ->
     end.
 
 
-generate_inlayhints([], _Defs) ->
+generate_inlayhints([], _Defs, _Macros) ->
     [];
-generate_inlayhints([#{args := Args, func_name := FName} | RestCalls], Defs) ->
+generate_inlayhints([#{args := Args, func_name := FName} | RestCalls], Defs, Macros) ->
     L = length(Args),
     %% filter calls and definitions by arity and name
     case
@@ -116,28 +135,45 @@ generate_inlayhints([#{args := Args, func_name := FName} | RestCalls], Defs) ->
             fun(#{arity := Arity, func_name := Dfn}) -> Arity =:= L andalso FName =:= Dfn end, Defs
         )
     of
-        [#{args := DArgs}] -> filter_and_map_args(Args, DArgs);
+        [#{args := DArgs}] -> filter_and_map_args(Args, DArgs, Macros);
         _ -> []
     end ++
-        generate_inlayhints(RestCalls, Defs).
+        generate_inlayhints(RestCalls, Defs, Macros).
 
-filter_and_map_args([], _Defs) ->
+filter_and_map_args([], _Defs, _Macros) ->
     [];
-filter_and_map_args([{Index, Call} | RestCalls], Defs) ->
+filter_and_map_args([{Index, Call} | RestCalls], Defs, Macros) ->
     %get corresponding argument in definition
     D = lists:nth(Index + 1, Defs),
     %?LOG("try_match:~p, ~p", [Call, D]),
-    try_match_parameter(Call, D) ++ filter_and_map_args(RestCalls, Defs).
+    try_match_parameter(Call, D, Macros) ++ filter_and_map_args(RestCalls, Defs, Macros).
 
-try_match_parameter({var, _, VarName}, {var, _, DefVarName}) when VarName =:= DefVarName ->
+try_match_parameter({var, _, VarName}, {var, _, DefVarName}, _Macros) when VarName =:= DefVarName ->
     % call var name and definition var name are equal, no inlay for this argument
     [];
-try_match_parameter({_, Position, _}, DefArg) ->
-   new_inlay(Position, DefArg);
-try_match_parameter({call, Position, _,_}, DefArg)  ->
-   new_inlay(Position, DefArg);
-try_match_parameter(_, _)  ->
+try_match_parameter({_P, Position, _}, DefArg, Macros) ->
+    NewPosition = update_position(Position, Macros),
+    new_inlay(NewPosition, DefArg);
+try_match_parameter({call, Position, _,_}, DefArg, _Macros)  ->
+    new_inlay(Position, DefArg);
+try_match_parameter(_, _, _)  ->
     [].
+
+update_position(LC, undefined) ->
+    LC;
+update_position(LC, []) ->
+    LC;
+update_position({Line, Column}, Macros) ->
+    %% check if the position is inside a macro
+    case lists:filter(fun
+        ({{L,C}, _, Length}) when L =:= Line, C =< Column, C + Length >= Column -> true;
+        (_) -> false 
+        end, 
+    Macros) of
+        [] -> {Line, Column};
+        [{{NewLine, NewColumn}, _, _}] -> {NewLine, NewColumn};
+        _ -> {Line, Column}
+    end.
 
 new_inlay(Position, DefArg) ->
     Label = case DefArg of
