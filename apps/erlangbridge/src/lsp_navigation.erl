@@ -667,13 +667,13 @@ find_definition_in_file(_Type, _Name, _File, []) ->
 find_definition_in_file(macro, MacroName, File,
                         [{tree, attribute, _,
                           {attribute, {atom, _, define},
-                           [{_, Line, MacroName}, _]}}
+                           [{_, {Line,_C}, MacroName}, _]}}
                          | _Forms]) ->
     {File, Line, 1, 1};
 find_definition_in_file(macro, MacroName, File,
                         [{tree, attribute, _,
                           {attribute, {atom, _, define},
-                           [{_, _, _, {_, {_, Line, MacroName}, _}}, _]}}
+                           [{_, _, _, {_, {_, {Line,_C}, MacroName}, _}}, _]}}
                          | _Forms]) ->
     {File, Line, 1, 1};
 find_definition_in_file(record, RecordName, File,
@@ -701,14 +701,14 @@ find_field_definition_in_file(_Name, _File, []) ->
     undefined;
 find_field_definition_in_file(Name, File,
                               [{tree, record_field, _,
-                                {record_field, {atom, Line, Name}, _}}
+                                {record_field, {atom, {Line,_C}, Name}, _}}
                                | _Forms]) ->
     {File, Line, 1, 1};
 find_field_definition_in_file(Name, File,
                               [{tree,typed_record_field, _,
                                 {typed_record_field,
                                  {tree, record_field, _,
-                                  {record_field, {atom, Line, Name}, _}}, _}}
+                                  {record_field, {atom, {Line,_C}, Name}, _}}, _}}
                                | _Forms]) ->
     {File, Line, 1, 1};
 find_field_definition_in_file(Name, File, [_ | Forms]) ->

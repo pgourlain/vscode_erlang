@@ -337,10 +337,12 @@ find_in_syntax_tree(Fun, File) ->
         (_SyntaxTree, _CurrentFile, Value) -> Value
     end, undefined, File, gen_lsp_doc_server:get_syntax_tree(File)).
 
-get_macros(_DodgedSyntaxTree) ->
+% get all macros from syntax tree
+-spec get_macros(DodgedSyntaxTree :: erl_syntax:syntaxtree()) -> { erl_anno:location(), string(), integer() }.
+get_macros(DodgedSyntaxTree) ->
     lists:foldl(fun (TopLevelElementSyntaxTree, Acc) ->
         erl_syntax_lib:fold(fun find_macros_in_file/2, Acc, TopLevelElementSyntaxTree)
-    end, [], _DodgedSyntaxTree).
+    end, [], DodgedSyntaxTree).
 
 
 find_macros_in_file({tree, macro, {attr,LC,_,_},
