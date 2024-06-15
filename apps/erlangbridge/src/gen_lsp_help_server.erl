@@ -102,32 +102,28 @@ render_function([], _D) ->
     % maps at (line:52, column:59), put cursor on iterator_order/0
     ["function_documentation_missing"];
 render_function(FDocs, Docs) ->
-    Grouping =
-        lists:foldl(
-          fun({_Group,_Anno,_Sig,_Doc,#{ equiv := Group }} = Func,Acc) ->
-                  Members = maps:get(Group, Acc, []),
-                  Acc#{ Group => [Func|Members] };
-             ({Group, _Anno, _Sig, _Doc, _Meta} = Func, Acc) ->
-                  Members = maps:get(Group, Acc, []),
-                  Acc#{ Group => [Func|Members] }
-          end, #{}, lists:sort(FDocs)),
-          lists:map(
-      fun({{_,F,A} = Group,Members}) ->
-              Signatures = lists:flatmap(fun render_signature/1,lists:reverse(Members)),
-              case lists:search(fun({_,_,_,Doc,_}) ->
-                                        Doc =/= #{}
-                                end, Members) of
-                  {value, {_,_,_,Doc,_Meta}} ->
-                      render_headers_and_docs(Signatures, get_local_doc({F,A},Doc));
-                  false ->
-                      case lists:keyfind(Group, 1, Docs) of
-                          false ->
-                              render_headers_and_docs(Signatures, get_local_doc({F,A},none));
-                          {_,_,_,Doc,_} ->
-                              render_headers_and_docs(Signatures, get_local_doc({F,A},Doc))
-                      end
-              end
-      end, maps:to_list(Grouping)).
+    Grouping = lists:foldl(fun
+        ({_Group,_Anno,_Sig,_Doc,#{ equiv := Group = {_,_,_}}} = Func,Acc) ->
+            Members = maps:get(Group, Acc, []),
+            Acc#{ Group => [Func|Members] };
+        ({Group, _Anno, _Sig, _Doc, _Meta} = Func, Acc) ->
+            Members = maps:get(Group, Acc, []),
+            Acc#{ Group => [Func|Members] }
+    end, #{}, lists:sort(FDocs)),
+    lists:map(fun ({{_,F,A} = Group, Members}) ->
+        Signatures = lists:flatmap(fun render_signature/1,lists:reverse(Members)),
+        case lists:search(fun({_,_,_,Doc,_}) -> Doc =/= #{} end, Members) of
+            {value, {_,_,_,Doc,_Meta}} ->
+                render_headers_and_docs(Signatures, get_local_doc({F,A},Doc));
+            false ->
+                case lists:keyfind(Group, 1, Docs) of
+                    false ->
+                        render_headers_and_docs(Signatures, get_local_doc({F,A},none));
+                    {_,_,_,Doc,_} ->
+                        render_headers_and_docs(Signatures, get_local_doc({F,A},Doc))
+                end
+        end
+    end, maps:to_list(Grouping)).
 
 render_signature({{_Type,_F,_A},_Anno,_Sigs,_Docs,#{ signature := Specs } = Meta}) ->
     lists:flatmap(
@@ -273,10 +269,10 @@ get_local_doc({F,A}, Docs) ->
     get_local_doc(unicode:characters_to_binary(io_lib:format("~tp/~p",[F,A])), Docs);
 get_local_doc(_Missing, #{ <<"en">> := Docs }) ->
     %% English if it exists
-    shell_docs:normalize(Docs);
+    Docs;
 get_local_doc(_Missing, ModuleDoc) when map_size(ModuleDoc) > 0 ->
     %% Otherwise take first alternative found
-    shell_docs:normalize(maps:get(hd(maps:keys(ModuleDoc)), ModuleDoc));
+    maps:get(hd(maps:keys(ModuleDoc)), ModuleDoc);
 get_local_doc(Missing, hidden) ->
     [{p,[],[<<"The documentation for ">>,Missing,
             <<" is hidden. This probably means that it is internal "
