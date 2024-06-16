@@ -1,5 +1,5 @@
 -module(lsp_parse).
--export([parse_source_file/2, parse_config_file/2, get_include_path/1, scan_source_file/2]).
+-export([parse_source_file/2, parse_config_file/2, get_include_path/1, get_include_path_no_build/1, scan_source_file/2]).
 
 %% @doc
 %% @param File is a reference to the real file (file opened by editor)
@@ -68,6 +68,22 @@ get_standard_include_paths() ->
         filename:join([RootDir, "_build", "default", "lib"]),
         filename:join([RootDir, "_build", "default", "plugins"])
     ].
+
+get_include_path_no_build(File) ->
+    RootDir = gen_lsp_config_server:root(),
+    StandardIncludePathsNoBuild = 
+    [
+        filename:join([RootDir, "apps"]),
+        filename:join([RootDir, "lib"])
+    ],
+    Candidates = get_file_include_paths(File) ++
+        get_settings_include_paths() ++
+        get_include_paths_from_rebar_config(File) ++
+        StandardIncludePathsNoBuild,
+    Paths = lists:filter(fun filelib:is_dir/1, Candidates),
+    % activate it only for debugging, on big projects it can generate a lot of logs
+    %gen_lsp_server:lsp_log("get_include_path: ~p", [Paths]),
+    Paths.
 
 get_settings_include_paths() ->
     SettingPaths = gen_lsp_config_server:includePaths(),
