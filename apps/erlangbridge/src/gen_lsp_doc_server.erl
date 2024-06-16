@@ -338,8 +338,7 @@ get_scan_project_files_exclude_conf() ->
 -spec scan_project_files(#state{}) -> #state{}.
 scan_project_files(State = #state{project_modules = OldProjectModules}) ->
     BuildDir = get_build_dir(), % relative to workspace root or 'undefined'
-    SearchExcludeConf = gen_lsp_config_server:search_files_exclude(),
-    %SearchExcludeConf = get_scan_project_files_exclude_conf(),
+    SearchExcludeConf = get_scan_project_files_exclude_conf(),
     SearchExclude = lsp_utils:search_exclude_globs_to_regexps(SearchExcludeConf),
     %% Find all source (*.erl) files not excluded by any filter
     CollectProjSrcFilesFun =
