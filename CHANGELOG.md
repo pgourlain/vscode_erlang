@@ -1,5 +1,19 @@
 # Change log
 
+## Version 1.0.9 (June 16, 2024)
+
+* [306](https://github.com/pgourlain/vscode_erlang/issues/306) : Fixes for help in OTP 27 and for go to definition
+
+* [307](https://github.com/pgourlain/vscode_erlang/issues/307) : Re activate [285](https://github.com/pgourlain/vscode_erlang/issues/285) (Fine tuning of scanning for project files)
+
+
+Thanks to
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+* [Kornel Horvath](https://github.com/KornelH)
+
+---
+
+
 ## Version 1.0.8 (June 9, 2024)
 
 * [302](https://github.com/pgourlain/vscode_erlang/issues/302)
