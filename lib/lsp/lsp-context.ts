@@ -24,13 +24,13 @@ export class ErlangLanguageClient extends LanguageClient {
   // prompt up the failure to users.
   outChannel?: vscode.OutputChannel;
 
-  handleFailedRequest<T>(type: MessageSignature, error: any,
-    defaultValue: T): T {
+  handleFailedRequest<T>(type: MessageSignature, token: vscode.CancellationToken | undefined, error: any, defaultValue: T, showNotification?: boolean): T {
+    
     if (error instanceof ResponseError && type.method === 'workspace/executeCommand') {
       //show an error popup at lower right in vscode
       vscode.window.showErrorMessage(error.message);
     }
-    return super.handleFailedRequest(type, error, defaultValue);
+    return super.handleFailedRequest(type, token, error, defaultValue);
   }
 
   constructor(name: string, serverOptions: ServerOptions,

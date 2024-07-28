@@ -222,10 +222,10 @@ export function activate(context: ExtensionContext) {
 		resolveCodeLens: (codeLens) => {
 			return Promise.resolve(lspcodelens.onResolveCodeLenses(codeLens)).then(x => x);
 		},
-		didSave: (data: TextDocument, next: (data: TextDocument) => void) => {
-			next(data);//call LSP
+		didSave: async (data, next) => {
+			await next(data);//call LSP
 			lspcodelens.onDocumentDidSave();
-		},	
+		}
 	};
 	// Options to control the language client
 	let clientOptions: LanguageClientOptions = {
