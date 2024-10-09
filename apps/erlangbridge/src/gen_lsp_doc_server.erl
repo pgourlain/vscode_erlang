@@ -134,11 +134,18 @@ as_string(Text) ->
     Text.
 
 start_link() ->
-    safe_new_table(document_contents, set),
-    safe_new_table(syntax_tree, set),
-    safe_new_table(dodged_syntax_tree, set),
-    safe_new_table(references, bag),
-    safe_new_table(document_inlayhints, set),
+    %% To save memory let's compress large ETS tables that are always used by
+    %% primary key basis, never by `match` or `select`.
+    ExtraEtsOpts =
+        case init:get_argument(vscode_ets_compressed) of
+            {ok, [["true"]]} -> [compressed];
+            _                -> []
+        end,
+    safe_new_table(document_contents, set, ExtraEtsOpts),
+    safe_new_table(syntax_tree, set, ExtraEtsOpts),
+    safe_new_table(dodged_syntax_tree, set, ExtraEtsOpts),
+    safe_new_table(references, bag, []),
+    safe_new_table(document_inlayhints, set, ExtraEtsOpts),
     gen_server:start_link({local, ?SERVER}, ?MODULE, [],[]).
 
 init(_Args) ->
@@ -409,9 +416,9 @@ delete_project_files([File | Files], State) ->
     NewState = State#state{project_modules = UpdatedProjectModules},
     delete_project_files(Files, NewState).
 
-safe_new_table(Name, Type) ->
+safe_new_table(Name, Type, ExtraOpts) ->
     case ets:whereis(Name) of
-        undefined -> ets:new(Name, [Type, named_table, public]);
+        undefined -> ets:new(Name, [Type, named_table, public | ExtraOpts]);
         _ -> Name
     end.
 

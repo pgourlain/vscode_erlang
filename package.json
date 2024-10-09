@@ -181,7 +181,7 @@
 				},
 				"erlang.erlangDistributedNode": {
 					"type": "boolean",
-					"description": "Start the Erlang backend in a distributed Erlang node. Could be usefull for extension development. Note, it starts EPMD if not running yet.",
+					"description": "Start the Erlang backend in a distributed Erlang node. Could be useful for extension development. Note, it starts EPMD if not running yet.",
 					"default": false
 				},
 				"erlang.rebarPath": {
@@ -220,6 +220,11 @@
 					"type": "boolean",
 					"default": false,
 					"description": "Enable/disable references CodeLens on functions."
+				},
+				"erlang.compressLargeEtsTables": {
+					"type": "boolean",
+					"description": "Enable/disable compression of large ETS lookup tables (mainly used for code navigation) to consume less memory. Please note, it might impact performance.",
+					"default": false
 				},
 				"erlang.inlayHintsEnabled": {
 					"type": "boolean",

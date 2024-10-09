@@ -31,6 +31,7 @@ export function configurationChanged(): void {
         erlangDistributedNode: erlangConf.get("erlangDistributedNode", false),
         rebarPath: resolveVariables(erlangConf.get<string>("rebarPath", null)),
         codeLensEnabled: erlangConf.get<boolean>('codeLensEnabled', false),
+        compressLargeEtsTables: erlangConf.get("compressLargeEtsTables", false),
         inlayHintsEnabled: erlangConf.get<boolean>('inlayHintsEnabled', false),
         debuggerRunMode: erlangConf.get<string>("debuggerRunMode", "Server"),
         includePaths: erlangConf.get("includePaths", []),

@@ -13,6 +13,11 @@ export class ErlangShellLSP extends GenericShell {
                 "-sname", "vscode_" + listen_port.toString(),
                 "-setcookie", "vscode_" + listen_port.toString());
         }
+        // Turn on compression of large ETS lookup tables to consume less memory
+        if (this.compressLargeEtsTables) {
+            debugStartArgs.push(
+                "-vscode_ets_compressed", "true");
+        }
         // Use special command line arguments
         if (this.erlangArgs) {
             debugStartArgs = debugStartArgs.concat(this.erlangArgs)
