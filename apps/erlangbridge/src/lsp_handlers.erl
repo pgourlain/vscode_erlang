@@ -87,6 +87,14 @@ configuration(Socket, [ErlangSection, FilesSection, ComputedSection, HttpSection
                            [ErlangSection, FilesSection, ComputedSection,
                             HttpSection, SearchSection]),
 
+    %% Delete old caches left there by brutally killed extension instances
+    case ComputedSection of
+        #{tmpdir := TmpDir, username := UserName} ->
+            gen_lsp_doc_server:delete_unused_caches(TmpDir, UserName);
+        _ ->
+            ok
+    end,
+
     %% Scan workspace for source files
     gen_lsp_doc_server:config_change(),
 

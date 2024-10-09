@@ -181,7 +181,7 @@
 				},
 				"erlang.erlangDistributedNode": {
 					"type": "boolean",
-					"description": "Start the Erlang backend in a distributed Erlang node. Could be usefull for extension development. Note, it starts EPMD if not running yet.",
+					"description": "Start the Erlang backend in a distributed Erlang node. Could be useful for extension development. Note, it starts EPMD if not running yet.",
 					"default": false
 				},
 				"erlang.rebarPath": {
@@ -215,6 +215,21 @@
 					"type": "boolean",
 					"default": true,
 					"description": "Enable/disable dynamic validation of opened Erlang source files."
+				},
+				"erlang.cacheManagement": {
+					"type": "string",
+					"default": "memory",
+					"description": "Specify where and how to store large cache tables.",
+					"enum": [
+						"memory",
+						"compressed memory",
+						"file"
+					],
+					"enumDescriptions": [
+						"Store in memory",
+						"Store in memory and apply lightweight compression to consume less memory (approx. 50%)",
+						"Store in temporary files"
+					]
 				},
 				"erlang.codeLensEnabled": {
 					"type": "boolean",

@@ -39,6 +39,7 @@ export class GenericShell extends EventEmitter {
     public erlangPath: string = null;
 	public erlangArgs : string[] = [];
 	public erlangDistributedNode: boolean = false;
+    public cacheManagement: string = "memory";
 
     //provide IGenericShellConfiguration, in order to avoid dependencies on vscode module (it doesn't works with debugger-adpater)
     constructor(logOutput?: ILogOutput, shellOutput?: IShellOutput, erlangConfiguration?: ErlangSettings) {
@@ -67,6 +68,7 @@ export class GenericShell extends EventEmitter {
             }
             this.erlangArgs = erlangConfiguration.erlangArgs;
             this.erlangDistributedNode = erlangConfiguration.erlangDistributedNode;
+            this.cacheManagement = erlangConfiguration.cacheManagement;
         }
     }
 

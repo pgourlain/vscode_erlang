@@ -9,12 +9,17 @@
 -export([get_syntax_tree/1, get_dodged_syntax_tree/1, get_references/1, get_inlayhints/1]).
 -export([root_available/0, config_change/0, project_modules/0, get_module_file/1, get_module_files/1, get_build_dir/0, find_source_file/1]).
 
+%% Cache management
+-export([delete_unused_caches/2,
+         persist_cache_mgmt_opts/0]).
+
 %% gen_server callbacks
 -export([init/1,handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 -include("./lsp_log.hrl").
 
 -define(SERVER, ?MODULE).
+-define(XETS, (persistent_term:get(large_cache_module, ets))).
 -define(IIF(Cond, Then, Else), if Cond -> Then; true -> Else end).
 
 -record(state,
@@ -24,19 +29,27 @@
         }).
 
 document_opened(File, Contents) ->
-    ets:insert(document_contents, {File, Contents}).
+    ?XETS:insert(document_contents, {File, Contents}).
 
 document_changed(File, Contents) ->
-    ets:insert(document_contents, {File, Contents}).
+    ?XETS:insert(document_contents, {File, Contents}).
 
 document_closed(File) ->
-    ets:delete(document_contents, File).
+    ?XETS:delete(document_contents, File).
 
 opened_documents() ->
-    [File || {File, _Contents} <- ets:tab2list(document_contents)].
+    do_opened_documents(?XETS).
+
+do_opened_documents(ets) ->
+    [File || {File, _Contents} <- ets:tab2list(document_contents)];
+do_opened_documents(dets) ->
+    dets:traverse(document_contents,
+                  fun({File, _Contents}) -> {continue, File};
+                      (_) -> continue
+                  end).
 
 get_document_contents(File) ->
-    case ets:lookup(document_contents, File) of
+    case ?XETS:lookup(document_contents, File) of
         [{File, Contents}] -> Contents;
         _ -> undefined
     end.
@@ -87,10 +100,10 @@ get_references(Reference) ->
     ets:match(references, {'$1', Reference, '$2', '$3', '$4'}).
 
 get_inlayhints(File) ->
-    case ets:lookup(document_inlayhints, File) of
+    case ?XETS:lookup(document_inlayhints, File) of
         [{File, Inlays}] -> Inlays;
         _ -> []
-    end.    
+    end.
 
 root_available() ->
     gen_server:cast(?SERVER, root_available).
@@ -138,14 +151,16 @@ as_string(Text) ->
     Text.
 
 start_link() ->
-    safe_new_table(document_contents, set),
-    safe_new_table(syntax_tree, set),
-    safe_new_table(dodged_syntax_tree, set),
-    safe_new_table(references, bag),
-    safe_new_table(document_inlayhints, set),
+    ExtraCreateOpts = persistent_term:get(large_cache_create_opts, []),
+    safe_new_table(document_contents, ?XETS, set, ExtraCreateOpts),
+    safe_new_table(syntax_tree, ?XETS, set, ExtraCreateOpts),
+    safe_new_table(dodged_syntax_tree, ?XETS, set, ExtraCreateOpts),
+    safe_new_table(references, ets, bag, []),
+    safe_new_table(document_inlayhints, ?XETS, set, ExtraCreateOpts),
     gen_server:start_link({local, ?SERVER}, ?MODULE, [],[]).
 
 init(_Args) ->
+    process_flag(trap_exit, true), % to terminate/2 be called at exit
     {ok, #state{root_available = false, project_modules = #{}, files_to_parse = []}}.
 
 handle_call(project_modules, _From, State) ->
@@ -181,7 +196,7 @@ handle_cast({project_file_added, File}, State) ->
     {noreply, parse_next_file_in_background(UpdatedState)};
 
 handle_cast({project_file_changed, File}, State) ->
-    case ets:lookup(document_contents, File) of
+    case ?XETS:lookup(document_contents, File) of
         [_FileContents] ->
             {noreply, State};
         _ ->
@@ -202,6 +217,10 @@ handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(_Reason, _State) ->
+    delete_cache_file(document_contents),
+    delete_cache_file(syntax_tree),
+    delete_cache_file(dodged_syntax_tree),
+    delete_cache_file(document_inlayhints),
     ok.
 
 code_change(_OldVersion, State, _Extra) ->
@@ -399,11 +418,11 @@ scan_project_files(State = #state{project_modules = OldProjectModules}) ->
 delete_project_files([], State) ->
     State;
 delete_project_files([File | Files], State) ->
-    ets:delete(document_contents, File),
-    ets:delete(syntax_tree, File),
-    ets:delete(dodged_syntax_tree, File),
+    ?XETS:delete(document_contents, File),
+    ?XETS:delete(syntax_tree, File),
+    ?XETS:delete(dodged_syntax_tree, File),
     ets:delete(references, File),
-    ets:delete(document_inlayhints, File),
+    ?XETS:delete(document_inlayhints, File),
     Module = filename:rootname(filename:basename(File)),
     UpdatedFiles = lists:delete(File, maps:get(Module, State#state.project_modules, [])),
     UpdatedProjectModules = case UpdatedFiles of
@@ -413,10 +432,48 @@ delete_project_files([File | Files], State) ->
     NewState = State#state{project_modules = UpdatedProjectModules},
     delete_project_files(Files, NewState).
 
-safe_new_table(Name, Type) ->
+%%--------------------------------------------------------------------
+%% @private
+%% @doc Create a new ETS or DETS table owned by the supervisor.
+%%
+%% This function is called by {@link start_link/0} that is called from the
+%% supervisor process, therefore created ETS and DETS tables are owned by the
+%% supervisor instead of the worker `gen_server' process. And so, if the worker
+%% process is crashed and restarted then data is still available in the original
+%% table.
+%% @end
+%%--------------------------------------------------------------------
+safe_new_table(Name, ets, Type, ExtraCreateOpts) ->
     case ets:whereis(Name) of
-        undefined -> ets:new(Name, [Type, named_table, public]);
-        _ -> Name
+        undefined ->
+            ets:new(Name, [Type, named_table, public | ExtraCreateOpts]),
+            Name;
+        _ ->
+            %% Supervisor still holds the ETS table
+            Name
+    end;
+safe_new_table(Name, dets, Type, ExtraCreateOpts) ->
+    case dets:info(Name, filename) of
+        undefined ->
+            CacheDir = persistent_term:get(large_cache_dets_dir),
+            FileName = filename:join(CacheDir, atom_to_list(Name)++".dets"),
+            OpenOpts = [{type, Type}, {file, FileName} | ExtraCreateOpts],
+            filelib:ensure_dir(FileName),
+            dets:open_file(Name, OpenOpts),
+            % dets:delete_all_objects(Name),
+            Name;
+        _ ->
+            %% Supervisor still holds the DETS table open
+            Name
+    end.
+
+delete_cache_file(Name) ->
+    case dets:info(Name, filename) of
+        FileName ->
+            dets:close(Name),
+            file:delete(FileName);
+        _ ->
+            ok
     end.
 
 parse_and_store(File, ContentsFile) ->
@@ -425,21 +482,21 @@ parse_and_store(File, ContentsFile) ->
         undefined ->
             ok;
         _ ->
-            ets:insert(syntax_tree, {File, SyntaxTree}),
+            ?XETS:insert(syntax_tree, {File, SyntaxTree}),
             ets:delete(references, File),
-            ets:delete(document_inlayhints, File),
+            ?XETS:delete(document_inlayhints, File),
             lsp_navigation:fold_references(fun (Reference, Line, Column, End, _) ->
                 ets:insert(references, {File, Reference, Line, Column, End})
             end, undefined, File, SyntaxTree),
-            ets:insert(document_inlayhints, {File, lsp_navigation:full_inlayhints_info(File,SyntaxTree, DodgedSyntaxTree)})
+            ?XETS:insert(document_inlayhints, {File, lsp_navigation:full_inlayhints_info(File,SyntaxTree, DodgedSyntaxTree)})
     end,
     case DodgedSyntaxTree of
         undefined -> ok;
-        _ -> ets:insert(dodged_syntax_tree, {File, DodgedSyntaxTree})
+        _ -> ?XETS:insert(dodged_syntax_tree, {File, DodgedSyntaxTree})
     end.
 
 get_tree(TreeType, File) ->
-    case ets:lookup(TreeType, File) of
+    case ?XETS:lookup(TreeType, File) of
         [{File, SyntaxTree}] ->
             SyntaxTree;
         _ ->
@@ -473,3 +530,113 @@ find_module_files(Module, State) ->
 -spec find_module_files_under_dir(module(), file:filename()) -> [file:filename()].
 find_module_files_under_dir(Module, Dir) ->
     filelib:wildcard(Dir ++ "/**/" ++ atom_to_list(Module) ++ ".erl").
+
+%%%-------------------------------------------------------------------
+%%% Cache management
+%%%-------------------------------------------------------------------
+
+persist_cache_mgmt_opts() ->
+    do_persist_cache_mgmt_opts(init:get_argument(vscode_cache_mgmt)).
+
+do_persist_cache_mgmt_opts({ok, [["memory"]]}) ->
+    persistent_term:put(large_cache_module, ets),
+    persistent_term:put(large_cache_create_opts, []);
+do_persist_cache_mgmt_opts({ok, [["memory", "compressed"]]}) ->
+    persistent_term:put(large_cache_module, ets),
+    persistent_term:put(large_cache_create_opts, [compressed]);
+do_persist_cache_mgmt_opts({ok, [["file", UserName, TmpDir]]}) ->
+    persistent_term:put(large_cache_module, dets),
+    persistent_term:put(large_cache_create_opts, []),
+    persistent_term:put(large_cache_dets_dir, cache_dir(TmpDir, UserName, os:getpid()));
+do_persist_cache_mgmt_opts(_) ->
+    do_persist_cache_mgmt_opts({ok, [["memory"]]}).
+
+cache_dir(TmpDir, UserName, OsPid) ->
+    filename:join(cache_basedir(TmpDir, UserName), OsPid).
+
+cache_basedir(TmpDir, UserName) ->
+    filename:join([TmpDir, "vscode_erlang_"++UserName, "cache"]).
+
+%%--------------------------------------------------------------------
+%% @doc Delete all cache directories that are not in use any more.
+%% It practically means, delete caches of those extension instances that were
+%% terminated without executing proper cleanup (e.g. killed by OS).
+%% @end
+%%--------------------------------------------------------------------
+-spec delete_unused_caches(TmpDir :: string(), UserName :: string()) -> ok.
+delete_unused_caches(TmpDir, UserName) when is_binary(TmpDir) ->
+    delete_unused_caches(binary_to_list(TmpDir), UserName);
+delete_unused_caches(TmpDir, UserName) when is_binary(UserName) ->
+    delete_unused_caches(TmpDir, binary_to_list(UserName));
+delete_unused_caches(TmpDir = [_|_], UserName = [_|_]) ->
+    try
+        CacheOsPids = get_cache_os_pids(TmpDir, UserName),
+        %% NOTE: a non-Erlang process may exists with the same PID as an old
+        %% extension instance.
+        DeadCacheOsPids = filter_non_existent_os_pids(CacheOsPids),
+        do_delete_unused_caches(TmpDir, UserName, DeadCacheOsPids)
+    catch Class:Reason:StackTrace ->
+        error_logger:error_report([{Class, Reason}, {stacktrace, StackTrace}])
+    end;
+delete_unused_caches(_TmpDir, _UserName) ->
+    ok.
+
+do_delete_unused_caches(TmpDir, UserName, OsPidsToRemove) ->
+    lists:foreach(
+        fun(OsPid) ->
+            file:del_dir_r(cache_dir(TmpDir, UserName, OsPid))
+        end,
+        OsPidsToRemove).
+
+%% Return OS PIDs of Erlang VMs, executing extension instances by the current
+%% user, that did create cache directories, regardless if the processes are
+%% alive or not.
+-spec get_cache_os_pids(TmpDir :: string(), UserName :: string())
+        -> OsPids :: [string()].
+get_cache_os_pids(TmpDir, UserName) ->
+    CacheBaseDir = cache_basedir(TmpDir, UserName),
+    case file:list_dir(CacheBaseDir) of
+        {ok, Filenames} ->
+            lists:filter(
+                fun(FN) -> filelib:is_dir(filename:join(CacheBaseDir, FN)) end,
+                Filenames);
+        _ ->
+            []
+    end.
+
+%% Return OS PIDs that do not belong to any live OS process.
+-spec filter_non_existent_os_pids(OsPids) -> OsPids
+      when OsPids :: [string()].
+filter_non_existent_os_pids([]) ->
+    [];
+filter_non_existent_os_pids(OsPids) ->
+    case os:type() of
+        {win32,_} -> filter_non_existent_win32_pids(OsPids);
+        {unix, _} -> filter_non_existent_unix_pids(OsPids)
+    end.
+
+filter_non_existent_unix_pids(OsPids) ->
+    lists:filter(
+        fun(OsPid) -> not filelib:is_dir("/proc/" ++ OsPid) end,
+        OsPids).
+
+filter_non_existent_win32_pids(OsPids) ->
+    %% In Windows there is no similar thing like /proc/<PID> filesystem entries
+    %% in Unix systems, but it's still possible to list all running processes.
+    WindowsPids = get_win32_pids(),
+    lists:filter(
+        fun(OsPid) -> not maps:is_key(OsPid, WindowsPids) end,
+        OsPids).
+
+%% Return the PIDs of alive Windows process.
+-spec get_win32_pids() -> #{OsPid :: string() => 1}.
+get_win32_pids() ->
+    lists:foldl(
+        fun(Line, Acc) ->
+            case string:split(Line, "\",\"", all) of
+                [_, OsPid | _] -> Acc#{OsPid => 1};
+                _              -> Acc
+            end
+        end,
+        #{},
+        string:lexemes(os:cmd("tasklist /FO CSV /NH"), ["\r\n", $\r, $\n])).

@@ -52,6 +52,7 @@ start(_Type, _Args) ->
     application:start(inets),
     %uncomment to monitor erlang processes
     %spawn(fun() -> observer:start() end),
+    gen_lsp_doc_server:persist_cache_mgmt_opts(),
     Port = get_port(),
     case vscode_lsp_app_sup:start_link(Port) of
         {ok, Pid} -> {ok, Pid};

@@ -4,7 +4,7 @@
 %% API
 -export([start_link/0]).
 -export([standard_modules/0, bifs/0]).
--export([update_config/2, root/0, tmpdir/0, codeLensEnabled/0, includePaths/0, linting/0,
+-export([update_config/2, root/0, tmpdir/0, username/0, codeLensEnabled/0, includePaths/0, linting/0,
          verbose/0, autosave/0, proxy/0, search_files_exclude/0, search_exclude/0,
          formatting_line_length/0, inlayHintsEnabled/0, verbose_is_include/1]).
 
@@ -78,6 +78,9 @@ proxy() ->
 tmpdir() ->
     get_config_entry(computed, tmpdir, "").
 
+username() ->
+    get_config_entry(computed, username, "").
+
 %%--------------------------------------------------------------------
 %% @doc Exclude filters for search in workspace.
 %%
@@ -125,6 +128,7 @@ init(_Args) ->
     BIFs = sets:to_list(lists:foldl(fun ({Name, _Arity}, Acc) ->
         sets:add_element(atom_to_list(Name), Acc)
     end, sets:new(), erlang:module_info(exports))),
+    process_flag(trap_exit, true), % to terminate/2 be called at exit
     {ok, #state{config = #{}, standard_modules = StandardModules, bifs = BIFs}}.
 
 handle_call({standard_modules}, _From, State) ->
@@ -144,6 +148,10 @@ handle_cast(stop, State) ->
 handle_info(_Info, State) ->
     {noreply, State}.
 
+terminate(_Reason, #state{config = #{computed := #{tmpdir := TmpDir, username := UserName}}}) ->
+    %% Delete old caches left there by brutally killed extension instances
+    gen_lsp_doc_server:delete_unused_caches(TmpDir, UserName),
+    ok;
 terminate(_Reason, _State) ->
     ok.
 
