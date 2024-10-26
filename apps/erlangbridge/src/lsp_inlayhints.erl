@@ -46,7 +46,8 @@ internal_inlayhint_analyze(SyntaxTree, _CurrentFile, #{defs := Defs, calls := Ca
        %{call,{32,5},{remote,{32,15},{atom,{32,5},sample_lib}, {atom,{32,16},fn_utils1}},[{var,{32,26},'X'}]}
        {call, _LocationCall, {remote, _, {atom, _,ModuleName}, {atom, _, FName}}, Args} ->
             %to avoid collision with local function name, add module as prefix 
-            FuncName = lists:flatten(io_lib:format("~s.~s", [ModuleName, FName])),
+            % ~p to avoid crash on function name with unicode characters
+            FuncName = lists:flatten(io_lib:format("~s.~p", [ModuleName, FName])),
             case get_remote_function_content(ModuleName, FName) of
                 {true, RemoteFuns} ->
                     F = #{
