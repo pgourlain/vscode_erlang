@@ -5,8 +5,9 @@
     textDocument_didOpen/2, textDocument_didClose/2, textDocument_didSave/2, textDocument_didChange/2,
     textDocument_definition/2, textDocument_references/2, textDocument_hover/2, textDocument_completion/2,
     textDocument_formatting/2, textDocument_codeLens/2, textDocument_documentSymbol/2,
-    textDocument_inlayHints/2, textDocument_signatureHelp/2, textDocument_prepareRename/2, textDocument_rename/2]).
--export([textDocument_inlineValues/2]).
+    textDocument_signatureHelp/2, textDocument_prepareRename/2, textDocument_rename/2]).
+-export([textDocument_inlineValues/2, textDocument_inlineValue/2]).
+-export([textDocument_inlayHints/2, textDocument_inlayHint/2]).
 
 -include("lsp_log.hrl").
 
@@ -239,6 +240,10 @@ textDocument_codeLens(_Socket, Params) ->
             end, [], lsp_navigation:codelens_info(lsp_utils:file_uri_to_file(Uri)))
     end.
 
+
+textDocument_inlayHint(_Socket, Params) ->
+    textDocument_inlayHints(_Socket, Params).
+
 textDocument_inlayHints(_Socket, Params) ->
     %gen_lsp_server:lsp_log("textDocument_inlayHints ~p", [Params]),
     Uri = mapmapget(textDocument, uri, Params),
@@ -272,6 +277,10 @@ textDocument_documentSymbol(_Socket, Params) ->
             }
         }
     end, lsp_navigation:symbol_info(lsp_utils:file_uri_to_file(Uri))).
+
+
+textDocument_inlineValue(_Socket, Params) ->
+    textDocument_inlineValues(_Socket, Params).
 
 % provide inlive values while debugging (values are shown directly in editor)
 textDocument_inlineValues(_Socket, Params) ->

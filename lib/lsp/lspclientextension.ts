@@ -25,7 +25,6 @@ import * as Net from 'net';
 
 import * as lspcodelens from './lspcodelens';
 
-import * as lspInlay from './lsp-inlayhints';
 import * as lspValue from './lsp-inlinevalues';
 import * as lspRename from './lsp-rename';
 
@@ -95,12 +94,10 @@ namespace Configuration {
 	export function initialize() {
 		//force to read configuration
 		lspcodelens.configurationChanged();
-		lspInlay.configurationChanged();
 		// VS Code currently doesn't sent fine grained configuration changes. So we 
 		// listen to any change. However this will change in the near future.
 		configurationListener = Workspace.onDidChangeConfiguration(() => {
 			lspcodelens.configurationChanged();
-			lspInlay.configurationChanged();
 			client.sendNotification(DidChangeConfigurationNotification.type, { settings: null });
 		});
 		fileSystemWatcher = workspace.createFileSystemWatcher('**/*.erl');
@@ -208,7 +205,6 @@ export function activate(context: ExtensionContext) {
 	if (erlangCfg.verbose)
 		lspOutputChannel = Window.createOutputChannel('Erlang Language Server');
 
-	lspInlay.activate(context, lspOutputChannel);
 	lspValue.activate(context, lspOutputChannel);
 	lspRename.activate(context, lspOutputChannel);
 	
@@ -258,7 +254,7 @@ export function activate(context: ExtensionContext) {
 					}, 
 					undefined);
 				//
-				client.onReady();
+				(<ErlangLanguageClient>client).onReady();
 			});
 		});
 	}, clientOptions, lspOutputChannel, true);
