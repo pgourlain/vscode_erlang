@@ -41,10 +41,10 @@ export class ErlangLanguageClient extends LanguageClient {
     this.outChannel = lspOutputChannel;
   }
 
-
-  onReady(): Promise<void> {
+  public onReady(): void {
     this.outChannel?.appendLine("LanguageClient is ready");
     clientIsReady = true;
-    return super.onReady();
+    //not more needed 
+    //return super.onReady();
   }
 }
