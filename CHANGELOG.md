@@ -1,5 +1,11 @@
 # Change log
 
+
+## Version 1.1.0 (October X, 2024)
+
+* [307](https://github.com/pgourlain/vscode_erlang/issues/307) : Update grammar that fix #197
+
+
 ## Version 1.0.9 (June 16, 2024)
 
 * [306](https://github.com/pgourlain/vscode_erlang/issues/306) : Fixes for help in OTP 27 and for go to definition
