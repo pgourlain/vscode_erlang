@@ -285,10 +285,8 @@ textDocument_inlineValue(_Socket, Params) ->
 % provide inlive values while debugging (values are shown directly in editor)
 textDocument_inlineValues(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),
-    %#{line:=LS, character:=CS} = mapmapget(range, start, Params),
-    % no inlivevalues after 'stoppedLocation' 
-    %#{line:=LE, character:=CE} = mapmapget(range, 'end', Params),
-    #{line:=LE, character:=CE} = mapmapget(stoppedLocation, 'end', Params),
+    ContextMap = maps:get(context, Params),
+    #{line:=LE, character:=CE} = mapmapget(stoppedLocation, 'end', ContextMap),
     lists:map(fun ({Kind, Position, Label}) ->
         #{
             position => lsp_utils:client_position(Position),

@@ -1,7 +1,7 @@
 import { ChildProcess, spawn } from 'child_process';
 import { EventEmitter } from 'events';
 import { GenericShell, ILogOutput } from './GenericShell';
-import { DebugProtocol } from 'vscode-debugprotocol';
+import { DebugProtocol } from '@vscode/debugprotocol';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
@@ -33,6 +33,9 @@ export class FunctionBreakpoint implements DebugProtocol.Breakpoint {
         this.functionName = fn;
         this.arity = a;
 	}
+    public setId(id: number): void{
+        this.id = id;
+    }
 }
 
 // export interface IErlangShellOutputForDebugging {
