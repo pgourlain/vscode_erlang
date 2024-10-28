@@ -2,8 +2,8 @@ import {
 	DebugSession, InitializedEvent, TerminatedEvent, StoppedEvent,
 	OutputEvent, Thread, ThreadEvent, StackFrame, Scope, Source, Handles
 	, Breakpoint, ModuleEvent, Module, ContinuedEvent, Variable, BreakpointEvent
-} from 'vscode-debugadapter';
-import { DebugProtocol } from 'vscode-debugprotocol';
+} from '@vscode/debugadapter';
+import { DebugProtocol } from '@vscode/debugprotocol';
 import { ErlangShellForDebugging, LaunchRequestArguments, FunctionBreakpoint } from './ErlangShellDebugger';
 import { ILogOutput } from './GenericShell';
 import * as path from 'path';
