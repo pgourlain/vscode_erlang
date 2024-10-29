@@ -7,6 +7,7 @@ export interface ErlangSettings {
 	includePaths : string[];
 	linting: boolean;
 	codeLensEnabled : boolean;
+	compressLargeEtsTables: boolean;
 	inlayHintsEnabled: boolean;
 	verbose: boolean;
 	debuggerRunMode : string;
