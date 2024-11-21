@@ -1,13 +1,17 @@
 -module(gen_lsp_doc_server).
-
 -behavior(gen_server).
+
+%% API
 -export([start_link/0]).
 
 -export([document_opened/2, document_changed/2, document_closed/1, opened_documents/0, get_document_contents/1, parse_document/1]).
 -export([project_file_added/1, project_file_changed/1, project_file_deleted/1]).
 -export([get_syntax_tree/1, get_dodged_syntax_tree/1, get_references/1, get_inlayhints/1]).
 -export([root_available/0, config_change/0, project_modules/0, get_module_file/1, get_module_files/1, get_build_dir/0, find_source_file/1]).
+
+%% gen_server callbacks
 -export([init/1,handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
+
 -include("./lsp_log.hrl").
 
 -define(SERVER, ?MODULE).

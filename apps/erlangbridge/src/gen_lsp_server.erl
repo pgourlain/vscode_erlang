@@ -1,5 +1,4 @@
 -module(gen_lsp_server).
-
 -behavior(gen_server).
 
 %inspired from https://github.com/kevinlynx/erlang-tcpserver/blob/master/test/test.erl
@@ -9,12 +8,12 @@
 % http://learnyousomeerlang.com/buckets-of-sockets
 
 
-%API
+%% API
 -export([start_link/1, start_link/2]).
-
-%export for gen_server
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([lsp_log/2, send_to_client/2]).
+
+%% gen_server callbacks
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 -define(SERVER, ?MODULE).
 %state
