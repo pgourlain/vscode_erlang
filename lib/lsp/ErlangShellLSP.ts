@@ -1,3 +1,4 @@
+import * as os from 'os';
 import { GenericShell, ILogOutput } from '../GenericShell';
 import { getElangConfigConfiguration } from '../ErlangConfigurationProvider';
 
@@ -12,6 +13,21 @@ export class ErlangShellLSP extends GenericShell {
             debugStartArgs.push(
                 "-sname", "vscode_" + listen_port.toString(),
                 "-setcookie", "vscode_" + listen_port.toString());
+        }
+        // Set management mode for large caches
+        switch (this.cacheManagement) {
+            case 'file':
+                debugStartArgs.push("-vscode_cache_mgmt", "file", os.userInfo().username, os.tmpdir());
+                break;
+
+            case 'compressed memory':
+                debugStartArgs.push("-vscode_cache_mgmt", "memory", "compressed");
+                break;
+
+            case 'memory':
+            default:
+                debugStartArgs.push("-vscode_cache_mgmt", "memory");
+                break;
         }
         // Use special command line arguments
         if (this.erlangArgs) {

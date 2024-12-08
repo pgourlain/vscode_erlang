@@ -311,17 +311,17 @@ make_temporary_file(Contents) ->
     file:write_file(TempFile, Contents),
     TempFile.
 
-index_of(Fun, List) -> 
-    case lists:foldl(fun 
-        (X, {not_found, I}) -> 
+index_of(Fun, List) ->
+    FoldFun =
+        fun(X, {not_found, I}) ->
             case Fun(X) of
                 true -> {ok, I+1};
-                _ -> {not_found, I+1}
+                _    -> {not_found, I+1}
             end;
-        (_, Acc) -> Acc 
-        end,{not_found, -1}, List) 
-    of
+        (_, Acc) ->
+            Acc
+        end,
+    case lists:foldl(FoldFun, {not_found, -1}, List) of
         {not_found, _} -> -1;
         {ok, Index} -> Index
     end.
-        

@@ -75,7 +75,8 @@ namespace Configuration {
 				if (item.section === "<computed>") {
 					result.push({
 						autosave: Workspace.getConfiguration("files").get("autoSave", "afterDelay") === "afterDelay",
-						tmpdir: os.tmpdir()
+						tmpdir: os.tmpdir(),
+						username: os.userInfo().username
 					});
 				} else if (item.section === "erlang") {
 					result.push(resolveErlangSettings(Workspace.getConfiguration(item.section)))

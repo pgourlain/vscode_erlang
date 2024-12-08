@@ -73,7 +73,7 @@ configuration(Socket, [ErlangSection, FilesSection, ComputedSection, HttpSection
     Documents = gen_lsp_doc_server:opened_documents(),
     gen_lsp_config_server:update_config(erlang, ErlangSection),
     %% because 'verbose' is stored in erlang section, loggin should be after update erlang config
-    gen_lsp_server:lsp_log("configuration ~p", [Documents]),
+    gen_lsp_server:lsp_log("Opened documents ~p", [Documents]),
     gen_lsp_config_server:update_config(files, FilesSection),
     gen_lsp_config_server:update_config(computed, ComputedSection),
     gen_lsp_config_server:update_config(http, HttpSection),
@@ -86,6 +86,14 @@ configuration(Socket, [ErlangSection, FilesSection, ComputedSection, HttpSection
                            " - search: ~p",
                            [ErlangSection, FilesSection, ComputedSection,
                             HttpSection, SearchSection]),
+
+    %% Delete old caches left there by brutally killed extension instances
+    case ComputedSection of
+        #{tmpdir := TmpDir, username := UserName} ->
+            gen_lsp_doc_server:delete_unused_caches(TmpDir, UserName);
+        _ ->
+            ok
+    end,
 
     %% Scan workspace for source files
     gen_lsp_doc_server:config_change(),
