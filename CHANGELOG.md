@@ -1,5 +1,17 @@
 # Change log
 
+## Version 1.1.1 (December 8, 2024)
+
+* [319](https://github.com/pgourlain/vscode_erlang/issues/319) : Add a configuration setting to change the storage mode for large cache tables (mainly used for code navigation). 
+
+      Available modes:
+      memory (default, original): use ETS tables
+      compressed memory: use ETS tables with compressed flag turned on.
+      file: use DETS tables saved into temporary files.
+
+Thanks to
+* [Kornel Horvath](https://github.com/KornelH)
+
 
 ## Version 1.1.0 (October 28, 2024)
 
