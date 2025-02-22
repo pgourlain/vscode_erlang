@@ -119,69 +119,69 @@ lint(FileSyntaxTree, File) ->
 	        #{parse_result => false, error_message => <<"lint error">>}
     end.
 
-combine_lint(LintResult, SyntaxTree, File) ->
-    case LintResult of
-        #{parse_result := ParseResult, errors_warnings := ErrorsWarnings} 
-            when ParseResult =:= true -> 
-              % combine only if previous parse is successfull
-              #{
-                parse_result => ParseResult, 
-                errors_warnings => lsp_lint(ErrorsWarnings, SyntaxTree, File)
-            };
-        _ -> LintResult
-    end.
+% combine_lint(LintResult, SyntaxTree, File) ->
+%     case LintResult of
+%         #{parse_result := ParseResult, errors_warnings := ErrorsWarnings} 
+%             when ParseResult =:= true -> 
+%               % combine only if previous parse is successfull
+%               #{
+%                 parse_result => ParseResult, 
+%                 errors_warnings => lsp_lint(ErrorsWarnings, SyntaxTree, File)
+%             };
+%         _ -> LintResult
+%     end.
 
-lsp_lint(PreviousLintResult, SyntaxTree, File) ->
-    RootWorkspace = gen_lsp_config_server:root(),
-    %%process remote call
-    fold_in_syntax_tree(fun
-        ({call, {_, _}, {remote, {_, _}, {atom, {Line, Column}, FnModule}, {atom, {_, _}, FnName}}, Args}, _CurrentFile, Acc)
-            -> 
-                % Incr = 1 for last right parenthesis
-                Acc ++ check_if_remote_fun_exists(RootWorkspace, FnModule, FnName, length(Args), range_of(Line, Column, FnModule, FnName, Args, 1));
-        ({'fun', {_, _}, {function, {atom, {Line, Column}, FnModule}, {atom, {_,_}, FnName}, {integer, {_, End}, FnArity}}}, _CurrentFile, Acc)
-             ->
-            Width = length(lsp_utils:to_string("~w",[FnArity])),
-            Acc ++ check_if_remote_fun_exists(RootWorkspace, FnModule, FnName, FnArity,{Line, Column, Line, End + Width});
+% lsp_lint(PreviousLintResult, SyntaxTree, File) ->
+%     RootWorkspace = gen_lsp_config_server:root(),
+%     %%process remote call
+%     fold_in_syntax_tree(fun
+%         ({call, {_, _}, {remote, {_, _}, {atom, {Line, Column}, FnModule}, {atom, {_, _}, FnName}}, Args}, _CurrentFile, Acc)
+%             -> 
+%                 % Incr = 1 for last right parenthesis
+%                 Acc ++ check_if_remote_fun_exists(RootWorkspace, FnModule, FnName, length(Args), range_of(Line, Column, FnModule, FnName, Args, 1));
+%         ({'fun', {_, _}, {function, {atom, {Line, Column}, FnModule}, {atom, {_,_}, FnName}, {integer, {_, End}, FnArity}}}, _CurrentFile, Acc)
+%              ->
+%             Width = length(lsp_utils:to_string("~w",[FnArity])),
+%             Acc ++ check_if_remote_fun_exists(RootWorkspace, FnModule, FnName, FnArity,{Line, Column, Line, End + Width});
 
-    (_, _, Acc) -> Acc
-    end,
-    PreviousLintResult, File, SyntaxTree).
+%     (_, _, Acc) -> Acc
+%     end,
+%     PreviousLintResult, File, SyntaxTree).
 
-range_of(Line, Column, MName, FName, Args, Incr) ->
-    {L,C, NewIncr} = if 
-        length(Args) > 0 -> max_lc_root(lists:last(Args), {Line, Column, Incr});
-        true -> 
-            % +2 for parenthesis
-            {Line, Column, Incr + 2 + length(atom_to_list(MName)) +length(atom_to_list(FName))}
-    end,
-   {Line, Column, L, C+NewIncr}.
+% range_of(Line, Column, MName, FName, Args, Incr) ->
+%     {L,C, NewIncr} = if 
+%         length(Args) > 0 -> max_lc_root(lists:last(Args), {Line, Column, Incr});
+%         true -> 
+%             % +2 for parenthesis
+%             {Line, Column, Incr + 2 + length(atom_to_list(MName)) +length(atom_to_list(FName))}
+%     end,
+%    {Line, Column, L, C+NewIncr}.
 
 
-max_lc_root({_,_,Atom}=Item, {Line, Column, Incr}) when is_atom(Atom) ->
-    max_lc(Item, {Line, Column, Incr + length(atom_to_list(Atom))});
-max_lc_root({_,_,Int}=Item, {Line, Column, Incr}) when is_number(Int) ->
-    ArgLength = length(lsp_utils:to_string("~w",[Int])),
-    max_lc(Item, {Line, Column, Incr + ArgLength});
-max_lc_root(Item, Acc) ->
-    max_lc(Item, Acc).
+% max_lc_root({_,_,Atom}=Item, {Line, Column, Incr}) when is_atom(Atom) ->
+%     max_lc(Item, {Line, Column, Incr + length(atom_to_list(Atom))});
+% max_lc_root({_,_,Int}=Item, {Line, Column, Incr}) when is_number(Int) ->
+%     ArgLength = length(lsp_utils:to_string("~w",[Int])),
+%     max_lc(Item, {Line, Column, Incr + ArgLength});
+% max_lc_root(Item, Acc) ->
+%     max_lc(Item, Acc).
 
--spec max_lc(Item:: term(), Acc :: term()) -> Acc1 :: term().
-max_lc({_, {L,C}, _}, {CL, CC, Incr}) when L > CL orelse (L =:= CL andalso C >= CC) ->
-    {L, C, Incr};
-max_lc({_, {_,_}, Item}, Acc) ->
-    max_lc(Item, Acc);
-max_lc({call, {L,C}, Remote, Args}, {CL, CC, Incr}) when L > CL orelse (L =:= CL andalso C >= CC) ->
-    if 
-        length(Args) > 0 -> max_lc_root(lists:last(Args), {L, C, Incr+1});
-        true -> 
-            case Remote of
-                {remote, _, {atom, _, _}, {atom,{RL, RC}, Atom}} -> {RL, RC, Incr + 1 + length(atom_to_list(Atom))};
-                _ -> {L, C, Incr}
-            end            
-    end;
-max_lc(_, Acc) -> 
-    Acc.
+% -spec max_lc(Item:: term(), Acc :: term()) -> Acc1 :: term().
+% max_lc({_, {L,C}, _}, {CL, CC, Incr}) when L > CL orelse (L =:= CL andalso C >= CC) ->
+%     {L, C, Incr};
+% max_lc({_, {_,_}, Item}, Acc) ->
+%     max_lc(Item, Acc);
+% max_lc({call, {L,C}, Remote, Args}, {CL, CC, Incr}) when L > CL orelse (L =:= CL andalso C >= CC) ->
+%     if 
+%         length(Args) > 0 -> max_lc_root(lists:last(Args), {L, C, Incr+1});
+%         true -> 
+%             case Remote of
+%                 {remote, _, {atom, _, _}, {atom,{RL, RC}, Atom}} -> {RL, RC, Incr + 1 + length(atom_to_list(Atom))};
+%                 _ -> {L, C, Incr}
+%             end            
+%     end;
+% max_lc(_, Acc) -> 
+%     Acc.
 
 check_if_remote_fun_exists(RootWorkspace, FnModule, FnName, FnArity, {Line, Column, LE,LC}) ->
     % check if module is under workspace

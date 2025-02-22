@@ -469,11 +469,10 @@ safe_new_table(Name, dets, Type, ExtraCreateOpts) ->
 
 delete_cache_file(Name) ->
     case dets:info(Name, filename) of
+        undefined -> ok;
         FileName ->
             dets:close(Name),
-            file:delete(FileName);
-        _ ->
-            ok
+            file:delete(FileName)
     end.
 
 parse_and_store(File, ContentsFile) ->

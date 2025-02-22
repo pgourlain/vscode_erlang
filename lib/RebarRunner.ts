@@ -232,7 +232,7 @@ export class RebarRunner implements vscode.Disposable {
 
 	public static get RebarOutput(): vscode.OutputChannel {
 		if (!rebarOutputChannel) {
-			rebarOutputChannel = vscode.window.createOutputChannel('rebar');
+			rebarOutputChannel = vscode.window.createOutputChannel('rebar', 'erlang');
 		}
 		return rebarOutputChannel;
 	}

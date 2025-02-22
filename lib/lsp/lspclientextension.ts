@@ -204,7 +204,7 @@ function getPort(callback) {
 export function activate(context: ExtensionContext) {
 	let erlangCfg = getElangConfigConfiguration();
 	if (erlangCfg.verbose)
-		lspOutputChannel = Window.createOutputChannel('Erlang Language Server');
+		lspOutputChannel = Window.createOutputChannel('Erlang Language Server', 'erlang');
 
 	lspValue.activate(context, lspOutputChannel);
 	lspRename.activate(context, lspOutputChannel);
