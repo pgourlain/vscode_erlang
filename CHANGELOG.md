@@ -1,5 +1,11 @@
 # Change log
 
+## Version 1.1.2 (February 22, 2025)
+
+* [320](https://github.com/pgourlain/vscode_erlang/issues/320) : Extension fails to start on vscode 1.96.4.
+* [321](https://github.com/pgourlain/vscode_erlang/issues/321) : Remove warnings.
+
+
 ## Version 1.1.1 (December 8, 2024)
 
 * [319](https://github.com/pgourlain/vscode_erlang/issues/319) : Add a configuration setting to change the storage mode for large cache tables (mainly used for code navigation). 
