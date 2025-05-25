@@ -1,10 +1,20 @@
 # Change log
 
+## Version 1.1.3 (May 25, 2025)
+
+* [323](https://github.com/pgourlain/vscode_erlang/issues/323) : Bump submodule grammar to the latest version
+
+Thanks to
+* [Kornel Horvath](https://github.com/KornelH)
+
+---
+
 ## Version 1.1.2 (February 22, 2025)
 
 * [320](https://github.com/pgourlain/vscode_erlang/issues/320) : Extension fails to start on vscode 1.96.4.
 * [321](https://github.com/pgourlain/vscode_erlang/issues/321) : Remove warnings.
 
+---
 
 ## Version 1.1.1 (December 8, 2024)
 
@@ -18,12 +28,14 @@
 Thanks to
 * [Kornel Horvath](https://github.com/KornelH)
 
+---
 
 ## Version 1.1.0 (October 28, 2024)
 
 * [307](https://github.com/pgourlain/vscode_erlang/issues/307) : Update grammar that fix #197
 * [315](https://github.com/pgourlain/vscode_erlang/issues/315) : Upgrade to latest vscode language client and debugger libraries
 
+---
 
 ## Version 1.0.9 (June 16, 2024)
 
