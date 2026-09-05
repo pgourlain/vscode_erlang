@@ -15,7 +15,7 @@ export class ErlangDebugAdapterDescriptorFactory implements DebugAdapterDescript
 				const session = new ErlangDebugSession(true);
 				session.setRunAsServer(true);
 				session.start(<NodeJS.ReadableStream>socket, socket);
-			}).listen(0);
+			}).listen(0, '127.0.0.1');
 		}
 
 		// make VS Code connect to debug server

@@ -147,7 +147,7 @@ function waitForSocket(options: any, callback: any, _tries: any) {
 		throw new Error('.port is a required option');
 
 	var maxTries = options.tries || MAX_TRIES;
-	var host = options.host || 'localhost';
+	var host = options.host || '127.0.0.1';
 	var port = options.port;
 
 
@@ -193,7 +193,7 @@ function getPort(callback) {
 	var server = Net.createServer(function (sock) {
 		sock.end('OK\n');
 	});
-	server.listen(0, function () {
+	server.listen(0, '127.0.0.1', function () {
 		var port = (<Net.AddressInfo>server.address()).port;
 		server.close(function () {
 			callback(port);
