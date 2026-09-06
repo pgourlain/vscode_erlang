@@ -327,7 +327,7 @@
 		"eslint": "^8.26.0",
 		"glob": "^7.1.4",
 		"gulp": "^5.0.0",
-		"mocha": "^10.2.0",
+		"mocha": "^10.8.2",
 		"source-map-support": "^0.5.12",
 		"ts-loader": "^8.1.0",
 		"typescript": "^5.0.2",
