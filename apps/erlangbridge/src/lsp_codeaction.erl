@@ -18,10 +18,16 @@
 %% The edit is always computed eagerly here rather than deferred to
 %% resolve/1 - every fix below is cheap (no re-parsing), so there is
 %% nothing to gain from the laziness resolveProvider => true allows for.
+%%
+%% Task 2.3 adds a second, independent source of actions: ones offered from
+%% the cursor's own position (Range) regardless of any diagnostic - adding/
+%% removing a function from -export, and generating a -spec from its
+%% inferred clause heads.
 -spec code_actions(File :: file:filename(), Range :: term(), Context :: map()) -> [map()].
-code_actions(File, _Range, Context) ->
+code_actions(File, Range, Context) ->
     Diagnostics = maps:get(diagnostics, Context, []),
-    lists:flatmap(fun (Diagnostic) -> actions_for_diagnostic(File, Diagnostic) end, Diagnostics).
+    DiagnosticActions = lists:flatmap(fun (Diagnostic) -> actions_for_diagnostic(File, Diagnostic) end, Diagnostics),
+    DiagnosticActions ++ actions_for_cursor(File, Range).
 
 %% @doc Identity: no fix defers any work to resolve/1 (see code_actions/3).
 -spec resolve(CodeAction :: map()) -> map().
@@ -101,6 +107,159 @@ action(Title, Diagnostic, Edit) ->
 
 export_title(Name, Arity) ->
     <<"Export ", Name/binary, "/", (integer_to_binary(Arity))/binary>>.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% task 2.3: cursor-based export/spec actions %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% Neither of these needs a diagnostic at all - just knowing which function
+%% the cursor is currently inside (find_function_with_line/2's own
+%% "last function whose start line is <= cursor line" heuristic, same one
+%% inlinevalues/hover already rely on elsewhere in this codebase).
+actions_for_cursor(File, #{start := #{line := Line0}}) ->
+    Tree = gen_lsp_doc_server:get_syntax_tree(File),
+    case is_list(Tree) andalso lsp_navigation:find_function_with_line(Tree, Line0 + 1) of
+        {function, Pos, Name, Arity, Clauses} ->
+            export_toggle_actions(File, Tree, Pos, Name, Arity) ++
+            generate_spec_actions(File, Tree, Pos, Name, Arity, Clauses);
+        _ ->
+            []
+    end;
+actions_for_cursor(_File, _Range) ->
+    [].
+
+%% Offers exactly one of "export this" / "remove from export", never both.
+export_toggle_actions(File, Tree, _Pos, Name, Arity) ->
+    NameBin = atom_to_binary(Name, utf8),
+    case is_exported(Tree, Name, Arity) of
+        true -> remove_from_export_action(File, Tree, NameBin, Name, Arity);
+        false -> add_to_export_action(File, Tree, NameBin, Name, Arity)
+    end.
+
+is_exported(Tree, Name, Arity) ->
+    lists:any(fun
+        ({attribute, _, export, Exports}) -> lists:member({Name, Arity}, Exports);
+        (_) -> false
+    end, Tree).
+
+add_to_export_action(File, Tree, NameBin, Name, Arity) ->
+    case find_attribute_insertion_point(File, export, fun (_) -> true end, $]) of
+        {ok, {Line, Col}} ->
+            InsertText = iolist_to_binary(io_lib:format(", ~s/~p", [Name, Arity])),
+            Edit = lsp_rename:build_workspace_edit([{File, Line, Col, Col, InsertText}]),
+            [source_action(export_title(NameBin, Arity), <<"refactor">>, Edit)];
+        undefined ->
+            %% no -export attribute exists at all yet: add a brand new one
+            %% right after -module(...).
+            case module_attribute_line(Tree) of
+                {ok, Line} ->
+                    InsertText = iolist_to_binary(io_lib:format("-export([~s/~p]).~n", [Name, Arity])),
+                    Edit = lsp_rename:build_workspace_edit([{File, Line + 1, 1, Line + 1, 1, InsertText}]),
+                    [source_action(export_title(NameBin, Arity), <<"refactor">>, Edit)];
+                undefined ->
+                    []
+            end
+    end.
+
+module_attribute_line(Tree) ->
+    case [Line || {attribute, {Line, _}, module, _} <- Tree] of
+        [Line | _] -> {ok, Line};
+        [] -> undefined
+    end.
+
+%% CHARACTERIZATION: removes exactly one neighbouring comma (whichever
+%% side has one) along with the Name/Arity entry itself, so the export
+%% list stays syntactically valid regardless of where in the list the
+%% entry sits - it does not attempt to also tidy up surrounding whitespace
+%% or reformat the remaining entries.
+remove_from_export_action(File, Tree, NameBin, Name, Arity) ->
+    case [Pos || {attribute, Pos, export, Exports} <- Tree, lists:member({Name, Arity}, Exports)] of
+        [Pos | _] ->
+            Content = read_content(File),
+            case find_export_removal_span(Content, Pos, Name, Arity) of
+                {ok, {StartLine, StartCol}, {EndLine, EndCol}} ->
+                    Edit = lsp_rename:build_workspace_edit([{File, StartLine, StartCol, EndLine, EndCol, <<>>}]),
+                    [source_action(<<"Remove ", NameBin/binary, "/", (integer_to_binary(Arity))/binary,
+                                     " from export">>, <<"refactor">>, Edit)];
+                not_found ->
+                    []
+            end;
+        [] ->
+            []
+    end.
+
+%% Scans the real tokens of the specific -export(...) form starting at Pos
+%% for the Name/Arity entry, and returns the [Start, End) span to delete -
+%% End is always the *start* of whatever token follows the removed span,
+%% so there is never a need to compute an individual token's own width.
+find_export_removal_span(Content, Pos, Name, Arity) ->
+    {ok, Tokens, _} = erl_scan:string(binary_to_list(Content), {1, 1}),
+    RelevantTokens = lists:dropwhile(fun (T) -> token_pos(T) < Pos end, Tokens),
+    FormTokens = lists:takewhile(fun (T) -> element(1, T) =/= dot end, RelevantTokens),
+    scan_for_export_entry(Name, Arity, undefined, FormTokens).
+
+scan_for_export_entry(Name, Arity, PrevToken,
+        [{atom, NamePos, Name}, {'/', _}, {integer, _, Arity} | Rest]) ->
+    NextPos = case Rest of [Next | _] -> token_pos(Next); [] -> NamePos end,
+    case {PrevToken, Rest} of
+        {{',', PrevPos}, _} ->
+            {ok, PrevPos, NextPos};
+        {_, [{',', _} | AfterComma]} ->
+            NextAfterComma = case AfterComma of [N2 | _] -> token_pos(N2); [] -> NextPos end,
+            {ok, NamePos, NextAfterComma};
+        _ ->
+            {ok, NamePos, NextPos}
+    end;
+scan_for_export_entry(Name, Arity, _Prev, [Tok | Rest]) ->
+    scan_for_export_entry(Name, Arity, Tok, Rest);
+scan_for_export_entry(_Name, _Arity, _Prev, []) ->
+    not_found.
+
+%% Generate a -spec from the function's own clause heads: reuses
+%% lsp_navigation's find_function_with_line/2 result (already the same
+%% {function, Pos, Name, Arity, Clauses} shape function_clauses/3 would
+%% give for this one function) and lsp_inlayhints:extract_function_args/1
+%% (the exact "pick the most informative arg name across every clause"
+%% logic inlay hints already rely on) - not offered again if a -spec for
+%% this Name/Arity already exists.
+generate_spec_actions(File, Tree, {Line, _Col}, Name, Arity, Clauses) ->
+    case has_spec(Tree, Name, Arity) of
+        true ->
+            [];
+        false ->
+            Args = lsp_inlayhints:extract_function_args(Clauses),
+            ArgsText = spec_args_text(Args),
+            NameBin = atom_to_binary(Name, utf8),
+            SpecText = iolist_to_binary(
+                io_lib:format("-spec ~s(~s) -> term().~n", [Name, ArgsText])),
+            Edit = lsp_rename:build_workspace_edit([{File, Line, 1, Line, 1, SpecText}]),
+            [source_action(<<"Generate -spec for ", NameBin/binary, "/",
+                             (integer_to_binary(Arity))/binary>>, <<"source">>, Edit)]
+    end.
+
+has_spec(Tree, Name, Arity) ->
+    lists:any(fun
+        ({attribute, _, spec, {{SpecName, SpecArity}, _}}) -> SpecName =:= Name andalso SpecArity =:= Arity;
+        (_) -> false
+    end, Tree).
+
+spec_args_text(Args) ->
+    Indexed = lists:zip(lists:seq(1, length(Args)), Args),
+    Named = [iolist_to_binary(io_lib:format("~s :: term()", [spec_arg_name(Arg, Index)])) || {Index, Arg} <- Indexed],
+    iolist_to_binary(lists:join(<<", ">>, Named)).
+
+spec_arg_name({var, _, '_'}, Index) -> arg_placeholder_name(Index);
+spec_arg_name({var, _, Name}, _Index) -> atom_to_list(Name);
+spec_arg_name(_Other, Index) -> arg_placeholder_name(Index).
+
+arg_placeholder_name(Index) -> io_lib:format("Arg~p", [Index]).
+
+source_action(Title, Kind, Edit) ->
+    #{
+        title => Title,
+        kind => Kind,
+        edit => Edit
+    }.
 
 %%%%%%%%%%%%%
 %% helpers %%

@@ -285,7 +285,7 @@ Set `codeActionProvider => #{codeActionKinds => [...], resolveProvider => true}`
 |---|---|---|
 | 2.1 | Infrastructure: `textDocument_codeAction/2`, `codeAction/resolve`, `workspace/executeCommand`, `WorkspaceEdit` builders (reuse `lsp_rename.erl`) | done |
 | 2.2 | `erl_lint`-driven fixes: unused variable → prefix `_`; unused function → add to `-export`; unused/missing include; undefined function → create stub clause; unbound record field | done |
-| 2.3 | Export/spec actions: add/remove from `-export`; generate `-spec` from inferred clause heads (reuse `lsp_navigation:function_clauses/2` + arg-name logic in `lsp_inlayhints.erl`) | todo |
+| 2.3 | Export/spec actions: add/remove from `-export`; generate `-spec` from inferred clause heads (reuse `lsp_navigation:function_clauses/2` + arg-name logic in `lsp_inlayhints.erl`) | done |
 | 2.4 | Behaviour support: on `-behaviour(X)`, "Implement missing callbacks" — callbacks via `gen_lsp_help_server`/EEP-48, generate stubs | todo |
 | 2.5 | Refactors: extract function from selection; inline variable; convert `if`↔`case`. Ship after 2.2-2.4 | todo |
 | 2.6 | Source actions: organize/sort `-export`; add missing `-module` | todo |

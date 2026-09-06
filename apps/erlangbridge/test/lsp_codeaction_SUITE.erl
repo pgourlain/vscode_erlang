@@ -30,7 +30,16 @@ all() -> [
     unmatched_diagnostic_produces_no_action,
     resolve_is_the_identity_function,
     build_workspace_edit_produces_one_document_change_per_edit,
-    wire_level_handlers_dispatch_without_crashing
+    wire_level_handlers_dispatch_without_crashing,
+    cursor_on_unexported_function_offers_export_with_no_existing_export,
+    cursor_on_unexported_function_offers_export_into_existing_export,
+    cursor_on_exported_function_offers_remove_from_export_first_entry,
+    cursor_on_exported_function_offers_remove_from_export_middle_entry,
+    cursor_on_exported_function_offers_remove_from_export_last_entry,
+    cursor_on_sole_export_removes_it_leaving_an_empty_list,
+    cursor_on_function_without_spec_offers_generate_spec,
+    generate_spec_merges_arg_names_across_clauses,
+    cursor_on_function_with_existing_spec_does_not_offer_generate_spec_again
 ].
 
 init_per_suite(Config) ->
@@ -169,6 +178,69 @@ wire_level_handlers_dispatch_without_crashing(Config) ->
     %% command/arguments the client asks to execute.
     ?assertEqual(null, lsp_handlers:workspace_executeCommand(undefined, #{command => <<"anything">>, arguments => []})).
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% task 2.3: cursor-based export/spec actions %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%
+%% Unlike task 2.2's fixes, these come from actions_for_cursor/2 - no
+%% diagnostic is involved at all, only which function the cursor's Range
+%% sits inside (lsp_navigation:find_function_with_line/2).
+
+cursor_on_unexported_function_offers_export_with_no_existing_export(Config) ->
+    Action = action_at(Config, "no_export.erl", {2, 0}, <<"Export go/0">>),
+    ?assertEqual(<<"refactor">>, maps:get(kind, Action)),
+    apply_and_assert(Config, "no_export.erl", Action,
+        <<"-module(no_export).\n-export([go/0]).\n\ngo() ->\n    ok.\n">>).
+
+cursor_on_unexported_function_offers_export_into_existing_export(Config) ->
+    Action = action_at(Config, "existing_export.erl", {6, 0}, <<"Export helper/0">>),
+    apply_and_assert(Config, "existing_export.erl", Action,
+        <<"-module(existing_export).\n-export([go/0, helper/0]).\n\ngo() ->\n    ok.\n\nhelper() ->\n    ok.\n">>).
+
+%% three_exports.erl: -export([a/0, b/0, c/0]).
+cursor_on_exported_function_offers_remove_from_export_first_entry(Config) ->
+    Action = action_at(Config, "three_exports.erl", {3, 0}, <<"Remove a/0 from export">>),
+    apply_and_assert(Config, "three_exports.erl", Action,
+        <<"-module(three_exports).\n-export([b/0, c/0]).\n\na() -> ok.\nb() -> ok.\nc() -> ok.\n">>).
+
+cursor_on_exported_function_offers_remove_from_export_middle_entry(Config) ->
+    Action = action_at(Config, "three_exports.erl", {4, 0}, <<"Remove b/0 from export">>),
+    apply_and_assert(Config, "three_exports.erl", Action,
+        <<"-module(three_exports).\n-export([a/0, c/0]).\n\na() -> ok.\nb() -> ok.\nc() -> ok.\n">>).
+
+cursor_on_exported_function_offers_remove_from_export_last_entry(Config) ->
+    Action = action_at(Config, "three_exports.erl", {5, 0}, <<"Remove c/0 from export">>),
+    apply_and_assert(Config, "three_exports.erl", Action,
+        <<"-module(three_exports).\n-export([a/0, b/0]).\n\na() -> ok.\nb() -> ok.\nc() -> ok.\n">>).
+
+cursor_on_sole_export_removes_it_leaving_an_empty_list(Config) ->
+    Action = action_at(Config, "sole_export.erl", {3, 0}, <<"Remove a/0 from export">>),
+    apply_and_assert(Config, "sole_export.erl", Action,
+        <<"-module(sole_export).\n-export([]).\n\na() -> ok.\n">>).
+
+cursor_on_function_without_spec_offers_generate_spec(Config) ->
+    Action = action_at(Config, "existing_export.erl", {6, 0}, <<"Generate -spec for helper/0">>),
+    ?assertEqual(<<"source">>, maps:get(kind, Action)),
+    apply_and_assert(Config, "existing_export.erl", Action,
+        <<"-module(existing_export).\n-export([go/0]).\n\ngo() ->\n    ok.\n\n"
+          "-spec helper() -> term().\nhelper() ->\n    ok.\n">>).
+
+%% gen_spec.erl: go(X, _Y) -> X; go(_A, B) -> B. - the non-underscore name
+%% at each argument position, picked from whichever clause has one (task
+%% 2.3 reuses lsp_inlayhints:extract_function_args/1, the exact same
+%% "prefer a real name over _" merge inlay hints already use).
+generate_spec_merges_arg_names_across_clauses(Config) ->
+    Action = action_at(Config, "gen_spec.erl", {3, 0}, <<"Generate -spec for go/2">>),
+    ?assertEqual([{"gen_spec.erl", <<"-spec go(X :: term(), B :: term()) -> term().\n">>}],
+                 edit_summaries(Config, Action)).
+
+%% has_spec_already/1 (in the same fixture) already has a -spec: only the
+%% export-toggle action is offered for it, never a second Generate -spec.
+cursor_on_function_with_existing_spec_does_not_offer_generate_spec_again(Config) ->
+    Actions = actions_at(Config, "gen_spec.erl", {9, 0}),
+    Titles = [maps:get(title, A) || A <- Actions],
+    ?assertNot(lists:any(fun (T) -> binary:match(T, <<"Generate -spec">>) =/= nomatch end, Titles)).
+
 %%%%%%%%%%%%%
 %% helpers %%
 %%%%%%%%%%%%%
@@ -197,6 +269,21 @@ to_wire_diagnostic(#{type := Type, info := Info, correlation_data := Correlation
         source => <<"erl">>,
         data => CorrelationData
     }.
+
+%% Cursor-based (task 2.3) actions for a given 0-based {Line, Character}
+%% position, with no diagnostics involved at all.
+actions_at(Config, FileName, {Line, Character}) ->
+    File = source_file(Config, FileName),
+    Range = #{start => #{line => Line, character => Character}},
+    Context = #{diagnostics => []},
+    lsp_codeaction:code_actions(File, Range, Context).
+
+action_at(Config, FileName, Position, Title) ->
+    Actions = actions_at(Config, FileName, Position),
+    case [A || A <- Actions, maps:get(title, A) =:= Title] of
+        [Action] -> Action;
+        [] -> ct:fail({action_not_found, Title, [maps:get(title, A) || A <- Actions]})
+    end.
 
 round_trip(Term) ->
     {ok, Json} = vscode_jsone:encode(Term),
