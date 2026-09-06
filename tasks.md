@@ -94,7 +94,7 @@ then call the analysis module directly against `.erl` fixtures in `<suite>_SUITE
 
 ### 0.3 — `lsp_completion_SUITE`
 
-- **Status**: todo
+- **Status**: done
 - **Goal**: completion after `mod:`, after `#`, after `?`, after `-`, bare atom prefix, variable in scope, record field. Pin item kinds and `insertText`.
 - **Files**: `apps/erlangbridge/test/lsp_completion_SUITE.erl` + `_SUITE_data/` (new)
 - **Reference**: `lsp_completion.erl`, dispatch at `lsp_handlers.erl:188`
