@@ -1,7 +1,7 @@
 -module(lsp_handlers).
 
 -export([initialize/2, initialized/2, shutdown/2, exit/2, cancelRequest/2, setTrace/2, configuration/2,
-    workspace_didChangeConfiguration/2, workspace_didChangeWatchedFiles/2,
+    workspace_didChangeConfiguration/2, workspace_didChangeWatchedFiles/2, workspace_didChangeWorkspaceFolders/2,
     textDocument_didOpen/2, textDocument_didClose/2, textDocument_didSave/2, textDocument_didChange/2,
     textDocument_definition/2, textDocument_references/2, textDocument_hover/2, textDocument_completion/2,
     textDocument_formatting/2, textDocument_codeLens/2, textDocument_documentSymbol/2,
@@ -12,12 +12,8 @@
 -include("lsp_log.hrl").
 
 initialize(_Socket, Params) ->
-    % usefull when file is open instead of folder
-    RootPath = case maps:get(rootPath, Params) of
-        null -> <<"">>;
-        Other -> Other
-    end,
-    gen_lsp_config_server:update_config(root, binary_to_list(RootPath)),
+    RootPath = resolve_root(Params),
+    gen_lsp_config_server:update_config(root, RootPath),
     gen_lsp_doc_server:root_available(),
     #{capabilities => #{
         textDocumentSync => 1, % Full
@@ -50,9 +46,37 @@ initialize(_Socket, Params) ->
         inlineValueProvider => true,
         inlayHintProvider => true,
         diagnosticProvider => false,
-        workspaceSymbolProvider => false
-
+        workspaceSymbolProvider => false,
+        workspace => #{
+            workspaceFolders => #{supported => true, changeNotifications => true}
+        }
     }}.
+
+%% @doc Resolve the initial workspace root, preferring the modern,
+%% possibly-multi-folder `workspaceFolders` field over the single-folder
+%% `rootUri`, itself preferred over the deprecated `rootPath`.
+%%
+%% CHARACTERIZATION / known limitation: gen_lsp_config_server only ever
+%% stores a single root path, so with several workspace folders only the
+%% first one is used - true multi-root project scanning (folding over
+%% every folder in gen_lsp_doc_server's scan) is a separate follow-up task,
+%% not yet implemented here.
+resolve_root(Params) ->
+    case maps:get(workspaceFolders, Params, null) of
+        [#{uri := Uri} | _] ->
+            lsp_utils:to_string(lsp_utils:file_uri_to_file(Uri));
+        _ ->
+            case maps:get(rootUri, Params, null) of
+                null -> resolve_root_path(Params);
+                RootUri -> lsp_utils:to_string(lsp_utils:file_uri_to_file(RootUri))
+            end
+    end.
+
+resolve_root_path(Params) ->
+    case maps:get(rootPath, Params, null) of
+        null -> "";
+        RootPath -> lsp_utils:to_string(RootPath)
+    end.
 
 initialized(Socket, _Params) ->
     request_configuration(Socket).
@@ -113,9 +137,29 @@ workspace_didChangeWatchedFiles(_Socket, Params) ->
             gen_lsp_doc_server:project_file_added(lsp_utils:file_uri_to_file(Uri));
         (#{uri := Uri, type := 2}) -> % Changed  
             gen_lsp_doc_server:project_file_changed(lsp_utils:file_uri_to_file(Uri));
-        (#{uri := Uri, type := 3}) -> % Deleted  
+        (#{uri := Uri, type := 3}) -> % Deleted
             gen_lsp_doc_server:project_file_deleted(lsp_utils:file_uri_to_file(Uri))
     end, maps:get(changes, Params)).
+
+%% @doc Only handles the case where the server started with no root at all
+%% (single-file mode) and a folder is then added to the workspace: that
+%% first added folder is adopted as the root and scanned.
+%%
+%% CHARACTERIZATION / known limitation: once a root is already set, further
+%% additions or removals are not reflected - see resolve_root/1's comment
+%% and task 1.3's scope note. Real multi-root support is a separate,
+%% follow-up task.
+workspace_didChangeWorkspaceFolders(_Socket, Params) ->
+    #{event := #{added := Added}} = Params,
+    case {gen_lsp_config_server:root(), Added} of
+        {"", [#{uri := Uri} | _]} ->
+            NewRoot = lsp_utils:to_string(lsp_utils:file_uri_to_file(Uri)),
+            gen_lsp_config_server:update_config(root, NewRoot),
+            gen_lsp_doc_server:root_available(),
+            gen_lsp_doc_server:config_change();
+        _ ->
+            ok
+    end.
 
 textDocument_didOpen(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),

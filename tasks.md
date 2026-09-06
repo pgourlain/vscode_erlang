@@ -249,7 +249,7 @@ Only then may `apps/erlangbridge/src/` or `lib/` be edited.
 
 ### 1.3 — `workspaceFolders` / `rootUri`
 
-- **Status**: todo
+- **Status**: done (minimal plumbing scope: first folder adopted as root, real multi-root scan is a separate follow-up)
 - **Goal**: `initialize/2` reads only the deprecated `rootPath`. Read `workspaceFolders`, advertise `workspace.workspaceFolders.supported`, handle `workspace/didChangeWorkspaceFolders`. Prerequisite for multi-root umbrella projects, which are very common in Erlang.
 - **Files**: `apps/erlangbridge/src/lsp_handlers.erl:16-19`, `gen_lsp_config_server.erl`, `gen_lsp_doc_server.erl`
 - **Deps**: 0.1, 0.12, 0.13

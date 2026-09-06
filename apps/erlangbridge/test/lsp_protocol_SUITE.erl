@@ -44,7 +44,8 @@ end_per_testcase(_TestCase, Config) ->
 %% test cases %%
 %%%%%%%%%%%%%%%%
 
-%% Pins the full capability map verbatim (lsp_handlers.erl:22-54) so any
+%% Pins the full capability map verbatim (lsp_handlers.erl:14-53; updated
+%% for task 1.3's workspace.workspaceFolders capability) so any
 %% later capability flip is a visible, deliberate diff to this golden term -
 %% not an accidental side effect of an unrelated change.
 initialize_returns_golden_capabilities(Config) ->
@@ -126,7 +127,10 @@ golden_initialize_result() ->
         inlineValueProvider => true,
         inlayHintProvider => true,
         diagnosticProvider => false,
-        workspaceSymbolProvider => false
+        workspaceSymbolProvider => false,
+        workspace => #{
+            workspaceFolders => #{supported => true, changeNotifications => true}
+        }
     }}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%
