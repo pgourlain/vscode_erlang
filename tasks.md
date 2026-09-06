@@ -135,7 +135,7 @@ then call the analysis module directly against `.erl` fixtures in `<suite>_SUITE
 
 ### 0.8 — `lsp_inlayhints_SUITE`
 
-- **Status**: todo
+- **Status**: done
 - **Goal**: hints for local calls. Pin the two known limits as characterization: no hints for remote calls, no `-spec`-derived arg names.
 - **Files**: `apps/erlangbridge/test/lsp_inlayhints_SUITE.erl` + `_SUITE_data/` (new)
 - **Reference**: `lsp_inlayhints.erl:28` (`%TODO, get args from spec if exists`), `lsp_handlers.erl:252-275`
