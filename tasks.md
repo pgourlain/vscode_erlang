@@ -167,7 +167,7 @@ then call the analysis module directly against `.erl` fixtures in `<suite>_SUITE
 
 ### 0.12 — `gen_lsp_doc_server_SUITE`
 
-- **Status**: todo
+- **Status**: done
 - **Goal**: open/change/close lifecycle, cache invalidation, project scan, module→file index, all three `erlang.cacheManagement` modes (`memory`, `compressed memory`, `file`).
 - **Why**: this module is rewritten by 1.4 (incremental sync) and 4.1 (symbol index). Needs the strongest net.
 - **Files**: `apps/erlangbridge/test/gen_lsp_doc_server_SUITE.erl` + `_SUITE_data/` (new)
