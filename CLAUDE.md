@@ -67,3 +67,5 @@ Settings cross the boundary through the client middleware `Configuration.compute
 - New command: `contributes.commands` in `package.json` + registration in the matching runner (`RebarRunner`, `EunitRunner`).
 - `erlang.verbose` enables the `Erlang Language Server` output channel and technical traces; `erlang.verboseExcludeFilter` filters noisy methods.
 - Grammar edits go through the `grammar` submodule (upstream repo), not this one; see `syntaxes/README.md` for the plist/yaml workflow.
+- use always rg instead of grep
+
