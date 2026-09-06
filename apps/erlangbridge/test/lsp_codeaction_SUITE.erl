@@ -41,7 +41,15 @@ all() -> [
     generate_spec_merges_arg_names_across_clauses,
     cursor_on_function_with_existing_spec_does_not_offer_generate_spec_again,
     behaviour_with_missing_callbacks_offers_one_bulk_stub_action,
-    behaviour_with_every_callback_present_offers_no_action
+    behaviour_with_every_callback_present_offers_no_action,
+    cursor_on_if_offers_convert_to_case,
+    cursor_on_case_with_wildcard_patterns_offers_convert_to_if,
+    cursor_on_case_with_real_patterns_does_not_offer_convert_to_if,
+    cursor_on_single_use_binding_offers_inline_variable,
+    cursor_on_multi_use_binding_does_not_offer_inline_variable,
+    selecting_a_leading_block_offers_extract_function,
+    selecting_a_block_whose_non_result_binding_is_used_after_offers_no_extract,
+    selecting_the_clauses_own_last_statement_offers_no_extract
 ].
 
 init_per_suite(Config) ->
@@ -267,6 +275,75 @@ behaviour_with_missing_callbacks_offers_one_bulk_stub_action(Config) ->
 behaviour_with_every_callback_present_offers_no_action(Config) ->
     ?assertEqual([], actions_for(Config, "complete_callbacks.erl")).
 
+%% if_sample.erl: f(X) -> if X > 0 -> pos; true -> non_pos end. - cursor
+%% placed on the `if` keyword's own line.
+cursor_on_if_offers_convert_to_case(Config) ->
+    Action = action_at(Config, "if_sample.erl", {4, 4}, <<"Convert if to case">>),
+    apply_and_assert(Config, "if_sample.erl", Action,
+        <<"-module(if_sample).\n-export([f/1]).\n\nf(X) ->\n"
+          "    case true of\n        _ when X > 0 ->\n            pos;\n"
+          "        _ when true ->\n            non_pos\n    end.\n">>).
+
+%% case_wildcard.erl: every clause pattern is already a bare `_`, and the
+%% switched expression is a plain variable - both required for a safe,
+%% side-effect-free rewrite back to `if`.
+cursor_on_case_with_wildcard_patterns_offers_convert_to_if(Config) ->
+    Action = action_at(Config, "case_wildcard.erl", {4, 4}, <<"Convert case to if">>),
+    apply_and_assert(Config, "case_wildcard.erl", Action,
+        <<"-module(case_wildcard).\n-export([f/1]).\n\nf(X) ->\n"
+          "    if\n        X > 0 ->\n            pos;\n"
+          "        true ->\n            non_pos\n    end.\n">>).
+
+%% case_real_pattern.erl matches on {ok, V} / error - there is no `if`
+%% equivalent for real pattern matching, so no conversion is offered.
+cursor_on_case_with_real_patterns_does_not_offer_convert_to_if(Config) ->
+    Actions = actions_at(Config, "case_real_pattern.erl", {4, 4}),
+    Titles = [maps:get(title, A) || A <- Actions],
+    ?assertNot(lists:member(<<"Convert case to if">>, Titles)).
+
+%% inline_sample.erl: A = 1 + 2, B = A * 10, B. - A is used exactly once
+%% (inside B's binding), so inlining it can never duplicate a side effect.
+cursor_on_single_use_binding_offers_inline_variable(Config) ->
+    Action = action_at(Config, "inline_sample.erl", {4, 4}, <<"Inline variable A">>),
+    ?assertEqual(<<"refactor">>, maps:get(kind, Action)),
+    apply_and_assert(Config, "inline_sample.erl", Action,
+        <<"-module(inline_sample).\n-export([f/0]).\n\nf() ->\n"
+          "    B = (1 + 2) * 10,\n    B.\n">>).
+
+%% inline_multi_use.erl: A is referenced twice (in B's binding and again in
+%% C's) - inlining would duplicate its evaluation, so no action is offered.
+cursor_on_multi_use_binding_does_not_offer_inline_variable(Config) ->
+    Actions = actions_at(Config, "inline_multi_use.erl", {4, 4}),
+    Titles = [maps:get(title, A) || A <- Actions],
+    ?assertNot(lists:any(fun (T) -> binary:match(T, <<"Inline variable">>) =/= nomatch end, Titles)).
+
+%% extract_sample.erl: A = X + 1, B = A * 2, C = B - 3, C. - selecting the
+%% first two statements: A is a purely-local helper (never used outside the
+%% selection), B is the selection's own last binding and *is* used
+%% afterward, so it becomes the call site's result binding rather than
+%% blocking the action.
+selecting_a_leading_block_offers_extract_function(Config) ->
+    Actions = actions_in_range(Config, "extract_sample.erl", {4, 0}, {5, 14}),
+    [Action] = [A || A <- Actions, maps:get(title, A) =:= <<"Extract function extracted_1">>],
+    apply_and_assert(Config, "extract_sample.erl", Action,
+        <<"-module(extract_sample).\n-export([f/1]).\n\nf(X) ->\n"
+          "    B = extracted_1(X),\n    C = B - 3,\n    C.\n"
+          "\nextracted_1(X) ->\n    A = X + 1,\n    B = A * 2.\n">>).
+
+%% extract_multi.erl: A = X + 1, B = A * 2, D = A + B, D. - selecting the
+%% first two statements this time leaves A (not the selection's own last
+%% binding) referenced again in D = A + B: that needs a second return value
+%% the extracted function can't provide, so no action is offered at all.
+selecting_a_block_whose_non_result_binding_is_used_after_offers_no_extract(Config) ->
+    Actions = actions_in_range(Config, "extract_multi.erl", {4, 0}, {5, 14}),
+    ?assertNot(lists:any(fun (A) -> binary:match(maps:get(title, A), <<"Extract function">>) =/= nomatch end, Actions)).
+
+%% Selecting a clause's own last statement leaves nothing after it to anchor
+%% the call-site replacement on, so no action is offered.
+selecting_the_clauses_own_last_statement_offers_no_extract(Config) ->
+    Actions = actions_in_range(Config, "extract_multi.erl", {7, 0}, {7, 6}),
+    ?assertNot(lists:any(fun (A) -> binary:match(maps:get(title, A), <<"Extract function">>) =/= nomatch end, Actions)).
+
 %%%%%%%%%%%%%
 %% helpers %%
 %%%%%%%%%%%%%
@@ -303,6 +380,15 @@ to_wire_diagnostic(#{type := Type, info := Info, correlation_data := Correlation
 actions_at(Config, FileName, {Line, Character}) ->
     File = source_file(Config, FileName),
     Range = #{start => #{line => Line, character => Character}},
+    Context = #{diagnostics => []},
+    lsp_codeaction:code_actions(File, Range, Context).
+
+%% Task 2.5's extract-function is the only feature that needs a real
+%% selection (both start and end), not just a cursor position.
+actions_in_range(Config, FileName, {StartLine, StartChar}, {EndLine, EndChar}) ->
+    File = source_file(Config, FileName),
+    Range = #{start => #{line => StartLine, character => StartChar},
+              'end' => #{line => EndLine, character => EndChar}},
     Context = #{diagnostics => []},
     lsp_codeaction:code_actions(File, Range, Context).
 

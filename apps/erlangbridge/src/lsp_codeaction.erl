@@ -168,15 +168,18 @@ implement_callbacks_action(File, Behaviour, {Funcs, Diags}) ->
 %% the cursor is currently inside (find_function_with_line/2's own
 %% "last function whose start line is <= cursor line" heuristic, same one
 %% inlinevalues/hover already rely on elsewhere in this codebase).
-actions_for_cursor(File, #{start := #{line := Line0}}) ->
+actions_for_cursor(File, #{start := #{line := Line0}} = Range) ->
     Tree = gen_lsp_doc_server:get_syntax_tree(File),
-    case is_list(Tree) andalso lsp_navigation:find_function_with_line(Tree, Line0 + 1) of
+    FunctionActions = case is_list(Tree) andalso lsp_navigation:find_function_with_line(Tree, Line0 + 1) of
         {function, Pos, Name, Arity, Clauses} ->
             export_toggle_actions(File, Tree, Pos, Name, Arity) ++
-            generate_spec_actions(File, Tree, Pos, Name, Arity, Clauses);
+            generate_spec_actions(File, Tree, Pos, Name, Arity, Clauses) ++
+            inline_variable_actions(File, Clauses, Line0) ++
+            extract_function_actions(File, Tree, Clauses, Range);
         _ ->
             []
-    end;
+    end,
+    FunctionActions ++ if_case_actions(File, Line0);
 actions_for_cursor(_File, _Range) ->
     [].
 
@@ -312,6 +315,337 @@ source_action(Title, Kind, Edit) ->
         kind => Kind,
         edit => Edit
     }.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% task 2.5 (minimal scope): inline variable, if<->case %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% CHARACTERIZATION (deliberately minimal, see tasks.md 2.5): only offered
+%% when the bound variable is referenced exactly once anywhere else in its
+%% clause. This is not a general-purpose limitation for cosmetic reasons -
+%% it is what keeps this safe without any purity/side-effect analysis of
+%% the right-hand side: inlining into exactly one call site can never
+%% change how many times that expression is evaluated. Two or more usages,
+%% zero usages (dead binding), a non-variable (pattern) left-hand side, or
+%% the binding being the clause's own last statement (nothing left to
+%% shift into) all simply offer no action.
+inline_variable_actions(File, Clauses, Line0) ->
+    case find_binding_at_line(Clauses, Line0 + 1) of
+        {ok, Clause, Name, MatchPos, Rhs, NextPos} ->
+            inline_variable_action(File, Clause, Name, MatchPos, Rhs, NextPos);
+        undefined ->
+            []
+    end.
+
+find_binding_at_line([], _CursorLine) ->
+    undefined;
+find_binding_at_line([{clause, _, _, _, Body} = Clause | Rest], CursorLine) ->
+    case find_binding_in_body(Body, CursorLine) of
+        undefined -> find_binding_at_line(Rest, CursorLine);
+        {Name, MatchPos, Rhs, NextPos} -> {ok, Clause, Name, MatchPos, Rhs, NextPos}
+    end.
+
+%% Needs a statement right after it (element(2, Next) is valid for every
+%% erl_parse abstract-format node, since annotation/position always sits
+%% in the 2nd tuple element) to shift the removal's end into - a match on
+%% the clause's own last statement is left alone.
+find_binding_in_body([{match, {Line, _} = Pos, {var, _, Name}, Rhs}, Next | _], CursorLine)
+        when Line =:= CursorLine, Name =/= '_' ->
+    {Name, Pos, Rhs, element(2, Next)};
+find_binding_in_body([_ | Rest], CursorLine) ->
+    find_binding_in_body(Rest, CursorLine);
+find_binding_in_body([], _CursorLine) ->
+    undefined.
+
+inline_variable_action(File, Clause, Name, MatchPos, Rhs, {NextLine, NextCol}) ->
+    AllPositions = lists:usort(erl_syntax_lib:fold(fun
+        ({var, Pos, N}, Acc) when N =:= Name -> [Pos | Acc];
+        (_, Acc) -> Acc
+    end, [], Clause)),
+    case lists:delete(MatchPos, AllPositions) of
+        [{UsageLine, UsageCol}] ->
+            {MatchLine, MatchCol} = MatchPos,
+            RhsText = iolist_to_binary(io_lib:format("(~ts)", [erl_pp:expr(Rhs)])),
+            NameLen = length(atom_to_list(Name)),
+            %% Order matters: the usage (further down the file) is applied
+            %% first, so its positions are still the original ones; only
+            %% then is the earlier binding line removed - an edit never
+            %% shifts anything positioned before it.
+            UsageEdit = {File, UsageLine, UsageCol, UsageLine, UsageCol + NameLen, RhsText},
+            RemovalEdit = {File, MatchLine, MatchCol, NextLine, NextCol, <<>>},
+            Edit = lsp_rename:build_workspace_edit([UsageEdit, RemovalEdit]),
+            [#{
+                title => <<"Inline variable ", (atom_to_binary(Name, utf8))/binary>>,
+                kind => <<"refactor">>,
+                edit => Edit
+            }];
+        _ ->
+            []
+    end.
+
+%% if -> case is always offered (case true of _ when G -> B end is always a
+%% valid, side-effect-free rewrite of an if). case -> if is only offered
+%% when it is equally safe: the switched expression is a bare variable
+%% reference (no side effect can be dropped) and every clause pattern is
+%% already an unconditional wildcard (so no pattern-match semantics are
+%% lost by moving to a guard-only construct) - a general case with real
+%% patterns has no if-equivalent at all.
+if_case_actions(File, Line0) ->
+    CursorLine = Line0 + 1,
+    case find_if_or_case_at_line(File, CursorLine) of
+        {if_node, Pos, Clauses} -> convert_if_to_case_action(File, Pos, Clauses);
+        {case_node, Pos, Expr, Clauses} -> convert_case_to_if_action(File, Pos, Expr, Clauses);
+        undefined -> []
+    end.
+
+find_if_or_case_at_line(File, CursorLine) ->
+    Matches = lsp_syntax:fold_in_syntax_tree(fun
+        ({'if', {Line, _} = Pos, Clauses}, _CurFile, Acc) when Line =:= CursorLine ->
+            [{if_node, Pos, Clauses} | Acc];
+        ({'case', {Line, _} = Pos, Expr, Clauses}, _CurFile, Acc) when Line =:= CursorLine ->
+            [{case_node, Pos, Expr, Clauses} | Acc];
+        (_, _CurFile, Acc) ->
+            Acc
+    end, [], File),
+    case Matches of
+        [Node | _] -> Node;
+        [] -> undefined
+    end.
+
+convert_if_to_case_action(File, Pos, Clauses) ->
+    NewClauses = [{clause, CPos, [{var, CPos, '_'}], Guards, Body}
+                  || {clause, CPos, [], Guards, Body} <- Clauses],
+    NewNode = {'case', Pos, {atom, Pos, true}, NewClauses},
+    [convert_action(File, Pos, <<"Convert if to case">>, NewNode)].
+
+convert_case_to_if_action(File, Pos, {var, _, _}, Clauses) ->
+    case lists:all(fun ({clause, _, [{var, _, '_'}], _, _}) -> true; (_) -> false end, Clauses) of
+        true ->
+            NewClauses = [{clause, CPos, [], guards_or_true(Guards, CPos), Body}
+                          || {clause, CPos, [{var, _, '_'}], Guards, Body} <- Clauses],
+            NewNode = {'if', Pos, NewClauses},
+            [convert_action(File, Pos, <<"Convert case to if">>, NewNode)];
+        false ->
+            []
+    end;
+convert_case_to_if_action(_File, _Pos, _Expr, _Clauses) ->
+    [].
+
+guards_or_true([], Pos) -> [[{atom, Pos, true}]];
+guards_or_true(Guards, _Pos) -> Guards.
+
+convert_action(File, {Line, Col} = Pos, Title, NewNode) ->
+    Content = read_content(File),
+    {ok, Tokens, _} = erl_scan:string(binary_to_list(Content), {1, 1}),
+    {EndLine, EndCol} = find_matching_end(Tokens, Pos),
+    PrintedText = reindent(erl_pp:expr(NewNode), Col),
+    Edit = lsp_rename:build_workspace_edit([{File, Line, Col, EndLine, EndCol + 3, PrintedText}]),
+    #{title => Title, kind => <<"refactor">>, edit => Edit}.
+
+%% Depth-tracks every construct that closes with a bare `end` keyword
+%% (if/case/receive/begin/try/fun all do - a `fun M:F/A` shorthand never
+%% contains an `end` of its own, so counting every `fun` as an opener stays
+%% balanced regardless of which form it is) from the node's own start
+%% position, to find the specific `end` that matches it - not just the
+%% first `end` token encountered, which could belong to a nested construct.
+find_matching_end(Tokens, StartPos) ->
+    Relevant = lists:dropwhile(fun (T) -> token_pos(T) < StartPos end, Tokens),
+    scan_matching_end(Relevant, 0).
+
+scan_matching_end([{Kind, _} | Rest], Depth)
+        when Kind =:= 'if'; Kind =:= 'case'; Kind =:= 'receive'; Kind =:= 'begin';
+             Kind =:= 'try'; Kind =:= 'fun' ->
+    scan_matching_end(Rest, Depth + 1);
+scan_matching_end([{'end', Pos} | _Rest], 1) ->
+    Pos;
+scan_matching_end([{'end', _} | Rest], Depth) ->
+    scan_matching_end(Rest, Depth - 1);
+scan_matching_end([_ | Rest], Depth) ->
+    scan_matching_end(Rest, Depth).
+
+%% erl_pp always prints flush-left from column 0 - fine for the first line
+%% (the edit's own start column already places it correctly), but every
+%% following line needs the original construct's own indentation added
+%% back, or it visually collapses to the left margin.
+reindent(Text, Col) ->
+    Indent = binary:copy(<<" ">>, Col - 1),
+    [First | Rest] = binary:split(unicode:characters_to_binary(Text), <<"\n">>, [global]),
+    iolist_to_binary(lists:join(<<"\n">>, [First | [<<Indent/binary, L/binary>> || L <- Rest]])).
+
+%% CHARACTERIZATION (deliberately minimal, see tasks.md 2.5): only offered
+%% for a selection of one or more *complete* top-level statements from a
+%% function clause's body, with at least one statement still left after it
+%% in the same clause (that following statement's own start position is
+%% what both the removal and the new function body's own text are bounded
+%% by - extracting a clause's own trailing statement is not supported, nor
+%% is a selection spanning more than one clause). Free variables use a
+%% deliberately coarse heuristic: any variable referenced in the selection
+%% that also appears anywhere in the clause's head patterns or an earlier
+%% statement becomes an argument - no attempt is made to tell a "bound"
+%% occurrence from a merely-referenced one there, which only ever widens
+%% the argument list, never narrows away a real dependency. If a variable
+%% *bound inside* the selection (via a top-level `=` only - a binding
+%% introduced by a nested case/if/receive clause is not tracked) is
+%% referenced again afterward, no action is offered at all, since the
+%% extracted function would need to return more than its own trailing
+%% value to support that. The extracted body is copied verbatim from the
+%% source (not reformatted/reindented) and always named extracted_N, for
+%% the lowest N not already used as a function name in the file.
+extract_function_actions(File, Tree, Clauses, #{'end' := #{line := EndLine0}} = Range) ->
+    #{start := #{line := StartLine0}} = Range,
+    case find_selected_statements(Clauses, StartLine0 + 1, EndLine0 + 1) of
+        {ok, Clause, Before, Selected, After} ->
+            build_extract_action(File, Tree, Clause, Before, Selected, After);
+        undefined ->
+            []
+    end;
+extract_function_actions(_File, _Tree, _Clauses, _Range) ->
+    [].
+
+find_selected_statements([], _StartLine, _EndLine) ->
+    undefined;
+find_selected_statements([{clause, _, _, _, Body} = Clause | Rest], StartLine, EndLine) ->
+    case split_selected(Body, StartLine, EndLine) of
+        {ok, Before, Selected, After} -> {ok, Clause, Before, Selected, After};
+        undefined -> find_selected_statements(Rest, StartLine, EndLine)
+    end.
+
+%% Body statements always appear in increasing source-position order, so
+%% picking every statement whose own start line falls in [StartLine,
+%% EndLine] always yields a single contiguous run - never one with a gap.
+split_selected(Body, StartLine, EndLine) ->
+    InRange = fun (Stmt) ->
+        {Line, _} = element(2, Stmt),
+        Line >= StartLine andalso Line =< EndLine
+    end,
+    {Before, AtAndAfter} = lists:splitwith(fun (Stmt) -> not InRange(Stmt) end, Body),
+    {Selected, After} = lists:splitwith(InRange, AtAndAfter),
+    case {Selected, After} of
+        {[], _} -> undefined;
+        {_, []} -> undefined;
+        {_, _} -> {ok, Before, Selected, After}
+    end.
+
+%% The selection's own last statement is special-cased: if it binds a
+%% variable that *is* referenced afterward, that is exactly the ordinary
+%% "use the extracted computation's result" shape (the new function's own
+%% implicit return value becomes that binding at the call site) - not a
+%% multi-return situation. Any *other* bound variable still being
+%% referenced afterward is the real disqualifying case.
+build_extract_action(File, Tree, {clause, _, Patterns, _, _}, Before, Selected, [Next | _] = After) ->
+    ReferencedInSelection = ordered_unique_var_names(Selected),
+    BoundEarlier = sets:from_list(collect_var_names(Patterns) ++ collect_var_names(Before)),
+    Args = [Name || Name <- ReferencedInSelection, sets:is_element(Name, BoundEarlier)],
+    UsedAfter = sets:from_list(collect_var_names(After)),
+    LastBoundVar = last_bound_var(lists:last(Selected)),
+    ExcludedFromCheck = case LastBoundVar of {ok, N} -> [N]; undefined -> [] end,
+    BoundInSelection = collect_bound_names(Selected) -- ExcludedFromCheck,
+    case [Name || Name <- BoundInSelection, sets:is_element(Name, UsedAfter)] of
+        [] ->
+            ResultVar = case LastBoundVar of
+                {ok, N2} ->
+                    case sets:is_element(N2, UsedAfter) of true -> {ok, N2}; false -> undefined end;
+                undefined ->
+                    undefined
+            end,
+            build_extract_edit(File, Tree, Args, Selected, Next, ResultVar);
+        [_ | _] ->
+            []
+    end.
+
+last_bound_var({match, _, {var, _, Name}, _}) when Name =/= '_' -> {ok, Name};
+last_bound_var(_) -> undefined.
+
+collect_var_names(Nodes) when is_list(Nodes) ->
+    lists:usort(lists:flatmap(fun collect_var_names/1, Nodes));
+collect_var_names(Node) ->
+    erl_syntax_lib:fold(fun
+        ({var, _, '_'}, Acc) -> Acc;
+        ({var, _, Name}, Acc) -> [Name | Acc];
+        (_, Acc) -> Acc
+    end, [], Node).
+
+ordered_unique_var_names(Stmts) ->
+    Names = lists:flatmap(fun ordered_var_names/1, Stmts),
+    dedup_preserve_order(Names).
+
+ordered_var_names(Node) ->
+    lists:reverse(erl_syntax_lib:fold(fun
+        ({var, _, '_'}, Acc) -> Acc;
+        ({var, _, Name}, Acc) -> [Name | Acc];
+        (_, Acc) -> Acc
+    end, [], Node)).
+
+dedup_preserve_order(Names) ->
+    {Result, _Seen} = lists:foldl(fun (Name, {Acc, Seen}) ->
+        case sets:is_element(Name, Seen) of
+            true -> {Acc, Seen};
+            false -> {[Name | Acc], sets:add_element(Name, Seen)}
+        end
+    end, {[], sets:new()}, Names),
+    lists:reverse(Result).
+
+%% Only a top-level `Var = ...` statement counts as a binding here -
+%% deliberately shallow, see the CHARACTERIZATION comment above.
+collect_bound_names(Stmts) ->
+    lists:usort([Name || {match, _, {var, _, Name}, _} <- Stmts, Name =/= '_']).
+
+build_extract_edit(File, Tree, Args, Selected, Next, ResultVar) ->
+    NewName = fresh_function_name(Tree),
+    NameBin = atom_to_binary(NewName, utf8),
+    {FirstLine, FirstCol} = element(2, hd(Selected)),
+    {NextLine, NextCol} = element(2, Next),
+    Content = read_content(File),
+    RawBody = text_between(Content, {FirstLine, FirstCol}, {NextLine, NextCol}),
+    NewBodyText = terminate_with_dot(RawBody),
+    ArgsText = iolist_to_binary(lists:join(<<", ">>, [atom_to_binary(A, utf8) || A <- Args])),
+    NewFunctionText = iolist_to_binary(io_lib:format("~n~s(~s) ->~n    ~s~n", [NameBin, ArgsText, NewBodyText])),
+    Indent = binary:copy(<<" ">>, NextCol - 1),
+    CallText = case ResultVar of
+        {ok, VarName} ->
+            iolist_to_binary(io_lib:format("~s = ~s(~s),~n~s", [VarName, NameBin, ArgsText, Indent]));
+        undefined ->
+            iolist_to_binary(io_lib:format("~s(~s),~n~s", [NameBin, ArgsText, Indent]))
+    end,
+    {EofLine, EofCol} = end_of_file_insertion_point(File),
+    CallEdit = {File, FirstLine, FirstCol, NextLine, NextCol, CallText},
+    NewFunctionEdit = {File, EofLine, EofCol, EofLine, EofCol, NewFunctionText},
+    %% Bottom-of-file edit first, then the (earlier) call-site edit - same
+    %% "process edits bottom-to-top" ordering as inline_variable_action/6.
+    Edit = lsp_rename:build_workspace_edit([NewFunctionEdit, CallEdit]),
+    [#{title => <<"Extract function ", NameBin/binary>>, kind => <<"refactor">>, edit => Edit}].
+
+terminate_with_dot(Text) ->
+    Trimmed = string:trim(Text, trailing),
+    case binary:last(Trimmed) of
+        $, -> <<(binary:part(Trimmed, 0, byte_size(Trimmed) - 1))/binary, ".">>;
+        $. -> Trimmed;
+        _ -> <<Trimmed/binary, ".">>
+    end.
+
+fresh_function_name(Tree) ->
+    Existing = sets:from_list([FName || {function, _, FName, _, _} <- Tree]),
+    fresh_function_name(Existing, 1).
+
+fresh_function_name(Existing, N) ->
+    Candidate = list_to_atom("extracted_" ++ integer_to_list(N)),
+    case sets:is_element(Candidate, Existing) of
+        true -> fresh_function_name(Existing, N + 1);
+        false -> Candidate
+    end.
+
+%% 1-based {Line, Column} pair (matching every other AST-derived position
+%% in this module) -> the exact byte range of source text between them.
+text_between(Content, {L1, C1}, {L2, C2}) ->
+    Offset1 = pos_to_offset(Content, L1, C1),
+    Offset2 = pos_to_offset(Content, L2, C2),
+    binary:part(Content, Offset1, Offset2 - Offset1).
+
+pos_to_offset(Content, Line, Col) ->
+    Lines = binary:split(Content, <<"\n">>, [global]),
+    {Before, _} = lists:split(Line - 1, Lines),
+    LineStart = lists:foldl(fun (L, Acc) -> Acc + byte_size(L) + 1 end, 0, Before),
+    LineStart + (Col - 1).
 
 %%%%%%%%%%%%%
 %% helpers %%
