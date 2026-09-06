@@ -95,6 +95,7 @@ Support for Erlang tools, including rebar3, EUnit and Dialyzer
 - `erlang.includePaths` - Include paths are read from rebar.config, and also standard set of paths is used. This setting is for special cases when the default behaviour is not enough
 - `erlang.linting` - Enable/disable dynamic validation of opened Erlang source files
 - `erlang.codeLensEnabled` - Enable/Disable CodeLens
+- `erlang.cacheManagement` - Specify where and how to store large cache tables
 - `erlang.inlayHintsEnabled` - Enable/Disable InlayHints
 - `erlang.verbose` - Activate technical traces for use in the extension development
 

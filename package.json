@@ -1,7 +1,7 @@
 {
 	"name": "erlang",
 	"description": "Erlang language extension for Visual Studio Code",
-	"version": "1.0.8",
+	"version": "1.1.4",
 	"icon": "images/icon.png",
 	"publisher": "pgourlain",
 	"engines": {
@@ -181,7 +181,7 @@
 				},
 				"erlang.erlangDistributedNode": {
 					"type": "boolean",
-					"description": "Start the Erlang backend in a distributed Erlang node. Could be usefull for extension development. Note, it starts EPMD if not running yet.",
+					"description": "Start the Erlang backend in a distributed Erlang node. Could be useful for extension development. Note, it starts EPMD if not running yet.",
 					"default": false
 				},
 				"erlang.rebarPath": {
@@ -215,6 +215,21 @@
 					"type": "boolean",
 					"default": true,
 					"description": "Enable/disable dynamic validation of opened Erlang source files."
+				},
+				"erlang.cacheManagement": {
+					"type": "string",
+					"default": "memory",
+					"description": "Specify where and how to store large cache tables.",
+					"enum": [
+						"memory",
+						"compressed memory",
+						"file"
+					],
+					"enumDescriptions": [
+						"Store in memory",
+						"Store in memory and apply lightweight compression to consume less memory (approx. 50%)",
+						"Store in temporary files"
+					]
 				},
 				"erlang.codeLensEnabled": {
 					"type": "boolean",
@@ -292,10 +307,10 @@
 	},
 	"dependencies": {
 		"fs-extra": "^8.1.0",
-		"vscode-debugadapter": "^1.41.0",
-		"vscode-debugprotocol": "^1.41.0",
-		"vscode-languageclient": "^7.0.0",
-		"vscode-languageserver": "^7.0.0",
+		"@vscode/debugadapter": "^1.68.0",
+		"@vscode/debugprotocol": "^1.68.0",
+		"vscode-languageclient": "^9.0.1",
+		"vscode-languageserver": "^9.0.1",
 		"vscode-uri": "^1.0.3"
 	},
 	"devDependencies": {

@@ -621,23 +621,30 @@ variablelc_to_clauselc(VarLC2ClauseLC, Line, Column) ->
             -> [lsp_location()]
       when Type :: macro | record | field.
 find_definitions(Type, Name, File) ->
-    find_definitions_in_files(Type, Name, [File], #{}).
+    case find_definitions_in_files(Type, Name, [File], #{}, false) of
+        [] -> find_definitions_in_files(Type, Name, [File], #{}, true);
+        Found -> Found
+    end.
 
--spec find_definitions_in_files(Type, Name, FilesToVisit, VisitedFiles)
+-spec find_definitions_in_files(Type, Name, FilesToVisit, VisitedFiles, IncludeBuild)
             -> [lsp_location()]
       when Type :: macro | record | field,
            Name :: atom(),
            FilesToVisit :: [file:filename()],
-           VisitedFiles :: #{file:filename() => 1}.
-find_definitions_in_files(_Type, _Name, [], _VisitedFiles) ->
+           VisitedFiles :: #{file:filename() => 1},
+           IncludeBuild :: boolean.
+find_definitions_in_files(_Type, _Name, [], _VisitedFiles, _IncludeBuild) ->
     [];
-find_definitions_in_files(Type, Name, [File | Files], VisitedFiles) ->
+find_definitions_in_files(Type, Name, [File | Files], VisitedFiles, IncludeBuild) ->
     Forms = gen_lsp_doc_server:get_dodged_syntax_tree(File),
     case find_definition_in_file(Type, Name, File, Forms) of
         undefined ->
             %% Go deeper (check included files on the next level)
             IncludedRelFiles = lists:reverse(find_included_files(Forms, [])),
-            IncludeDirs = lsp_parse:get_include_path(File),
+            IncludeDirs = case IncludeBuild of
+                true -> lsp_parse:get_include_path(File);
+                false -> lsp_parse:get_include_path_no_build(File)
+            end,
             PossibleIncludeFiles = [filename:join(Dir, IncludedRelFile)
                                     || IncludedRelFile <- IncludedRelFiles,
                                        Dir <- IncludeDirs] ++ Files,
@@ -645,12 +652,12 @@ find_definitions_in_files(Type, Name, [File | Files], VisitedFiles) ->
                                    || IncFile <- PossibleIncludeFiles,
                                       not maps:is_key(IncFile, VisitedFiles)],
             find_definitions_in_files(Type, Name, IncludeFilesToVisit,
-                                      VisitedFiles#{File => 1});
+                                      VisitedFiles#{File => 1}, IncludeBuild);
         Result ->
             %% Don't go deeper (ignore included files on the next level) but
             %% go sideway (check e.g. build target dependent alternative files)
             [Result | find_definitions_in_files(Type, Name, Files,
-                                                VisitedFiles#{File => 1})]
+                                                VisitedFiles#{File => 1}, IncludeBuild)]
     end.
 
 %% @doc Find macro, record or record field definition in a dodged AST

@@ -1,5 +1,5 @@
 import {ErlangConnection} from './erlangConnection';
-import { DebugProtocol } from 'vscode-debugprotocol';
+import { DebugProtocol } from '@vscode/debugprotocol';
 import { FunctionBreakpoint } from './ErlangShellDebugger';
 
 

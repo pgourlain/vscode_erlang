@@ -36,17 +36,21 @@ suite('Erlang Language Extension', () => {
 		assert.ok(document != null);
 		assert.equal('erlang', document.languageId);
 
-		const waitForDiags = new Promise<readonly vscode.Uri[]>((resolve, reject) => {
+		const waitForDiags = new Promise<vscode.Diagnostic[]>((resolve) => {
 			const disposeToken = vscode.languages.onDidChangeDiagnostics(
-				async (ev) => {
-					disposeToken.dispose();
-					resolve(ev.uris);
+				(ev) => {
+					const docUri = document.uri.toString();
+					if (ev.uris.some(u => u.toString() === docUri)) {
+						const diags = vscode.languages.getDiagnostics(document.uri);
+						if (diags.length > 0) {
+							disposeToken.dispose();
+							resolve(diags);
+						}
+					}
 				}
-			) 
+			)
 		});
-		const uris = await waitForDiags;
-		assert.equal(true, uris.length > 0);
-		const diags = vscode.languages.getDiagnostics(uris[0]);
+		const diags = await waitForDiags;
 		assert.equal(1, diags.length);
 	});
 });

@@ -215,7 +215,7 @@ export class RebarRunner implements vscode.Disposable {
 	public async runScript(commands: string[]): Promise<string> {
 		const rootPath = getElangConfigConfiguration().rootPath;
 		const { output } = await new RebarShell(this.getRebarSearchPaths(), this.extensionPath, ErlangOutputAdapter(RebarRunner.RebarOutput))
-			.runScript(rootPath, commands);
+			.runScript(rootPath, commands, getElangConfigConfiguration().erlangPath);
 		return output;
 	}
 
@@ -232,7 +232,7 @@ export class RebarRunner implements vscode.Disposable {
 
 	public static get RebarOutput(): vscode.OutputChannel {
 		if (!rebarOutputChannel) {
-			rebarOutputChannel = vscode.window.createOutputChannel('rebar');
+			rebarOutputChannel = vscode.window.createOutputChannel('rebar', 'erlang');
 		}
 		return rebarOutputChannel;
 	}

@@ -41,7 +41,7 @@ send_message_to_vscode(Port, Verb, Data) ->
 %-------------------------------
 % Command receiver (from nodejs)
 %-------------------------------
--define(TCP_OPTIONS, [binary, {active, false}]).
+-define(TCP_OPTIONS, [binary, {active, false}, {ip, {127,0,0,1}}]).
 
 start_command_server(VsCodePort, Module) ->
     spawn(fun () ->

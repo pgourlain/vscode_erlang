@@ -2,8 +2,8 @@ import {
 	DebugSession, InitializedEvent, TerminatedEvent, StoppedEvent,
 	OutputEvent, Thread, ThreadEvent, StackFrame, Scope, Source, Handles
 	, Breakpoint, ModuleEvent, Module, ContinuedEvent, Variable, BreakpointEvent
-} from 'vscode-debugadapter';
-import { DebugProtocol } from 'vscode-debugprotocol';
+} from '@vscode/debugadapter';
+import { DebugProtocol } from '@vscode/debugprotocol';
 import { ErlangShellForDebugging, LaunchRequestArguments, FunctionBreakpoint } from './ErlangShellDebugger';
 import { ILogOutput } from './GenericShell';
 import * as path from 'path';
@@ -150,7 +150,7 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 			this.log(`debugger launchRequest arguments : ${JSON.stringify(args)}`);
 		}
 		// Based on JS output path, not TS path
-		this.erlangConnection.Start(this._LaunchArguments.verbose).then(port => {
+		this.erlangConnection.Start(this._LaunchArguments.verbose, this._LaunchArguments.erlangPath).then(port => {
 			//this.debug("Local webserver for erlang is started");
 			this._port = port;
 			//Initialize the workflow only when webserver is started

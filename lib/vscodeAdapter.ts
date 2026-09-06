@@ -6,7 +6,7 @@ var erlangOutputChannel : vscode.OutputChannel;
 
 export function ErlangOutput() : vscode.OutputChannel {
     if (!erlangOutputChannel) {
-        erlangOutputChannel = vscode.window.createOutputChannel('erlang'); 
+        erlangOutputChannel = vscode.window.createOutputChannel('erlang', 'erlang'); 
     }
     return erlangOutputChannel;
 }

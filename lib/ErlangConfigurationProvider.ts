@@ -31,6 +31,7 @@ export function configurationChanged(): void {
         erlangDistributedNode: erlangConf.get("erlangDistributedNode", false),
         rebarPath: resolveVariables(erlangConf.get<string>("rebarPath", null)),
         codeLensEnabled: erlangConf.get<boolean>('codeLensEnabled', false),
+        cacheManagement: erlangConf.get("cacheManagement", "memory"),
         inlayHintsEnabled: erlangConf.get<boolean>('inlayHintsEnabled', false),
         debuggerRunMode: erlangConf.get<string>("debuggerRunMode", "Server"),
         includePaths: erlangConf.get("includePaths", []),

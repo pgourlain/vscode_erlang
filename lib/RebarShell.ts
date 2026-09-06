@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as fsPromises from 'node:fs/promises'; 
 import * as path from 'path';
 import { GenericShell, ILogOutput, IShellOutput } from './GenericShell';
 import { getElangConfigConfiguration } from './ErlangConfigurationProvider';
@@ -20,8 +21,8 @@ export default class RebarShell extends GenericShell {
      * @param cwd - The working directory where compilation will take place
      * @returns Promise resolved or rejected when rebar exits
      */
-    public compile(cwd: string) : Promise<RebarShellResult> {
-        return this.runScript(cwd, ['compile']);
+    public compile(cwd: string, erlPath: string) : Promise<RebarShellResult> {
+        return this.runScript(cwd, ['compile'], erlPath);
     }
 
     /**
@@ -31,11 +32,14 @@ export default class RebarShell extends GenericShell {
      * @param commands - Arguments to rebar
      * @returns Promise resolved or rejected when rebar exits
      */
-    public async runScript(cwd: string, commands: string[]): Promise<RebarShellResult> {
+    public async runScript(cwd: string, commands: string[], erlPath: string): Promise<RebarShellResult> {
         // Rebar may not have execution permission (e.g. if extension is built
         // on Windows but installed on Linux). Let's always run rebar by escript.
         let escript = (process.platform == 'win32' ? 'escript.exe' : 'escript');
-        let rebarFileName = this.getRebarFullPath();
+        if (erlPath !== '') {
+            escript = path.join(erlPath, escript);
+        }
+        let rebarFileName = await this.getRebarFullPath();
         if (rebarFileName.search(' ') > -1) {
             // There is at least one space in rebarPath. Use double quotes
             // instead of single quotes for cross-operability between
@@ -60,12 +64,17 @@ export default class RebarShell extends GenericShell {
      *
      * @returns Full path to rebar executable
      */
-    private getRebarFullPath(): string {
+    private async getRebarFullPath(): Promise<string> {
         const rebarSearchPaths = this.rebarSearchPaths.slice();
-        if (!rebarSearchPaths.includes(this.defaultRebarSearchPath)) {
-            rebarSearchPaths.push(this.defaultRebarSearchPath);
+        const onSearchPaths = this.findBestFile(rebarSearchPaths, ['rebar3', 'rebar'], '');
+        if (onSearchPaths !== '') {
+            return onSearchPaths;
         }
-        return this.findBestFile(rebarSearchPaths, ['rebar3', 'rebar'], 'rebar3');
+        const onPATH = await this.findExecutable('rebar3');
+        if (onPATH) {
+            return onPATH;
+        }
+        return this.findBestFile([this.defaultRebarSearchPath], ['rebar3', 'rebar'], 'rebar3');
     }
 
     /**
@@ -91,6 +100,25 @@ export default class RebarShell extends GenericShell {
             }
         }
         return result;
+    }
+
+    private async findExecutable(name: string): Promise<string | null> {
+        const envPath = process.env.PATH ?? '';
+        const dirs = envPath.split(path.delimiter);
+        const exts = process.platform === 'win32'
+            ? (process.env.PATHEXT ?? '.EXE;.CMD;.BAT').split(';')
+            : [''];
+
+        for (const dir of dirs) {
+            for (const ext of exts) {
+            const full = path.join(dir, name + ext);
+            try {
+                await fsPromises.access(full, fsPromises.constants.X_OK);
+                return full;
+            } catch { /* keep looking */ }
+            }
+        }
+        return null;
     }
 }
 

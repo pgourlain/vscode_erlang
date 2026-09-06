@@ -25,7 +25,6 @@ import * as Net from 'net';
 
 import * as lspcodelens from './lspcodelens';
 
-import * as lspInlay from './lsp-inlayhints';
 import * as lspValue from './lsp-inlinevalues';
 import * as lspRename from './lsp-rename';
 
@@ -76,7 +75,8 @@ namespace Configuration {
 				if (item.section === "<computed>") {
 					result.push({
 						autosave: Workspace.getConfiguration("files").get("autoSave", "afterDelay") === "afterDelay",
-						tmpdir: os.tmpdir()
+						tmpdir: os.tmpdir(),
+						username: os.userInfo().username
 					});
 				} else if (item.section === "erlang") {
 					result.push(resolveErlangSettings(Workspace.getConfiguration(item.section)))
@@ -95,12 +95,10 @@ namespace Configuration {
 	export function initialize() {
 		//force to read configuration
 		lspcodelens.configurationChanged();
-		lspInlay.configurationChanged();
 		// VS Code currently doesn't sent fine grained configuration changes. So we 
 		// listen to any change. However this will change in the near future.
 		configurationListener = Workspace.onDidChangeConfiguration(() => {
 			lspcodelens.configurationChanged();
-			lspInlay.configurationChanged();
 			client.sendNotification(DidChangeConfigurationNotification.type, { settings: null });
 		});
 		fileSystemWatcher = workspace.createFileSystemWatcher('**/*.erl');
@@ -149,7 +147,7 @@ function waitForSocket(options: any, callback: any, _tries: any) {
 		throw new Error('.port is a required option');
 
 	var maxTries = options.tries || MAX_TRIES;
-	var host = options.host || 'localhost';
+	var host = options.host || '127.0.0.1';
 	var port = options.port;
 
 
@@ -186,7 +184,7 @@ function waitForSocket(options: any, callback: any, _tries: any) {
 // TODO: convert to async function
 function compileErlangBridge(extensionPath: string): Thenable<string> {
 	return new RebarShell([getElangConfigConfiguration().rebarPath], extensionPath, ErlangOutputAdapter())
-		.compile(extensionPath)
+		.compile(extensionPath, getElangConfigConfiguration().erlangPath)
 		.then(({ output }) => output);
 	// TODO: handle failure to compile erlangbridge
 }
@@ -195,7 +193,7 @@ function getPort(callback) {
 	var server = Net.createServer(function (sock) {
 		sock.end('OK\n');
 	});
-	server.listen(0, function () {
+	server.listen(0, '127.0.0.1', function () {
 		var port = (<Net.AddressInfo>server.address()).port;
 		server.close(function () {
 			callback(port);
@@ -206,9 +204,8 @@ function getPort(callback) {
 export function activate(context: ExtensionContext) {
 	let erlangCfg = getElangConfigConfiguration();
 	if (erlangCfg.verbose)
-		lspOutputChannel = Window.createOutputChannel('Erlang Language Server');
+		lspOutputChannel = Window.createOutputChannel('Erlang Language Server', 'erlang');
 
-	lspInlay.activate(context, lspOutputChannel);
 	lspValue.activate(context, lspOutputChannel);
 	lspRename.activate(context, lspOutputChannel);
 	
@@ -222,10 +219,10 @@ export function activate(context: ExtensionContext) {
 		resolveCodeLens: (codeLens) => {
 			return Promise.resolve(lspcodelens.onResolveCodeLenses(codeLens)).then(x => x);
 		},
-		didSave: (data: TextDocument, next: (data: TextDocument) => void) => {
-			next(data);//call LSP
+		didSave: async (data, next) => {
+			await next(data);//call LSP
 			lspcodelens.onDocumentDidSave();
-		},	
+		}
 	};
 	// Options to control the language client
 	let clientOptions: LanguageClientOptions = {
@@ -258,7 +255,7 @@ export function activate(context: ExtensionContext) {
 					}, 
 					undefined);
 				//
-				client.onReady();
+				(<ErlangLanguageClient>client).onReady();
 			});
 		});
 	}, clientOptions, lspOutputChannel, true);

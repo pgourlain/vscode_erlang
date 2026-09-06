@@ -648,6 +648,7 @@ Erlang code.
     form_info/0,
     error_info/0
 ]).
+-compile(nowarn_update_literal).
 
 %% Start of Abstract Format
 

@@ -1,6 +1,7 @@
 -module(lsp_signature_doc_layout).
 
 -export([module/2]).
+-compile({nowarn_unused_function, {signatures_sample, 0}}).
 
 -include_lib("xmerl/include/xmerl.hrl").
 

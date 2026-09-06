@@ -1,6 +1,11 @@
 -module(vscode_lsp_app_sup).
+-behaviour(supervisor).
 
--export([init/1, start_link/1, start_sup_socket/1, start_sup_doc/0, start_sup_config/0, start_sup_help/0, start_child/1]).
+%% API
+-export([start_link/1, start_sup_socket/1, start_sup_doc/0, start_sup_config/0, start_sup_help/0, start_child/1]).
+
+%% Supervisor callbacks
+-export([init/1]).
 
 start_link(VsCodePort) ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, VsCodePort).
@@ -20,17 +25,12 @@ socket_spec(VsCodePort) ->
     modules => [gen_lsp_sup],
     type => supervisor}.
 
-start_sup_socket(VsCodePort) ->
-    supervisor:start_child({local, ?MODULE}, socket_spec(VsCodePort)).
-
 doc_spec() ->
     #{id => gen_lsp_doc_sup,
     start => {gen_lsp_doc_sup, start_link, []},
     restart => permanent,
     modules => [gen_lsp_doc_sup],
     type => supervisor}.
-%        {gen_lsp_doc_sup, {gen_lsp_doc_sup, start_link, []},
-%                        permanent, infinity, supervisor, [gen_lsp_doc_sup]}.
 
 config_spec() ->
     #{id => gen_lsp_config_sup,
@@ -45,6 +45,9 @@ help_spec() ->
     restart => permanent,
     modules => [gen_lsp_help_sup],
     type => supervisor}.
+
+start_sup_socket(VsCodePort) ->
+    supervisor:start_child({local, ?MODULE}, socket_spec(VsCodePort)).
 
 start_sup_doc() ->
     supervisor:start_child(?MODULE, doc_spec()).

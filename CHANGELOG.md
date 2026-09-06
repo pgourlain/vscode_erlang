@@ -1,5 +1,64 @@
 # Change log
 
+## Version 1.1.4 (June 24, 2026)
+
+* [327](https://github.com/pgourlain/vscode_erlang/issues/327) : Use Erlang and rebar3 paths from settings everywhere (from PATH, and the built-in rebar3 only as the last resort)
+
+Thanks to
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+
+
+## Version 1.1.3 (May 25, 2025)
+
+* [323](https://github.com/pgourlain/vscode_erlang/issues/323) : Bump submodule grammar to the latest version
+
+Thanks to
+* [Kornel Horvath](https://github.com/KornelH)
+
+---
+
+## Version 1.1.2 (February 22, 2025)
+
+* [320](https://github.com/pgourlain/vscode_erlang/issues/320) : Extension fails to start on vscode 1.96.4.
+* [321](https://github.com/pgourlain/vscode_erlang/issues/321) : Remove warnings.
+
+---
+
+## Version 1.1.1 (December 8, 2024)
+
+* [319](https://github.com/pgourlain/vscode_erlang/issues/319) : Add a configuration setting to change the storage mode for large cache tables (mainly used for code navigation). 
+
+      Available modes:
+      memory (default, original): use ETS tables
+      compressed memory: use ETS tables with compressed flag turned on.
+      file: use DETS tables saved into temporary files.
+
+Thanks to
+* [Kornel Horvath](https://github.com/KornelH)
+
+---
+
+## Version 1.1.0 (October 28, 2024)
+
+* [307](https://github.com/pgourlain/vscode_erlang/issues/307) : Update grammar that fix #197
+* [315](https://github.com/pgourlain/vscode_erlang/issues/315) : Upgrade to latest vscode language client and debugger libraries
+
+---
+
+## Version 1.0.9 (June 16, 2024)
+
+* [306](https://github.com/pgourlain/vscode_erlang/issues/306) : Fixes for help in OTP 27 and for go to definition
+
+* [307](https://github.com/pgourlain/vscode_erlang/issues/307) : Re activate [285](https://github.com/pgourlain/vscode_erlang/issues/285) (Fine tuning of scanning for project files)
+
+
+Thanks to
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+* [Kornel Horvath](https://github.com/KornelH)
+
+---
+
+
 ## Version 1.0.8 (June 9, 2024)
 
 * [302](https://github.com/pgourlain/vscode_erlang/issues/302)
