@@ -4,7 +4,7 @@
 %% API
 -export([start_link/0]).
 
--export([document_opened/2, document_changed/2, document_closed/1, opened_documents/0, get_document_contents/1, parse_document/1]).
+-export([document_opened/2, document_changed/2, document_range_changed/4, document_closed/1, opened_documents/0, get_document_contents/1, parse_document/1]).
 -export([project_file_added/1, project_file_changed/1, project_file_deleted/1]).
 -export([get_syntax_tree/1, get_dodged_syntax_tree/1, get_references/1, get_inlayhints/1]).
 -export([root_available/0, config_change/0, project_modules/0, get_module_file/1, get_module_files/1, get_build_dir/0, find_source_file/1]).
@@ -33,6 +33,39 @@ document_opened(File, Contents) ->
 
 document_changed(File, Contents) ->
     ?XETS:insert(document_contents, {File, Contents}).
+
+%% @doc Apply one incremental (range + replacement text) content change
+%% against the currently cached buffer for File, for `textDocumentSync`
+%% mode 2 (Incremental). Start/end positions are 0-based {Line, Character}
+%% pairs, exactly as the LSP wire protocol sends them (before any of the
+%% +1 conversions lsp_navigation-facing code does).
+%%
+%% CHARACTERIZATION / known limitation: Character is treated as a raw byte
+%% offset within the line, like the rest of this codebase already does
+%% (see e.g. lsp_handlers:text_before_character/3) - not a UTF-16 code
+%% unit count per the LSP spec, so a line containing multi-byte UTF-8
+%% characters before the edit position can splice at the wrong byte.
+document_range_changed(File, {StartLine, StartChar}, {EndLine, EndChar}, NewText) ->
+    Contents = get_document_contents(File),
+    Updated = splice_range(Contents, StartLine, StartChar, EndLine, EndChar, NewText),
+    document_changed(File, Updated).
+
+splice_range(Contents, StartLine, StartChar, EndLine, EndChar, NewText) ->
+    Lines = binary:split(Contents, <<"\n">>, [global]),
+    StartOffset = line_char_to_offset(Lines, StartLine, StartChar),
+    EndOffset = line_char_to_offset(Lines, EndLine, EndChar),
+    Before = binary:part(Contents, 0, StartOffset),
+    After = binary:part(Contents, EndOffset, byte_size(Contents) - EndOffset),
+    <<Before/binary, NewText/binary, After/binary>>.
+
+%% Byte offset of {Line, Character} within the full contents, given
+%% Contents already split on "\n" (one byte re-added per split for the
+%% separator itself).
+line_char_to_offset(Lines, Line, Character) ->
+    {Before, Target} = lists:split(min(Line, length(Lines) - 1), Lines),
+    LineStart = lists:foldl(fun (L, Acc) -> Acc + byte_size(L) + 1 end, 0, Before),
+    TargetLine = hd(Target),
+    LineStart + min(Character, byte_size(TargetLine)).
 
 document_closed(File) ->
     ?XETS:delete(document_contents, File).

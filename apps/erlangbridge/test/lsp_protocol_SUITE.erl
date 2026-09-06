@@ -98,7 +98,7 @@ exit_closes_the_connection(Config) ->
 
 golden_initialize_result() ->
     #{capabilities => #{
-        textDocumentSync => 1,
+        textDocumentSync => 2, %% Incremental, task 1.4
         completionProvider => #{triggerCharacters => <<":#.">>},
         hoverProvider => true,
         signatureHelpProvider => #{triggerCharacters => <<"(,">>, retriggerCharacters => <<",">>},

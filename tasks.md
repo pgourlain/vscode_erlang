@@ -257,7 +257,7 @@ Only then may `apps/erlangbridge/src/` or `lib/` be edited.
 
 ### 1.4 — Incremental document sync
 
-- **Status**: todo
+- **Status**: done
 - **Goal**: `textDocumentSync => 1` (Full) resends the whole buffer on every keystroke. Move to `2` (Incremental) with range-apply in `gen_lsp_doc_server`. Do this **before** semantic tokens, which is latency-sensitive.
 - **Files**: `apps/erlangbridge/src/lsp_handlers.erl` (`textDocument_didChange/2`, capability), `gen_lsp_doc_server.erl`
 - **Deps**: 0.12 (strong net required)

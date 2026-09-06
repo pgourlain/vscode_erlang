@@ -16,7 +16,7 @@ initialize(_Socket, Params) ->
     gen_lsp_config_server:update_config(root, RootPath),
     gen_lsp_doc_server:root_available(),
     #{capabilities => #{
-        textDocumentSync => 1, % Full
+        textDocumentSync => 2, % Incremental
         completionProvider => #{triggerCharacters => <<":#.">>},
         hoverProvider => true,
         signatureHelpProvider => #{triggerCharacters => <<"(,">>, retriggerCharacters => <<",">>},
@@ -187,10 +187,14 @@ textDocument_didSave(Socket, Params) ->
             ok
     end.
 
+%% Content changes are applied in the order the client sent them - each
+%% one (range-based or, still legal even under Incremental sync, a full
+%% replacement with no range) is resolved against the buffer state left by
+%% the previous one.
 textDocument_didChange(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
-    [ContentChange] = maps:get(contentChanges, Params),
-    gen_lsp_doc_server:document_changed(File, maps:get(text, ContentChange)),
+    ContentChanges = maps:get(contentChanges, Params),
+    lists:foreach(fun (ContentChange) -> apply_content_change(File, ContentChange) end, ContentChanges),
     case gen_lsp_config_server:autosave() of
         true ->
             ok;
@@ -198,6 +202,13 @@ textDocument_didChange(Socket, Params) ->
             gen_lsp_doc_server:parse_document(File),
             validate_file(Socket, File)
     end.
+
+apply_content_change(File, #{range := #{start := #{line := SL, character := SC},
+                                         'end' := #{line := EL, character := EC}},
+                              text := NewText}) ->
+    gen_lsp_doc_server:document_range_changed(File, {SL, SC}, {EL, EC}, NewText);
+apply_content_change(File, #{text := NewText}) ->
+    gen_lsp_doc_server:document_changed(File, NewText).
 
 textDocument_definition(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),

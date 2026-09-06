@@ -22,6 +22,10 @@
 all() -> [
     document_opened_is_readable_via_get_document_contents,
     document_changed_replaces_the_cached_contents,
+    document_range_changed_replaces_text_inside_a_range,
+    document_range_changed_inserts_at_a_zero_width_range,
+    document_range_changed_deletes_when_replacement_is_empty,
+    document_range_changed_spans_multiple_lines,
     document_closed_removes_the_cached_contents,
     get_syntax_tree_lazily_parses_and_caches_on_first_call,
     project_file_changed_on_an_open_document_is_a_no_op,
@@ -79,6 +83,61 @@ document_changed_replaces_the_cached_contents(Config) ->
     NewContent = <<"-module(docserver_a).\n-export([go/0]).\n\ngo() -> changed.\n">>,
     gen_lsp_doc_server:document_changed(File, NewContent),
     ?assertEqual(NewContent, gen_lsp_doc_server:get_document_contents(File)).
+
+%% docserver_a.erl content: "-module(docserver_a).\n-export([go/0]).\n\ngo() -> ok.\n"
+%% Line 3 (0-based) is "go() -> ok.", where "ok" sits at characters 8-10.
+
+%% task 1.4: textDocumentSync moved from Full (1) to Incremental (2), so
+%% document_range_changed/4 is what now keeps the cached buffer in sync
+%% with each keystroke instead of a full-document resend.
+document_range_changed_replaces_text_inside_a_range(Config) ->
+    File = ?config(file_a, Config),
+    Content = ?config(content_a, Config),
+    gen_lsp_doc_server:document_opened(File, Content),
+    gen_lsp_doc_server:document_range_changed(File, {3, 8}, {3, 10}, <<"done">>),
+    ?assertEqual(
+        <<"-module(docserver_a).\n-export([go/0]).\n\ngo() -> done.\n">>,
+        gen_lsp_doc_server:get_document_contents(File)
+    ).
+
+%% A zero-width range (start =:= end) is an insertion - typing a single
+%% character sends exactly this shape.
+document_range_changed_inserts_at_a_zero_width_range(Config) ->
+    File = ?config(file_a, Config),
+    Content = ?config(content_a, Config),
+    gen_lsp_doc_server:document_opened(File, Content),
+    gen_lsp_doc_server:document_range_changed(File, {3, 10}, {3, 10}, <<"!">>),
+    ?assertEqual(
+        <<"-module(docserver_a).\n-export([go/0]).\n\ngo() -> ok!.\n">>,
+        gen_lsp_doc_server:get_document_contents(File)
+    ).
+
+%% An empty replacement text over a non-zero-width range is a deletion -
+%% backspace/delete send this shape.
+document_range_changed_deletes_when_replacement_is_empty(Config) ->
+    File = ?config(file_a, Config),
+    Content = ?config(content_a, Config),
+    gen_lsp_doc_server:document_opened(File, Content),
+    gen_lsp_doc_server:document_range_changed(File, {3, 8}, {3, 10}, <<>>),
+    ?assertEqual(
+        <<"-module(docserver_a).\n-export([go/0]).\n\ngo() -> .\n">>,
+        gen_lsp_doc_server:get_document_contents(File)
+    ).
+
+%% Pressing Enter mid-line sends a zero-width range whose replacement text
+%% contains the newline itself - the range can also legitimately span
+%% several existing lines (selecting text across lines, then typing).
+document_range_changed_spans_multiple_lines(Config) ->
+    File = ?config(file_a, Config),
+    Content = ?config(content_a, Config),
+    gen_lsp_doc_server:document_opened(File, Content),
+    %% select from just after "-module(docserver_a)." through just before
+    %% "go()" on the last line, replace the whole span with one line
+    gen_lsp_doc_server:document_range_changed(File, {0, 22}, {3, 0}, <<"\n">>),
+    ?assertEqual(
+        <<"-module(docserver_a).\ngo() -> ok.\n">>,
+        gen_lsp_doc_server:get_document_contents(File)
+    ).
 
 document_closed_removes_the_cached_contents(Config) ->
     File = ?config(file_a, Config),
