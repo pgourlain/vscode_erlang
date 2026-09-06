@@ -75,7 +75,7 @@ then call the analysis module directly against `.erl` fixtures in `<suite>_SUITE
 
 ### 0.1 — `lsp_protocol_SUITE` (protocol-level net)
 
-- **Status**: todo
+- **Status**: done
 - **Goal**: TCP client helper (`Content-Length` framing + `vscode_jsone`), `initialize` handshake, assert the **full capability map verbatim** against a golden term. Also: unknown method → error `-32001`; `shutdown`/`exit`; `$/cancelRequest`; `$/setTrace`.
 - **Why it matters most**: module-level tests cannot reach `lsp_handlers` (handlers take a `Socket`). This suite is the tripwire that makes every later `lsp_handlers.erl` edit safe, and forces each capability flip to be a visible, deliberate diff.
 - **Files**: `apps/erlangbridge/test/lsp_protocol_SUITE.erl` (new)
