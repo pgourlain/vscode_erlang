@@ -9,6 +9,7 @@
 -export([textDocument_inlineValues/2, textDocument_inlineValue/2]).
 -export([textDocument_inlayHints/2, textDocument_inlayHint/2]).
 -export([textDocument_codeAction/2, codeAction_resolve/2, workspace_executeCommand/2]).
+-export([textDocument_semanticTokens_full/2]).
 
 -include("lsp_log.hrl").
 
@@ -48,7 +49,10 @@ initialize(_Socket, Params) ->
         selectionRangeProvider => false,
         linkedEditingRangeProvider => false,
         callHierarchyProvider => false,
-        semanticTokensProvider => false,
+        semanticTokensProvider => #{
+            legend => lsp_semantic_tokens:legend(),
+            full => true
+        },
         monikerProvider => false,
         typeHierarchyProvider => false,
         inlineValueProvider => true,
@@ -354,6 +358,10 @@ codeAction_resolve(_Socket, CodeAction) ->
 %% WorkspaceEdit returned directly from a resolved code action.
 workspace_executeCommand(_Socket, _Params) ->
     null.
+
+textDocument_semanticTokens_full(_Socket, Params) ->
+    Uri = mapmapget(textDocument, uri, Params),
+    lsp_semantic_tokens:full_tokens(lsp_utils:file_uri_to_file(Uri)).
 
 textDocument_documentSymbol(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),

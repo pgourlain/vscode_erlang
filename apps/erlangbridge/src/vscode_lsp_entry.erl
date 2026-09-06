@@ -32,7 +32,7 @@ compile_needed_modules() ->
         "src/gen_lsp_help_sup","src/gen_lsp_help_server", "src/lsp_handlers", "src/lsp_utils",
         "src/vscode_lsp_app_sup", "src/lsp_navigation", "src/lsp_signature", "src/lsp_parse", "src/lsp_syntax", "src/lsp_completion", "src/lsp_inlayhints",
         "src/gen_connection", "src/vscode_jsone","src/vscode_jsone_decode","src/hover_doc_layout", "src/worker", "src/lsp_rename",
-        "src/lsp_fun_utils", "src/lsp_signature_doc_layout", "src/lsp_codeaction"], CompileOptions)
+        "src/lsp_fun_utils", "src/lsp_signature_doc_layout", "src/lsp_codeaction", "src/lsp_semantic_tokens"], CompileOptions)
     .
 
 do_compile([H|T], CompileOptions) ->

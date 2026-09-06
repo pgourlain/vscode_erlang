@@ -125,7 +125,16 @@ golden_initialize_result() ->
         selectionRangeProvider => false,
         linkedEditingRangeProvider => false,
         callHierarchyProvider => false,
-        semanticTokensProvider => false,
+        semanticTokensProvider => #{ %% task 3.1
+            legend => #{
+                tokenTypes => [<<"namespace">>, <<"function">>, <<"macro">>, <<"variable">>,
+                               <<"parameter">>, <<"type">>, <<"struct">>, <<"property">>,
+                               <<"string">>, <<"number">>, <<"comment">>, <<"keyword">>, <<"operator">>],
+                tokenModifiers => [<<"definition">>, <<"declaration">>, <<"readonly">>,
+                                   <<"deprecated">>, <<"defaultLibrary">>]
+            },
+            full => true
+        },
         monikerProvider => false,
         typeHierarchyProvider => false,
         inlineValueProvider => true,

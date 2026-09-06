@@ -303,7 +303,7 @@ Highlighting is TextMate-only today. Semantic tokens give real macro/record/type
 
 | id | goal | status |
 |---|---|---|
-| 3.1 | Legend + full-document tokenizer over the cached syntax tree. Types: `namespace` (module), `function`, `macro`, `variable`, `parameter`, `type`, `struct` (record), `property` (record field), `string`, `number`, `comment`, `keyword`, `operator`. Modifiers: `definition`, `declaration`, `readonly`, `deprecated` (from `-deprecated`), `defaultLibrary` (OTP modules — already known to `gen_lsp_config_server`) | todo |
+| 3.1 | Legend + full-document tokenizer over the cached syntax tree. Types: `namespace` (module), `function`, `macro`, `variable`, `parameter`, `type`, `struct` (record), `property` (record field), `string`, `number`, `comment`, `keyword`, `operator`. Modifiers: `definition`, `declaration`, `readonly`, `deprecated` (from `-deprecated`), `defaultLibrary` (OTP modules — already known to `gen_lsp_config_server`) | done (semantic-only scope, see note) |
 | 3.2 | Range variant + delta (per-document token cache keyed by result id, alongside existing caches) | todo |
 | 3.3 | `contributes.semanticTokenScopes` in `package.json` mapping Erlang tokens to TextMate scopes so themes without semantic support degrade correctly | todo |
 | 3.4 | Setting `erlang.semanticTokensEnabled` (default `true`), plumbed like `codeLensEnabled` | todo |
@@ -421,7 +421,7 @@ Source of truth: `apps/erlangbridge/src/lsp_handlers.erl:22-54`. Update as flags
 | `selectionRangeProvider` | ❌ | 5.2 |
 | `linkedEditingRangeProvider` | ❌ | not planned |
 | `callHierarchyProvider` | ❌ | 4.5 |
-| `semanticTokensProvider` | ❌ | 3.1 |
+| `semanticTokensProvider` | ✅ (full only, semantic types - see 3.1) | 3.1 |
 | `monikerProvider` | ❌ | not planned |
 | `typeHierarchyProvider` | ❌ | 4.6 |
 | `diagnosticProvider` | ❌ (push only) | 5.9 |
