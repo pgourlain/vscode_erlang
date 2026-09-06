@@ -102,7 +102,7 @@ then call the analysis module directly against `.erl` fixtures in `<suite>_SUITE
 
 ### 0.4 — `lsp_hover_SUITE`
 
-- **Status**: todo
+- **Status**: done
 - **Goal**: hover on an OTP function (EEP-48 path), on a project function (head clauses), on a macro, on a record, on a type. Covers `hover_doc_layout` and `gen_lsp_help_server`.
 - **Files**: `apps/erlangbridge/test/lsp_hover_SUITE.erl` + `_SUITE_data/` (new)
 - **Reference**: `lsp_handlers.erl:179`, `lsp_navigation.erl` hover_info, `hover_doc_layout.erl`
