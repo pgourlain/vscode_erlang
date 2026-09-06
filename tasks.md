@@ -175,7 +175,7 @@ then call the analysis module directly against `.erl` fixtures in `<suite>_SUITE
 
 ### 0.13 — `gen_lsp_config_server_SUITE`
 
-- **Status**: todo
+- **Status**: done
 - **Goal**: every getter (`codeLensEnabled/0`, `inlayHintsEnabled/0`, `linting/0`, `autosave/0`, `formatting_line_length/0`, `verbose/0`) against a config map matching what the TS side actually sends.
 - **Files**: `apps/erlangbridge/test/gen_lsp_config_server_SUITE.erl` (new)
 - **Reference**: TS payload built in `lib/ErlangConfigurationProvider.ts` (`resolveErlangSettings`) and `lib/lsp/lspclientextension.ts:67` (`computeConfiguration`)
