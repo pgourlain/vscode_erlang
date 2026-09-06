@@ -26,7 +26,8 @@ all() -> [
     completion_for_variable_in_scope,
     completion_after_dash_pins_attributes,
     bare_atom_prefix_completion,
-    macro_prefix_is_not_macro_aware
+    macro_prefix_is_not_macro_aware,
+    completion_after_a_module_colon_for_an_unresolvable_module_does_not_crash
 ].
 
 init_per_suite(Config) ->
@@ -151,6 +152,18 @@ macro_prefix_is_not_macro_aware(Config) ->
     Position = position_after(Content, "MacroRef = ?MAX_"),
     Items = complete_at(File, Position),
     ?assertEqual([], Items).
+
+%% Regression: typing "mod:" for a module that doesn't resolve to any real
+%% project or stdlib file used to crash the whole request. module_function/2
+%% (lsp_completion.erl) passed gen_lsp_doc_server:get_module_file/1's
+%% `undefined` result straight into get_syntax_tree/1, which then tried to
+%% epp:parse_file/2 the atom `undefined` itself as a path and threw badarg -
+%% found via real-world manual testing of task 1.4, not by this suite.
+completion_after_a_module_colon_for_an_unresolvable_module_does_not_crash(Config) ->
+    File = ?config(source_file, Config),
+    Content = ?config(source_content, Config),
+    Position = position_after(Content, "nosuchmodule:g"),
+    ?assertEqual([], complete_at(File, Position)).
 
 %%%%%%%%%%%%%
 %% helpers %%

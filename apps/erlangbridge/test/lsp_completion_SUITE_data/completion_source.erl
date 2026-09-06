@@ -16,3 +16,6 @@ go(Identifier) ->
     LocalVar = Identifier,
     Other = completion_target,
     {Target, Item, ItemField, RecordName, MacroRef, LocalVar, Other}.
+
+call_missing_module() ->
+    nosuchmodule:go().

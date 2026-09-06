@@ -8,12 +8,21 @@ disable_completion() ->
     }].
 
 module_function(Module, Prefix) ->
-    File = gen_lsp_doc_server:get_module_file(Module),
-    ExportsResult = case gen_lsp_doc_server:get_syntax_tree(File) of
+    %% get_module_file/1 returns `undefined` for a module the project can't
+    %% resolve at all (e.g. a typo, or an atom that isn't actually a
+    %% module) - passing that straight to get_syntax_tree/1 would try to
+    %% parse the atom `undefined` itself as a file path and crash inside
+    %% epp:parse_file/2.
+    ExportsResult = case gen_lsp_doc_server:get_module_file(Module) of
         undefined ->
             standard_module_exports(Module);
-        SyntaxTree ->
-            syntax_tree_exports(SyntaxTree)
+        File ->
+            case gen_lsp_doc_server:get_syntax_tree(File) of
+                undefined ->
+                    standard_module_exports(Module);
+                SyntaxTree ->
+                    syntax_tree_exports(SyntaxTree)
+            end
     end,
     case ExportsResult of
         {ok, Exports} ->
