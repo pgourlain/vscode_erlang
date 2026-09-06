@@ -39,7 +39,9 @@ all() -> [
     cursor_on_sole_export_removes_it_leaving_an_empty_list,
     cursor_on_function_without_spec_offers_generate_spec,
     generate_spec_merges_arg_names_across_clauses,
-    cursor_on_function_with_existing_spec_does_not_offer_generate_spec_again
+    cursor_on_function_with_existing_spec_does_not_offer_generate_spec_again,
+    behaviour_with_missing_callbacks_offers_one_bulk_stub_action,
+    behaviour_with_every_callback_present_offers_no_action
 ].
 
 init_per_suite(Config) ->
@@ -241,6 +243,30 @@ cursor_on_function_with_existing_spec_does_not_offer_generate_spec_again(Config)
     Titles = [maps:get(title, A) || A <- Actions],
     ?assertNot(lists:any(fun (T) -> binary:match(T, <<"Generate -spec">>) =/= nomatch end, Titles)).
 
+%% missing_callbacks.erl declares -behaviour(gen_server) but only defines
+%% start_link/0: erl_lint reports one undefined_behaviour_func diagnostic
+%% per mandatory callback still missing (init/1, handle_call/3,
+%% handle_cast/2 - handle_info/2, terminate/2, code_change/3 etc. are all
+%% declared optional by gen_server itself, so erl_lint never asks for
+%% those). All three diagnostics get bundled into a single bulk action.
+behaviour_with_missing_callbacks_offers_one_bulk_stub_action(Config) ->
+    [Action] = actions_for(Config, "missing_callbacks.erl"),
+    ?assertEqual(<<"Implement missing callbacks for gen_server">>, maps:get(title, Action)),
+    ?assertEqual(<<"quickfix">>, maps:get(kind, Action)),
+    ?assertEqual(3, length(maps:get(diagnostics, Action))),
+    apply_and_assert(Config, "missing_callbacks.erl", Action,
+        <<"-module(missing_callbacks).\n-behaviour(gen_server).\n-export([start_link/0]).\n\n"
+          "start_link() ->\n    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).\n"
+          "\nhandle_call(_Arg1, _Arg2, _Arg3) ->\n    ok.\n"
+          "\nhandle_cast(_Arg1, _Arg2) ->\n    ok.\n"
+          "\ninit(_Arg1) ->\n    ok.\n">>).
+
+%% complete_callbacks.erl implements every mandatory gen_server callback
+%% already, so erl_lint has nothing to warn about and no bulk action exists
+%% to offer.
+behaviour_with_every_callback_present_offers_no_action(Config) ->
+    ?assertEqual([], actions_for(Config, "complete_callbacks.erl")).
+
 %%%%%%%%%%%%%
 %% helpers %%
 %%%%%%%%%%%%%
@@ -253,7 +279,9 @@ source_file(Config, FileName) ->
 %% code_actions/3 call, exactly like a live client would trigger this.
 actions_for(Config, FileName) ->
     File = source_file(Config, FileName),
-    #{errors_warnings := Warnings} = lsp_syntax:validate_parsed_source_file(File),
+    %% A file with no diagnostics at all (e.g. every behaviour callback
+    %% already implemented) parses to a map with no errors_warnings key.
+    Warnings = maps:get(errors_warnings, lsp_syntax:validate_parsed_source_file(File), []),
     Diagnostics = [round_trip(to_wire_diagnostic(W)) || W <- Warnings],
     Context = #{diagnostics => Diagnostics, triggerKind => 1},
     lsp_codeaction:code_actions(File, undefined, Context).

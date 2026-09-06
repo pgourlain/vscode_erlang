@@ -23,11 +23,24 @@
 %% the cursor's own position (Range) regardless of any diagnostic - adding/
 %% removing a function from -export, and generating a -spec from its
 %% inferred clause heads.
+%%
+%% Task 2.4 adds a third source: "Implement missing callbacks" for a
+%% -behaviour(X) that is missing one or more mandatory callbacks. Unlike
+%% every fix above, this one is not one-action-per-diagnostic - erl_lint
+%% already emits a separate undefined_behaviour_func diagnostic per missing
+%% callback (all pointing at the same -behaviour(...) line), so
+%% actions_for_behaviours/2 groups every diagnostic that shares the same
+%% behaviour module into a single bulk action that stubs all of them at
+%% once. There is deliberately no separate query of Module's full callback
+%% list (via behaviour_info/1 or EEP-48 docs): erl_lint has already computed
+%% exactly which ones are missing, for both OTP and project-local behaviours
+%% alike (lsp_syntax:validate_parsed_source_file/1 loads project-local
+%% behaviour modules before linting).
 -spec code_actions(File :: file:filename(), Range :: term(), Context :: map()) -> [map()].
 code_actions(File, Range, Context) ->
     Diagnostics = maps:get(diagnostics, Context, []),
     DiagnosticActions = lists:flatmap(fun (Diagnostic) -> actions_for_diagnostic(File, Diagnostic) end, Diagnostics),
-    DiagnosticActions ++ actions_for_cursor(File, Range).
+    DiagnosticActions ++ actions_for_behaviours(File, Diagnostics) ++ actions_for_cursor(File, Range).
 
 %% @doc Identity: no fix defers any work to resolve/1 (see code_actions/3).
 -spec resolve(CodeAction :: map()) -> map().
@@ -107,6 +120,45 @@ action(Title, Diagnostic, Edit) ->
 
 export_title(Name, Arity) ->
     <<"Export ", Name/binary, "/", (integer_to_binary(Arity))/binary>>.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% task 2.4: behaviour "implement missing callbacks" %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+actions_for_behaviours(File, Diagnostics) ->
+    [implement_callbacks_action(File, Behaviour, FuncsAndDiags)
+     || {Behaviour, FuncsAndDiags} <- group_missing_callbacks(Diagnostics)].
+
+%% Groups every undefined_behaviour_func diagnostic by its Behaviour module,
+%% collecting the missing {Name, Arity} callback and the diagnostic itself
+%% for each. Funcs/Diags each come out in original diagnostic order (the
+%% fold prepends, so the final maps:to_list/lists:reverse pairing undoes
+%% that).
+group_missing_callbacks(Diagnostics) ->
+    Entries = lists:filtermap(fun missing_callback_entry/1, Diagnostics),
+    Grouped = lists:foldl(fun ({Behaviour, Func, Diagnostic}, Acc) ->
+        {Funcs, Diags} = maps:get(Behaviour, Acc, {[], []}),
+        Acc#{Behaviour => {[Func | Funcs], [Diagnostic | Diags]}}
+    end, #{}, Entries),
+    [{Behaviour, {lists:reverse(Funcs), lists:reverse(Diags)}}
+     || {Behaviour, {Funcs, Diags}} <- maps:to_list(Grouped)].
+
+missing_callback_entry(#{data := #{module := <<"erl_lint">>,
+                                    messageBody := [<<"undefined_behaviour_func">>, [Name, Arity], Behaviour]}} = Diagnostic) ->
+    {true, {Behaviour, {binary_to_atom(Name, utf8), Arity}, Diagnostic}};
+missing_callback_entry(_) ->
+    false.
+
+implement_callbacks_action(File, Behaviour, {Funcs, Diags}) ->
+    {Line, Col} = end_of_file_insertion_point(File),
+    StubsText = iolist_to_binary([stub_function_text(Name, Arity) || {Name, Arity} <- Funcs]),
+    Edit = lsp_rename:build_workspace_edit([{File, Line, Col, Line, Col, StubsText}]),
+    #{
+        title => <<"Implement missing callbacks for ", Behaviour/binary>>,
+        kind => <<"quickfix">>,
+        diagnostics => Diags,
+        edit => Edit
+    }.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% task 2.3: cursor-based export/spec actions %%
