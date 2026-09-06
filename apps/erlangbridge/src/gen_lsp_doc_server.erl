@@ -7,6 +7,7 @@
 -export([document_opened/2, document_changed/2, document_range_changed/4, document_closed/1, opened_documents/0, get_document_contents/1, parse_document/1]).
 -export([project_file_added/1, project_file_changed/1, project_file_deleted/1]).
 -export([get_syntax_tree/1, get_dodged_syntax_tree/1, get_references/1, get_inlayhints/1]).
+-export([get_semantic_tokens_cache/1, store_semantic_tokens_cache/3]).
 -export([root_available/0, config_change/0, project_modules/0, get_module_file/1, get_module_files/1, get_build_dir/0, find_source_file/1]).
 
 %% Cache management
@@ -138,6 +139,21 @@ get_inlayhints(File) ->
         _ -> []
     end.
 
+%% CHARACTERIZATION: unlike every other cache in this module, this one is
+%% not eagerly recomputed by parse_and_store/2 on every reparse - it only
+%% exists to let semanticTokens/full/delta diff against whatever the
+%% client actually still has, so it is only ever written when a
+%% full/delta request is served (see lsp_semantic_tokens:full_tokens/1 and
+%% full_tokens_delta/2), not on every document change.
+get_semantic_tokens_cache(File) ->
+    case ?XETS:lookup(document_semantic_tokens, File) of
+        [{File, ResultId, Tokens}] -> {ResultId, Tokens};
+        _ -> undefined
+    end.
+
+store_semantic_tokens_cache(File, ResultId, Tokens) ->
+    ?XETS:insert(document_semantic_tokens, {File, ResultId, Tokens}).
+
 root_available() ->
     gen_server:cast(?SERVER, root_available).
 
@@ -190,6 +206,7 @@ start_link() ->
     safe_new_table(dodged_syntax_tree, ?XETS, set, ExtraCreateOpts),
     safe_new_table(references, ets, bag, []),
     safe_new_table(document_inlayhints, ?XETS, set, ExtraCreateOpts),
+    safe_new_table(document_semantic_tokens, ?XETS, set, ExtraCreateOpts),
     gen_server:start_link({local, ?SERVER}, ?MODULE, [],[]).
 
 init(_Args) ->
@@ -254,6 +271,7 @@ terminate(_Reason, _State) ->
     delete_cache_file(syntax_tree),
     delete_cache_file(dodged_syntax_tree),
     delete_cache_file(document_inlayhints),
+    delete_cache_file(document_semantic_tokens),
     ok.
 
 code_change(_OldVersion, State, _Extra) ->
@@ -456,6 +474,7 @@ delete_project_files([File | Files], State) ->
     ?XETS:delete(dodged_syntax_tree, File),
     ets:delete(references, File),
     ?XETS:delete(document_inlayhints, File),
+    ?XETS:delete(document_semantic_tokens, File),
     Module = filename:rootname(filename:basename(File)),
     UpdatedFiles = lists:delete(File, maps:get(Module, State#state.project_modules, [])),
     UpdatedProjectModules = case UpdatedFiles of

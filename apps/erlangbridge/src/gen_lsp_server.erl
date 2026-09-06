@@ -142,8 +142,14 @@ call_handler(Socket, Name, ArgsMap) ->
 
 handler_name(<<"$/", Name/binary>>) ->
     list_to_atom(binary_to_list(Name));
+%% CHARACTERIZATION: every method name up to task 3.2 had at most one `/`
+%% (e.g. `textDocument/codeAction`), so a non-global replace happened to
+%% work. `textDocument/semanticTokens/full/delta` has three - without
+%% `[global]` this silently produced an atom that still contained `/`
+%% characters (matching no exported handler) - never caught until task 3.2
+%% actually tried to route a method name with more than one `/`.
 handler_name(Name) ->
-    list_to_atom(binary_to_list(binary:replace(Name, <<"/">>, <<"_">>))).
+    list_to_atom(binary_to_list(binary:replace(Name, <<"/">>, <<"_">>, [global]))).
 
 send_response_with_id(Socket, #{method := Method} = Input, Response) ->
     case maps:get(id, Input, undefined) of

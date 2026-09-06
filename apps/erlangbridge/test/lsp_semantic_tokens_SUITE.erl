@@ -30,7 +30,11 @@ all() -> [
     parameters_and_variables_are_distinguished_and_reuses_carry_no_modifier,
     record_usage_sites_are_tokenized_struct_and_property,
     local_and_remote_calls_are_tokenized_and_otp_calls_get_defaultLibrary,
-    unparseable_file_returns_empty_data
+    unparseable_file_returns_empty_data,
+    delta_with_unchanged_content_returns_no_edits,
+    delta_after_an_edit_returns_a_single_edit_for_the_changed_region,
+    delta_with_a_stale_previous_result_id_falls_back_to_full_data,
+    range_tokens_only_includes_the_requested_lines
 ].
 
 init_per_suite(Config) ->
@@ -154,6 +158,62 @@ unparseable_file_returns_empty_data(Config) ->
     AppDir = ?config(data_dir, Config),
     File = filename:join(AppDir, "does_not_exist.erl"),
     ?assertEqual(#{data => []}, lsp_semantic_tokens:full_tokens(File)).
+
+%% delta_sample.erl is only touched by the three delta tests below, each of
+%% which reopens it with known content and closes it again afterward - so
+%% none of them can see a stale in-memory edit left behind by another
+%% test, or by test execution order.
+delta_with_unchanged_content_returns_no_edits(Config) ->
+    File = reopen_delta_sample(Config),
+    #{resultId := ResultId1} = lsp_semantic_tokens:full_tokens(File),
+    ?assertEqual(#{resultId => ResultId1, edits => []},
+                 lsp_semantic_tokens:full_tokens_delta(File, ResultId1)),
+    gen_lsp_doc_server:document_closed(File).
+
+%% Appending a new function is a pure insert at the very end of the token
+%% stream: the common-prefix/common-suffix diff should reduce to exactly
+%% one edit that only adds the new function's own token group, deleting
+%% nothing.
+delta_after_an_edit_returns_a_single_edit_for_the_changed_region(Config) ->
+    File = reopen_delta_sample(Config),
+    #{resultId := ResultId1, data := Data1} = lsp_semantic_tokens:full_tokens(File),
+    {ok, Original} = file:read_file(File),
+    Modified = <<Original/binary, "\ng() -> ok.\n">>,
+    gen_lsp_doc_server:document_opened(File, Modified),
+    gen_lsp_doc_server:parse_document(File),
+    Delta = lsp_semantic_tokens:full_tokens_delta(File, ResultId1),
+    ?assertMatch(#{edits := [#{start := _, deleteCount := 0, data := _}]}, Delta),
+    #{edits := [#{start := Start, data := NewGroup}]} = Delta,
+    ?assertEqual(length(Data1), Start),
+    ?assertEqual(5, length(NewGroup)),
+    gen_lsp_doc_server:document_closed(File).
+
+delta_with_a_stale_previous_result_id_falls_back_to_full_data(Config) ->
+    File = reopen_delta_sample(Config),
+    Delta = lsp_semantic_tokens:full_tokens_delta(File, <<"this-id-was-never-issued">>),
+    ?assertMatch(#{data := _}, Delta),
+    ?assertNot(maps:is_key(edits, Delta)),
+    gen_lsp_doc_server:document_closed(File).
+
+reopen_delta_sample(Config) ->
+    AppDir = ?config(data_dir, Config),
+    File = filename:join(AppDir, "delta_sample.erl"),
+    {ok, Content} = file:read_file(File),
+    gen_lsp_doc_server:document_opened(File, Content),
+    gen_lsp_doc_server:parse_document(File),
+    File.
+
+%% Only tokens on lines 10-13 (1-based) of tokens_source.erl: f/1's own
+%% definition, its parameter, and the R/#rec construction on the following
+%% lines - nothing from -module/-record/-type/-spec above, nor from g/1 or
+%% old/0 below.
+range_tokens_only_includes_the_requested_lines(Config) ->
+    AppDir = ?config(data_dir, Config),
+    File = filename:join(AppDir, "tokens_source.erl"),
+    #{data := Data} = lsp_semantic_tokens:range_tokens(File, {10, 13}),
+    Decoded = decode(Data, 1, 1),
+    Lines = lists:usort([L || {L, _, _, _, _} <- Decoded]),
+    ?assertEqual([10, 11, 12, 13], Lines).
 
 %%%%%%%%%%%%%
 %% helpers %%

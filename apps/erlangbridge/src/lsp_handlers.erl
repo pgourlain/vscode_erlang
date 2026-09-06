@@ -9,7 +9,8 @@
 -export([textDocument_inlineValues/2, textDocument_inlineValue/2]).
 -export([textDocument_inlayHints/2, textDocument_inlayHint/2]).
 -export([textDocument_codeAction/2, codeAction_resolve/2, workspace_executeCommand/2]).
--export([textDocument_semanticTokens_full/2]).
+-export([textDocument_semanticTokens_full/2, textDocument_semanticTokens_full_delta/2,
+    textDocument_semanticTokens_range/2]).
 
 -include("lsp_log.hrl").
 
@@ -51,7 +52,8 @@ initialize(_Socket, Params) ->
         callHierarchyProvider => false,
         semanticTokensProvider => #{
             legend => lsp_semantic_tokens:legend(),
-            full => true
+            full => #{delta => true}, %% task 3.2
+            range => true %% task 3.2
         },
         monikerProvider => false,
         typeHierarchyProvider => false,
@@ -362,6 +364,17 @@ workspace_executeCommand(_Socket, _Params) ->
 textDocument_semanticTokens_full(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),
     lsp_semantic_tokens:full_tokens(lsp_utils:file_uri_to_file(Uri)).
+
+textDocument_semanticTokens_full_delta(_Socket, Params) ->
+    Uri = mapmapget(textDocument, uri, Params),
+    PreviousResultId = maps:get(previousResultId, Params),
+    lsp_semantic_tokens:full_tokens_delta(lsp_utils:file_uri_to_file(Uri), PreviousResultId).
+
+textDocument_semanticTokens_range(_Socket, Params) ->
+    Uri = mapmapget(textDocument, uri, Params),
+    #{line := LS} = mapmapget(range, start, Params),
+    #{line := LE} = mapmapget(range, 'end', Params),
+    lsp_semantic_tokens:range_tokens(lsp_utils:file_uri_to_file(Uri), {LS + 1, LE + 1}).
 
 textDocument_documentSymbol(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),

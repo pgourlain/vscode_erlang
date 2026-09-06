@@ -125,7 +125,7 @@ golden_initialize_result() ->
         selectionRangeProvider => false,
         linkedEditingRangeProvider => false,
         callHierarchyProvider => false,
-        semanticTokensProvider => #{ %% task 3.1
+        semanticTokensProvider => #{ %% task 3.1, range/delta task 3.2
             legend => #{
                 tokenTypes => [<<"namespace">>, <<"function">>, <<"macro">>, <<"variable">>,
                                <<"parameter">>, <<"type">>, <<"struct">>, <<"property">>,
@@ -133,7 +133,8 @@ golden_initialize_result() ->
                 tokenModifiers => [<<"definition">>, <<"declaration">>, <<"readonly">>,
                                    <<"deprecated">>, <<"defaultLibrary">>]
             },
-            full => true
+            full => #{delta => true},
+            range => true
         },
         monikerProvider => false,
         typeHierarchyProvider => false,

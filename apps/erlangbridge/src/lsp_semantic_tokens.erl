@@ -1,6 +1,6 @@
 -module(lsp_semantic_tokens).
 
--export([legend/0, full_tokens/1]).
+-export([legend/0, full_tokens/1, full_tokens_delta/2, range_tokens/2]).
 
 -include("lsp_log.hrl").
 
@@ -40,18 +40,101 @@ legend() ->
                            <<"deprecated">>, <<"defaultLibrary">>]
     }.
 
-%% @doc Full-document semantic tokens (task 3.1). Range/delta variants are
-%% task 3.2. Returns the wire-ready `{data => [...]}` map directly (LSP's
-%% own relative-position encoding - see encode/1) so lsp_handlers.erl stays
-%% a thin Params-unwrapping shim, matching every other feature module in
-%% this codebase.
--spec full_tokens(File :: file:filename()) -> #{data := [integer()]}.
+%% @doc Full-document semantic tokens (task 3.1). Stores its own result
+%% under a fresh resultId (task 3.2 - a plain hash of the encoded data,
+%% not a counter: identical tokens naturally get the identical id, no
+%% per-document sequence state to maintain), so a later
+%% semanticTokens/full/delta request can diff against it.
+-spec full_tokens(File :: file:filename()) -> #{resultId := binary(), data := [integer()]} | #{data := []}.
 full_tokens(File) ->
+    case compute(File) of
+        {ok, Data} ->
+            ResultId = result_id(Data),
+            gen_lsp_doc_server:store_semantic_tokens_cache(File, ResultId, Data),
+            #{resultId => ResultId, data => Data};
+        error ->
+            #{data => []}
+    end.
+
+%% @doc `textDocument/semanticTokens/full/delta` (task 3.2). If
+%% PreviousResultId still matches what this document's own cache holds
+%% (see get_semantic_tokens_cache/1 - only ever populated by full_tokens/1
+%% or this function itself, never by a plain reparse), respond with a
+%% single edit covering just the differing middle region (a common-
+%% prefix/common-suffix diff at the whole-token granularity, not a
+%% minimal LCS - simple, always correct, and small for the common case of
+%% a localized edit). Otherwise - first request, a server restart lost the
+%% cache, or the client is out of sync - fall back to a full result, which
+%% the protocol always allows.
+-spec full_tokens_delta(File :: file:filename(), PreviousResultId :: binary()) ->
+    #{resultId := binary(), edits := [map()]} | #{resultId := binary(), data := [integer()]} | #{data := []}.
+full_tokens_delta(File, PreviousResultId) ->
+    Previous = gen_lsp_doc_server:get_semantic_tokens_cache(File),
+    case compute(File) of
+        {ok, NewData} ->
+            NewResultId = result_id(NewData),
+            gen_lsp_doc_server:store_semantic_tokens_cache(File, NewResultId, NewData),
+            case Previous of
+                {PreviousResultId, OldData} -> #{resultId => NewResultId, edits => diff_tokens(OldData, NewData)};
+                _ -> #{resultId => NewResultId, data => NewData}
+            end;
+        error ->
+            #{data => []}
+    end.
+
+%% @doc `textDocument/semanticTokens/range` (task 3.2) - the same tokens
+%% full_tokens/1 would produce, filtered to just the requested (1-based)
+%% line range. Not cached and never diffed - the range variant exists
+%% purely so a client can paint a large file's visible region immediately
+%% without waiting on (or contributing a resultId for) the whole document.
+-spec range_tokens(File :: file:filename(), {StartLine :: integer(), EndLine :: integer()}) -> #{data := [integer()]}.
+range_tokens(File, {StartLine, EndLine}) ->
     Tree = gen_lsp_doc_server:get_syntax_tree(File),
     case is_list(Tree) of
-        true -> #{data => encode(collect_tokens(File, Tree))};
-        false -> #{data => []}
+        true ->
+            InRange = [T || {Line, _, _, _, _} = T <- collect_tokens(File, Tree),
+                             Line >= StartLine, Line =< EndLine],
+            #{data => encode(InRange)};
+        false ->
+            #{data => []}
     end.
+
+compute(File) ->
+    Tree = gen_lsp_doc_server:get_syntax_tree(File),
+    case is_list(Tree) of
+        true -> {ok, encode(collect_tokens(File, Tree))};
+        false -> error
+    end.
+
+result_id(Data) ->
+    integer_to_binary(erlang:phash2(Data, 4294967296)).
+
+%% Diffs two already-encoded (flat, 5-uint32-groups) token arrays and
+%% returns the smallest single [start, deleteCount, data] edit whose
+%% boundaries land on token-group edges (5-element chunks), by trimming
+%% the common prefix and common suffix, both measured in whole groups so
+%% a cut can never land in the middle of one token's own 5 numbers.
+diff_tokens(OldData, NewData) ->
+    OldGroups = group5(OldData),
+    NewGroups = group5(NewData),
+    {PrefixLen, OldAfterPrefix, NewAfterPrefix} = common_prefix(OldGroups, NewGroups, 0),
+    {_SuffixLen, OldMiddle, NewMiddle} = common_suffix(OldAfterPrefix, NewAfterPrefix),
+    case {OldMiddle, NewMiddle} of
+        {[], []} ->
+            [];
+        _ ->
+            [#{start => PrefixLen * 5, deleteCount => length(OldMiddle) * 5, data => lists:append(NewMiddle)}]
+    end.
+
+group5([A, B, C, D, E | Rest]) -> [[A, B, C, D, E] | group5(Rest)];
+group5([]) -> [].
+
+common_prefix([H | T1], [H | T2], N) -> common_prefix(T1, T2, N + 1);
+common_prefix(L1, L2, N) -> {N, L1, L2}.
+
+common_suffix(L1, L2) ->
+    {N, RevRest1, RevRest2} = common_prefix(lists:reverse(L1), lists:reverse(L2), 0),
+    {N, lists:reverse(RevRest1), lists:reverse(RevRest2)}.
 
 collect_tokens(File, Tree) ->
     Content = read_content(File),
