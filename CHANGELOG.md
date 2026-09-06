@@ -1,5 +1,20 @@
 # Change log
 
+
+## Version 1.1.5 (September 6, 2026)
+
+**Security fix**, please update. See the [security advisory](https://github.com/pgourlain/vscode_erlang/security/advisories) for details.
+
+* [328](https://github.com/pgourlain/vscode_erlang/issues/328) : **Security** — bind LSP and debugger sockets to 127.0.0.1. Before this release they listened on all interfaces, so anyone able to reach your machine on those ports could execute arbitrary code through the debugger evaluation path.
+* [330](https://github.com/pgourlain/vscode_erlang/pull/330) : **Security** — bind Erlang distribution and epmd to loopback when `erlang.erlangDistributedNode` is enabled (that setting is off by default).
+
+* [312..345] : Bumps by dependabot
+
+Thanks to
+* [Guilherme Silva](https://github.com/erts-sched)
+
+---
+
 ## Version 1.1.4 (June 24, 2026)
 
 * [327](https://github.com/pgourlain/vscode_erlang/issues/327) : Use Erlang and rebar3 paths from settings everywhere (from PATH, and the built-in rebar3 only as the last resort)
@@ -7,6 +22,7 @@
 Thanks to
 * [Wojtek Surowka](https://github.com/wojteksurowka)
 
+---
 
 ## Version 1.1.3 (May 25, 2025)
 
