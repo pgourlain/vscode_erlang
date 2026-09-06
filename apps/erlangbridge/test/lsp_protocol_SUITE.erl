@@ -45,7 +45,8 @@ end_per_testcase(_TestCase, Config) ->
 %%%%%%%%%%%%%%%%
 
 %% Pins the full capability map verbatim (lsp_handlers.erl:14-53; updated
-%% for task 1.3's workspace.workspaceFolders capability) so any
+%% for task 1.3's workspace.workspaceFolders and task 2.1's codeAction/
+%% executeCommand infrastructure) so any
 %% later capability flip is a visible, deliberate diff to this golden term -
 %% not an accidental side effect of an unrelated change.
 initialize_returns_golden_capabilities(Config) ->
@@ -108,7 +109,10 @@ golden_initialize_result() ->
         referencesProvider => true,
         documentHighlightProvider => false,
         documentSymbolProvider => true,
-        codeActionProvider => false,
+        codeActionProvider => #{ %% task 2.1
+            codeActionKinds => [<<"quickfix">>, <<"source">>, <<"refactor">>],
+            resolveProvider => true
+        },
         codeLensProvider => true,
         documentLinkProvider => false,
         colorProvider => false,
@@ -117,7 +121,7 @@ golden_initialize_result() ->
         documentOnTypeFormattingProvider => false,
         renameProvider => #{prepareProvider => true},
         foldingRangeProvider => false,
-        executeCommandProvider => false,
+        executeCommandProvider => #{commands => []}, %% task 2.1, no commands registered yet
         selectionRangeProvider => false,
         linkedEditingRangeProvider => false,
         callHierarchyProvider => false,

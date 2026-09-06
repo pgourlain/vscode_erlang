@@ -297,7 +297,8 @@ extract_error_or_warning(Type, ErrorsOrWarnings) ->
     [#{type => Type,
         file =>
         erlang:list_to_binary(element(1, ErrorsOrWarnings)),
-        info => extract_info(X)}
+        info => extract_info(X),
+        correlation_data => correlation_data(X)}
         || X <- element(2, ErrorsOrWarnings)].
 
 extract_info({Line, Module, MessageBody}) when is_number(Line) ->
@@ -307,10 +308,41 @@ extract_info({{Line, Column}, Module, MessageBody}) ->
     %{20,erl_parse,["syntax error before: ","load_xy"]}
     %{11,erl_lint,{undefined_function,{load_xy,1}}}]}
     #{
-        line => Line, 
+        line => Line,
         character => Column,
         message => erlang:list_to_binary(lists:flatten(apply(Module, format_error, [MessageBody]), []))
     }.
+
+%% @doc Task 2.1 infrastructure: a JSON-safe, machine-readable identity for
+%% the diagnostic, echoed back verbatim by the client as
+%% context.diagnostics[].data on a later textDocument/codeAction request -
+%% so a quick fix (task 2.2+) can act on the *exact* erl_lint/erl_parse
+%% term that produced the diagnostic without re-running any analysis.
+%% Generic on purpose: it does not know about any specific lint check.
+correlation_data({Line, Module, MessageBody}) when is_number(Line) ->
+    correlation_data({{Line, 1}, Module, MessageBody});
+correlation_data({{_Line, _Column}, Module, MessageBody}) ->
+    #{module => Module, messageBody => to_json_safe(MessageBody)}.
+
+%% Recursively reshape an arbitrary Erlang term (as found in erl_lint/
+%% erl_parse error/warning info) into something vscode_jsone can encode:
+%% tuples become arrays, printable char lists become binaries, anything
+%% else unrecognized is dumped via ~p as a last resort.
+to_json_safe(Tuple) when is_tuple(Tuple) ->
+    [to_json_safe(E) || E <- tuple_to_list(Tuple)];
+to_json_safe(List) when is_list(List) ->
+    case io_lib:printable_unicode_list(List) of
+        true -> unicode:characters_to_binary(List);
+        false -> [to_json_safe(E) || E <- List]
+    end;
+to_json_safe(Atom) when is_atom(Atom) ->
+    Atom;
+to_json_safe(Number) when is_number(Number) ->
+    Number;
+to_json_safe(Binary) when is_binary(Binary) ->
+    Binary;
+to_json_safe(Other) ->
+    unicode:characters_to_binary(io_lib:format("~p", [Other])).
 
 fold_in_syntax_tree(Fun, StartAcc, File) ->
     fold_in_syntax_tree(Fun, StartAcc, File, gen_lsp_doc_server:get_syntax_tree(File)).

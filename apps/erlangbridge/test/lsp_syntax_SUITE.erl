@@ -26,7 +26,7 @@ all() -> [
     invalid_app_src_reports_the_parse_error,
     valid_rebar_config_parses_cleanly,
     invalid_rebar_config_reports_the_parse_error,
-    diagnostics_pin_severity_range_and_null_data
+    diagnostics_pin_severity_range_and_data
 ].
 
 init_per_suite(Config) ->
@@ -86,19 +86,22 @@ bad_record_field_is_reported(Config) ->
     ?assertEqual(6, maps:get(line, Info)),
     assert_message_contains(Info, "rec").
 
-%% CHARACTERIZATION: lsp_syntax never sets a `data`/`correlation_data` field
-%% on any errors_warnings item - lsp_handlers:send_diagnostics/3 always
-%% forwards `null` for it today (lsp_handlers.erl:484). Phase 2 (code actions)
-%% is expected to start populating this so a fix can be matched back to its
-%% diagnostic without re-analysis; this pins the "nothing there yet" baseline.
+%% Since task 2.1, every errors_warnings item also carries a generic,
+%% JSON-safe `correlation_data` (module + the raw erl_lint/erl_parse
+%% message body reshaped into JSON-safe arrays/binaries) - see
+%% lsp_syntax:correlation_data/1. Before 2.1 this key never existed at
+%% all (lsp_handlers:send_diagnostics/3 forwarded `null` unconditionally);
+%% see diagnostics_pin_severity_range_and_data below for the
+%% wire-level shape this produces.
 the_one_diagnostic(Config, FileName) ->
     AppDir = ?config(data_dir, Config),
     File = filename:join(AppDir, FileName),
     Result = lsp_syntax:validate_parsed_source_file(File),
     ?assertMatch(#{parse_result := true, errors_warnings := [_ | _]}, Result),
     #{errors_warnings := [Item | _]} = Result,
-    ?assertEqual(lists:sort([type, file, info]), lists:sort(maps:keys(Item))),
+    ?assertEqual(lists:sort([type, file, info, correlation_data]), lists:sort(maps:keys(Item))),
     ?assertEqual(list_to_binary(File), maps:get(file, Item)),
+    ?assertEqual(lists:sort([module, messageBody]), lists:sort(maps:keys(maps:get(correlation_data, Item)))),
     #{info := Info} = Item,
     ?assertEqual(lists:sort([line, character, message]), lists:sort(maps:keys(Info))),
     Item.
@@ -149,7 +152,10 @@ invalid_rebar_config_reports_the_parse_error(Config) ->
 %% Socket-shaped mock needed beyond a genuine connected gen_tcp pair) so the
 %% publishDiagnostics notification it pushes reflects lsp_handlers.erl's
 %% actual severity/1 and get_range/1 logic, not a re-implementation of it.
-diagnostics_pin_severity_range_and_null_data(Config) ->
+%%
+%% Since task 2.1, `data` is the wire (JSON-round-tripped) form of
+%% lsp_syntax:correlation_data/1 - before 2.1 this was always `null`.
+diagnostics_pin_severity_range_and_data(Config) ->
     AppDir = ?config(data_dir, Config),
     File = filename:join(AppDir, "unused_function.erl"),
     {ok, Text} = file:read_file(File),
@@ -162,7 +168,9 @@ diagnostics_pin_severity_range_and_null_data(Config) ->
     ?assertMatch(#{method := <<"textDocument/publishDiagnostics">>}, Notification),
     #{params := #{diagnostics := [Diagnostic | _]}} = Notification,
     ?assertMatch(
-        #{severity := 2, source := <<"erl">>, data := null},
+        #{severity := 2, source := <<"erl">>,
+          data := #{module := <<"erl_lint">>,
+                    messageBody := [<<"unused_function">>, [<<"unused">>, 0]]}},
         Diagnostic
     ),
     %% CHARACTERIZATION: lsp_syntax never provides a line_end/character_end,

@@ -283,7 +283,7 @@ Set `codeActionProvider => #{codeActionKinds => [...], resolveProvider => true}`
 
 | id | goal | status |
 |---|---|---|
-| 2.1 | Infrastructure: `textDocument_codeAction/2`, `codeAction/resolve`, `workspace/executeCommand`, `WorkspaceEdit` builders (reuse `lsp_rename.erl`) | todo |
+| 2.1 | Infrastructure: `textDocument_codeAction/2`, `codeAction/resolve`, `workspace/executeCommand`, `WorkspaceEdit` builders (reuse `lsp_rename.erl`) | done |
 | 2.2 | `erl_lint`-driven fixes: unused variable → prefix `_`; unused function → add to `-export`; unused/missing include; undefined function → create stub clause; unbound record field | todo |
 | 2.3 | Export/spec actions: add/remove from `-export`; generate `-spec` from inferred clause heads (reuse `lsp_navigation:function_clauses/2` + arg-name logic in `lsp_inlayhints.erl`) | todo |
 | 2.4 | Behaviour support: on `-behaviour(X)`, "Implement missing callbacks" — callbacks via `gen_lsp_help_server`/EEP-48, generate stubs | todo |
@@ -411,13 +411,13 @@ Source of truth: `apps/erlangbridge/src/lsp_handlers.erl:22-54`. Update as flags
 | `typeDefinitionProvider` | ❌ | 4.3 |
 | `implementationProvider` | ❌ | 4.4 |
 | `documentHighlightProvider` | ❌ | 4.7 |
-| `codeActionProvider` | ❌ | 2.1 |
+| `codeActionProvider` | ✅ (infra only, no fix yet) | 2.1 |
 | `documentLinkProvider` | ❌ | 5.7 |
 | `colorProvider` | ❌ | n/a for Erlang |
 | `documentRangeFormattingProvider` | ❌ | 5.3 |
 | `documentOnTypeFormattingProvider` | ❌ | 5.4 |
 | `foldingRangeProvider` | ❌ | 5.1 |
-| `executeCommandProvider` | ❌ | 2.1 |
+| `executeCommandProvider` | ✅ (empty commands list, infra only) | 2.1 |
 | `selectionRangeProvider` | ❌ | 5.2 |
 | `linkedEditingRangeProvider` | ❌ | not planned |
 | `callHierarchyProvider` | ❌ | 4.5 |

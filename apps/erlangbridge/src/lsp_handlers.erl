@@ -8,6 +8,7 @@
     textDocument_signatureHelp/2, textDocument_prepareRename/2, textDocument_rename/2]).
 -export([textDocument_inlineValues/2, textDocument_inlineValue/2]).
 -export([textDocument_inlayHints/2, textDocument_inlayHint/2]).
+-export([textDocument_codeAction/2, codeAction_resolve/2, workspace_executeCommand/2]).
 
 -include("lsp_log.hrl").
 
@@ -27,7 +28,10 @@ initialize(_Socket, Params) ->
         referencesProvider => true,
         documentHighlightProvider => false,
         documentSymbolProvider => true,
-        codeActionProvider => false,
+        codeActionProvider => #{
+            codeActionKinds => [<<"quickfix">>, <<"source">>, <<"refactor">>],
+            resolveProvider => true
+        },
         codeLensProvider => true,
         documentLinkProvider => false,
         colorProvider => false,
@@ -36,7 +40,11 @@ initialize(_Socket, Params) ->
         documentOnTypeFormattingProvider => false,
         renameProvider => #{ prepareProvider => true },
         foldingRangeProvider => false,
-        executeCommandProvider => false,
+        %% CHARACTERIZATION / known limitation: no command is registered yet
+        %% (task 2.1 is infrastructure only) - this list grows as task 2.2+
+        %% adds fixes that need workspace/executeCommand rather than a plain
+        %% WorkspaceEdit.
+        executeCommandProvider => #{commands => []},
         selectionRangeProvider => false,
         linkedEditingRangeProvider => false,
         callHierarchyProvider => false,
@@ -327,6 +335,25 @@ textDocument_inlayHints(_Socket, Params) ->
                 end, 
                 lsp_navigation:inlayhints_info(lsp_utils:file_uri_to_file(Uri), {LS,CS}, {LE,CE}))
     end.
+
+textDocument_codeAction(_Socket, Params) ->
+    Uri = mapmapget(textDocument, uri, Params),
+    Range = maps:get(range, Params),
+    Context = maps:get(context, Params),
+    lsp_codeaction:code_actions(lsp_utils:file_uri_to_file(Uri), Range, Context).
+
+%% Per the LSP spec, `codeAction/resolve`'s own Params *is* the CodeAction
+%% being resolved (not wrapped in anything else).
+codeAction_resolve(_Socket, CodeAction) ->
+    lsp_codeaction:resolve(CodeAction).
+
+%% CHARACTERIZATION / known limitation: no command is registered yet (task
+%% 2.1 is infrastructure only, see executeCommandProvider's empty commands
+%% list above) - task 2.2+ will dispatch on maps:get(command, Params) once
+%% a fix actually needs workspace/executeCommand rather than a plain
+%% WorkspaceEdit returned directly from a resolved code action.
+workspace_executeCommand(_Socket, _Params) ->
+    null.
 
 textDocument_documentSymbol(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),
