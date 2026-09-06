@@ -7,20 +7,28 @@
 
 -include("./testlog.hrl").
 
-%% Task 2.1: infrastructure only - codeActionProvider/executeCommandProvider
-%% capability flags, textDocument/codeAction + codeAction/resolve +
-%% workspace/executeCommand dispatch, and lsp_rename:build_workspace_edit/1
-%% (a WorkspaceEdit builder factored out of lsp_rename:rename/5 so this
-%% module and any future one can reuse it). No quick fix exists yet - that
-%% is task 2.2+ - so lsp_codeaction:code_actions/3 always returns [] today
-%% and this suite pins exactly that, plus the plumbing around it.
+%% Task 2.1 laid the infrastructure (codeActionProvider/executeCommandProvider
+%% capability flags - pinned in lsp_protocol_SUITE's golden capability map,
+%% not duplicated here - dispatch, and lsp_rename:build_workspace_edit/1).
+%% Task 2.2 adds the five erl_lint/epp-driven fixes themselves.
 %%
-%% The capability flags themselves are pinned in lsp_protocol_SUITE's
-%% golden capability map, not duplicated here.
+%% Each fix test below drives the *real* pipeline end to end: get a genuine
+%% diagnostic from lsp_syntax:validate_parsed_source_file/1, round-trip its
+%% correlation_data through actual JSON encode/decode (exactly like a real
+%% client echoing context.diagnostics[].data back on a codeAction request -
+%% see lsp_syntax_SUITE's own wire-level test for why this matters: atoms
+%% on the way out come back as binaries), then call
+%% lsp_codeaction:code_actions/3 and inspect the resulting edit.
 
 all() -> [
-    code_actions_returns_nothing_until_a_fix_is_registered,
-    resolve_is_the_identity_function_until_a_fix_is_registered,
+    unused_variable_is_prefixed_with_underscore,
+    unused_function_is_added_to_export,
+    unused_function_is_added_to_a_multiline_export,
+    undefined_function_gets_a_stub_at_end_of_file,
+    undefined_record_field_is_added_to_the_record,
+    missing_include_line_is_removed,
+    unmatched_diagnostic_produces_no_action,
+    resolve_is_the_identity_function,
     build_workspace_edit_produces_one_document_change_per_edit,
     wire_level_handlers_dispatch_without_crashing
 ].
@@ -29,50 +37,98 @@ init_per_suite(Config) ->
     StartResult = application:start(vscode_lsp, permanent),
     ?assertEqual(ok, StartResult),
     gen_lsp_config_server:update_config(erlang, #{verbose => false}),
-    AppDir = ?config(data_dir, Config),
-    gen_lsp_config_server:update_config(root, AppDir),
-    File = filename:join(AppDir, "codeaction_source.erl"),
-    {ok, Content} = file:read_file(File),
-    gen_lsp_doc_server:document_opened(File, Content),
-    [{source_file, File} | Config].
+    Config.
 
 end_per_suite(Config) ->
     application:stop(vscode_lsp),
+    Config.
+
+init_per_testcase(_TestCase, Config) ->
+    AppDir = ?config(data_dir, Config),
+    gen_lsp_config_server:update_config(root, AppDir),
     Config.
 
 %%%%%%%%%%%%%%%%
 %% test cases %%
 %%%%%%%%%%%%%%%%
 
-%% CHARACTERIZATION: no fix is registered yet (task 2.2+), so code_actions/3
-%% is unconditionally empty regardless of file, range, or diagnostics
-%% context - the client shows no lightbulb at all today.
-code_actions_returns_nothing_until_a_fix_is_registered(Config) ->
-    File = ?config(source_file, Config),
-    Range = #{start => #{line => 0, character => 0}, 'end' => #{line => 5, character => 0}},
-    SomeDiagnostic = #{
-        severity => 2,
-        range => Range,
-        message => <<"function unused_helper/0 is unused">>,
-        source => <<"erl">>,
-        data => #{module => erl_lint, messageBody => [unused_function, [unused_helper, 0]]}
-    },
-    Context = #{diagnostics => [SomeDiagnostic], triggerKind => 1},
-    ?assertEqual([], lsp_codeaction:code_actions(File, Range, Context)).
+%% erl_lint reports the unused binding's own position, so the fix needs no
+%% lookup beyond the diagnostic itself.
+unused_variable_is_prefixed_with_underscore(Config) ->
+    [Action] = actions_for(Config, "unused_var.erl"),
+    ?assertEqual(<<"Prefix unused variable with _">>, maps:get(title, Action)),
+    ?assertEqual([{"unused_var.erl", <<"_Y">>}], edit_summaries(Config, Action)).
 
-%% CHARACTERIZATION: with no fix populating a `data` field on any code
-%% action, resolve/1 has nothing to act on - it is the identity function.
-resolve_is_the_identity_function_until_a_fix_is_registered(_Config) ->
+unused_function_is_added_to_export(Config) ->
+    [Action] = actions_for(Config, "unused_fn.erl"),
+    ?assertEqual(<<"Export unused/0">>, maps:get(title, Action)),
+    ?assertEqual([{"unused_fn.erl", <<", unused/0">>}], edit_summaries(Config, Action)),
+    apply_and_assert(Config, "unused_fn.erl", Action,
+        <<"-module(unused_fn).\n-export([go/0, unused/0]).\n\ngo() ->\n    ok.\n\nunused() ->\n    ok.\n">>).
+
+%% CHARACTERIZATION: the insertion point is the export list's real closing
+%% bracket wherever it lands, so a multi-line list gets the new entry
+%% spliced onto whatever line the "]" itself is on - readable single-line
+%% output isn't attempted, only a syntactically correct one.
+unused_function_is_added_to_a_multiline_export(Config) ->
+    [Action] = actions_for(Config, "unused_fn_multiline_export.erl"),
+    ?assertEqual([{"unused_fn_multiline_export.erl", <<", unused/0">>}], edit_summaries(Config, Action)),
+    apply_and_assert(Config, "unused_fn_multiline_export.erl", Action,
+        <<"-module(unused_fn_multiline_export).\n-export([\n    a/0,\n    b/1\n, unused/0]).\n\n"
+          "a() -> ok.\nb(X) -> X.\n\nunused() ->\n    ok.\n">>).
+
+undefined_function_gets_a_stub_at_end_of_file(Config) ->
+    [Action] = actions_for(Config, "undefined_fn.erl"),
+    ?assertEqual(<<"Create stub for helper/2">>, maps:get(title, Action)),
+    ?assertEqual(
+        [{"undefined_fn.erl", <<"\nhelper(_Arg1, _Arg2) ->\n    ok.\n">>}],
+        edit_summaries(Config, Action)
+    ),
+    apply_and_assert(Config, "undefined_fn.erl", Action,
+        <<"-module(undefined_fn).\n-export([go/0]).\n\ngo() ->\n    helper(1, 2).\n"
+          "\nhelper(_Arg1, _Arg2) ->\n    ok.\n">>).
+
+undefined_record_field_is_added_to_the_record(Config) ->
+    [Action] = actions_for(Config, "undefined_field.erl"),
+    ?assertEqual(<<"Add field c to record #rec">>, maps:get(title, Action)),
+    ?assertEqual([{"undefined_field.erl", <<", c">>}], edit_summaries(Config, Action)),
+    apply_and_assert(Config, "undefined_field.erl", Action,
+        <<"-module(undefined_field).\n-record(rec, {a, b, c}).\n-export([go/0]).\n\n"
+          "go() ->\n    R = #rec{a = 1, c = 2},\n    R.\n">>).
+
+%% CHARACTERIZATION: there is no file to point the include at instead, so
+%% the only generally-safe fix is removing the broken line - the whole
+%% line, including its trailing newline, so no blank line is left behind.
+missing_include_line_is_removed(Config) ->
+    [Action] = actions_for(Config, "missing_include.erl"),
+    ?assertEqual(<<"Remove include of missing file \"does_not_exist.hrl\"">>, maps:get(title, Action)),
+    ?assertEqual([{"missing_include.erl", <<>>}], edit_summaries(Config, Action)),
+    apply_and_assert(Config, "missing_include.erl", Action,
+        <<"-module(missing_include).\n-export([go/0]).\n\ngo() ->\n    ok.\n">>).
+
+%% A diagnostic whose correlation_data doesn't match any known fix (module/
+%% messageBody combination) produces no action - not a crash.
+unmatched_diagnostic_produces_no_action(Config) ->
+    File = source_file(Config, "unused_fn.erl"),
+    Diagnostic = round_trip(#{
+        severity => 2,
+        range => #{start => #{line => 0, character => 0}, 'end' => #{line => 0, character => 1}},
+        message => <<"some warning this server has no fix for">>,
+        source => <<"erl">>,
+        data => #{module => erl_lint, messageBody => [deprecated_type, foo, bar]}
+    }),
+    Context = #{diagnostics => [Diagnostic], triggerKind => 1},
+    ?assertEqual([], lsp_codeaction:code_actions(File, undefined, Context)).
+
+resolve_is_the_identity_function(_Config) ->
     CodeAction = #{title => <<"placeholder">>, kind => <<"quickfix">>},
     ?assertEqual(CodeAction, lsp_codeaction:resolve(CodeAction)),
-    %% identity holds regardless of shape - including one carrying a `data`
-    %% field a future fix might have attached before asking for resolution
     WithData = CodeAction#{data => #{anything => <<"at all">>}},
     ?assertEqual(WithData, lsp_codeaction:resolve(WithData)).
 
-%% Direct unit test of the extracted builder (task 2.1 factors this out of
+%% Direct unit test of the builder (task 2.1 factors this out of
 %% lsp_rename:rename/5 - see lsp_rename_SUITE for rename/5's own behavior,
-%% unchanged by the refactor).
+%% unchanged by the refactor or by its later multi-line generalization).
 build_workspace_edit_produces_one_document_change_per_edit(_Config) ->
     Edits = [
         {"/tmp/a.erl", 3, 4, 8, "renamed"},
@@ -95,7 +151,7 @@ build_workspace_edit_produces_one_document_change_per_edit(_Config) ->
 %% unused by every one of them, so `undefined` stands in), and none of them
 %% crash on a realistic request shape.
 wire_level_handlers_dispatch_without_crashing(Config) ->
-    File = ?config(source_file, Config),
+    File = source_file(Config, "unused_fn.erl"),
     Uri = lsp_utils:file_to_file_uri(File),
     CodeActionParams = #{
         textDocument => #{uri => Uri},
@@ -107,7 +163,76 @@ wire_level_handlers_dispatch_without_crashing(Config) ->
     CodeAction = #{title => <<"placeholder">>, kind => <<"quickfix">>},
     ?assertEqual(CodeAction, lsp_handlers:codeAction_resolve(undefined, CodeAction)),
 
-    %% CHARACTERIZATION: no command is registered yet (task 2.1 is
-    %% infrastructure only) - the handler is a fixed no-op regardless of
-    %% what command/arguments the client asks to execute.
+    %% CHARACTERIZATION: no command is registered yet (task 2.1/2.2 never
+    %% needed workspace/executeCommand - every fix here is a plain
+    %% WorkspaceEdit) - the handler is a fixed no-op regardless of what
+    %% command/arguments the client asks to execute.
     ?assertEqual(null, lsp_handlers:workspace_executeCommand(undefined, #{command => <<"anything">>, arguments => []})).
+
+%%%%%%%%%%%%%
+%% helpers %%
+%%%%%%%%%%%%%
+
+source_file(Config, FileName) ->
+    AppDir = ?config(data_dir, Config),
+    filename:join(AppDir, FileName).
+
+%% Real diagnostic -> real (JSON-round-tripped) wire shape -> real
+%% code_actions/3 call, exactly like a live client would trigger this.
+actions_for(Config, FileName) ->
+    File = source_file(Config, FileName),
+    #{errors_warnings := Warnings} = lsp_syntax:validate_parsed_source_file(File),
+    Diagnostics = [round_trip(to_wire_diagnostic(W)) || W <- Warnings],
+    Context = #{diagnostics => Diagnostics, triggerKind => 1},
+    lsp_codeaction:code_actions(File, undefined, Context).
+
+to_wire_diagnostic(#{type := Type, info := Info, correlation_data := CorrelationData}) ->
+    Severity = case Type of <<"error">> -> 1; _ -> 2 end,
+    Line0 = maps:get(line, Info) - 1,
+    Char0 = maps:get(character, Info) - 1,
+    #{
+        severity => Severity,
+        range => #{start => #{line => Line0, character => Char0}, 'end' => #{line => Line0, character => 255}},
+        message => maps:get(message, Info),
+        source => <<"erl">>,
+        data => CorrelationData
+    }.
+
+round_trip(Term) ->
+    {ok, Json} = vscode_jsone:encode(Term),
+    {ok, Decoded, _} = vscode_jsone_decode:decode(Json, [{keys, atom}]),
+    Decoded.
+
+%% [{BaseFileName, NewText}] for every edit in every documentChanges group
+%% of Action's `edit` - lets a test assert file + replacement text without
+%% hardcoding line/column numbers already covered by the fix's own logic.
+edit_summaries(_Config, #{edit := #{documentChanges := Changes}}) ->
+    [begin
+        Uri = maps:get(uri, maps:get(textDocument, C)),
+        File = lsp_utils:file_uri_to_file(Uri),
+        [Edit] = maps:get(edits, C),
+        {filename:basename(File), maps:get(newText, Edit)}
+     end || C <- Changes].
+
+%% Actually apply the fix's edit(s) to the real file content and assert the
+%% resulting file matches Expected exactly - proves the edit is not just
+%% "some text at some position" but the *correct* whole-file result.
+apply_and_assert(Config, FileName, #{edit := #{documentChanges := Changes}}, Expected) ->
+    File = source_file(Config, FileName),
+    {ok, Original} = file:read_file(File),
+    Result = lists:foldl(fun (Change, Content) -> apply_change(Content, Change) end, Original, Changes),
+    ?assertEqual(Expected, Result).
+
+apply_change(Content, #{edits := [#{range := Range, newText := NewText}]}) ->
+    #{<<"start">> := #{line := SL, character := SC}, <<"end">> := #{line := EL, character := EC}} = Range,
+    Lines = binary:split(Content, <<"\n">>, [global]),
+    StartOffset = line_char_offset(Lines, SL, SC),
+    EndOffset = line_char_offset(Lines, EL, EC),
+    Before = binary:part(Content, 0, StartOffset),
+    After = binary:part(Content, EndOffset, byte_size(Content) - EndOffset),
+    <<Before/binary, NewText/binary, After/binary>>.
+
+line_char_offset(Lines, Line, Character) ->
+    {Before, [TargetLine | _]} = lists:split(Line, Lines),
+    LineStart = lists:foldl(fun (L, Acc) -> Acc + byte_size(L) + 1 end, 0, Before),
+    LineStart + min(Character, byte_size(TargetLine)).
