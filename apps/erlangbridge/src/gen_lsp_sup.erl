@@ -7,7 +7,7 @@
 %% Supervisor callbacks
 -export([init/1]).
 
--define(TCP_OPTIONS, [binary, {packet, raw}, {active, once}, {reuseaddr, true}]).
+-define(TCP_OPTIONS, [binary, {packet, raw}, {active, once}, {reuseaddr, true}, {ip, {127,0,0,1}}]).
 
 start_link(Port) ->
     case supervisor:start_link({local, ?MODULE}, ?MODULE, Port) of
