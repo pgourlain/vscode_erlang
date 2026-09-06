@@ -200,7 +200,7 @@ then call the analysis module directly against `.erl` fixtures in `<suite>_SUITE
 
 ### 0.16 — CI hardening
 
-- **Status**: todo
+- **Status**: done (workflow edited; human verify via branch push still pending)
 - **Goal**: extend the workflow to an OTP-version matrix (code branches on OTP ≥ 21 for erlfmt vs `erl_tidy`), and fail the build on any CT failure.
 - **Files**: `.github/workflows/pr-verify.yml`
 - **Verify (human)**: after a manual branch push, confirm matrix jobs run and a
