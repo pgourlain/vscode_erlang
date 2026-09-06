@@ -110,7 +110,7 @@ then call the analysis module directly against `.erl` fixtures in `<suite>_SUITE
 
 ### 0.5 — `lsp_signature_SUITE`
 
-- **Status**: todo
+- **Status**: done
 - **Goal**: signature help at each argument position, with and without `-spec`, retrigger on `,`. Covers `lsp_signature_doc_layout`.
 - **Files**: `apps/erlangbridge/test/lsp_signature_SUITE.erl` + `_SUITE_data/` (new)
 - **Reference**: `lsp_signature.erl`, `lsp_handlers.erl:326`
