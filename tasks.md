@@ -118,7 +118,7 @@ then call the analysis module directly against `.erl` fixtures in `<suite>_SUITE
 
 ### 0.6 — `lsp_format_SUITE`
 
-- **Status**: todo
+- **Status**: done
 - **Goal**: `vscode_erlfmt` round-trip — idempotence (format twice = identical), `erlang.formattingLineLength` honored, already-formatted file unchanged. Pin the current hardcoded `0,0 → 999999,255` result range as characterization.
 - **Files**: `apps/erlangbridge/test/lsp_format_SUITE.erl` + `_SUITE_data/` (new)
 - **Reference**: `lsp_handlers.erl:201-219`, `:427-455` (OTP ≥ 21 → erlfmt, else `erl_tidy`)
