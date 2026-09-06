@@ -229,11 +229,13 @@ Only then may `apps/erlangbridge/src/` or `lib/` be edited.
 - **Deps**: 0.14
 - **Verify**: `./rebar3 ct --suite apps/erlangbridge/test/vscode_lsp_entry_SUITE`
 
-### 1.1 — Engine bump to `^1.75.0`
+### 1.1 — Engine + LSP client bump to latest
 
-- **Status**: todo
-- **Goal**: bump `engines.vscode` and `@types/vscode`, then fix every type error from 23 releases of API churn.
-- **Breaking surface to audit**: drop the superseded `vscode-test@^1.3.0` devDep (`@vscode/test-electron` is already present); `DiagnosticTag` / `CodeActionKind` enum additions; deprecated `rootPath`; `tsconfig.json` `lib` is `es7` — may need raising.
+- **Status**: done
+- **Goal**: bump `engines.vscode` and `@types/vscode` to the latest stable release (check `npm view @types/vscode version` at execution time — was `1.136.0` as of 2026-09-06 — and pin that, not a hardcoded old number), **and** bump `vscode-languageclient` + `vscode-languageserver` from `^9.0.1` to latest (`10.1.1` as of 2026-09-06, check `npm view vscode-languageclient version` at execution time) — then fix every type error from the resulting API churn on both surfaces.
+- **Breaking surface to audit**:
+  - VS Code API: drop the superseded `vscode-test@^1.3.0` devDep (`@vscode/test-electron` is already present); `DiagnosticTag` / `CodeActionKind` enum additions; deprecated `rootPath`; `tsconfig.json` `lib` is `es7` — may need raising.
+  - LSP client (9→10, a major bump): `lib/lsp/lsp-inlinevalues.ts` and `lib/lsp/lsp-rename.ts` import from `vscode-languageserver-protocol` directly, but that package is **not** declared in `package.json` — it only resolves today as a transitive dep of `vscode-languageserver`. Declare it explicitly while bumping (don't rely on the transitive resolution matching); check `vscode-languageclient`'s own migration notes for request/notification type changes between 9.x and 10.x.
 - **Files**: `package.json`, `tsconfig.json`, any `lib/**/*.ts` the compiler flags
 - **Deps**: Phase 0 gate
 - **Verify**: `npm run compile && npm test`

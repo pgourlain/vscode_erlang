@@ -2,7 +2,7 @@
 import * as os from 'os';
 import {
 	workspace as Workspace, window as Window, ExtensionContext, TextDocument, OutputChannel,
-	Uri, Disposable, CodeLens, FileSystemWatcher, workspace, languages
+	LogOutputChannel, Uri, Disposable, CodeLens, FileSystemWatcher, workspace, languages
 } from 'vscode';
 
 import {
@@ -55,7 +55,7 @@ https://tomassetti.me/language-server-dot-visual-studio/
 
 export let client: LanguageClient;
 let clients: Map<string, LanguageClient> = new Map();
-let lspOutputChannel: OutputChannel;
+let lspOutputChannel: LogOutputChannel;
 
 namespace Configuration {
 
@@ -204,7 +204,7 @@ function getPort(callback) {
 export function activate(context: ExtensionContext) {
 	let erlangCfg = getElangConfigConfiguration();
 	if (erlangCfg.verbose)
-		lspOutputChannel = Window.createOutputChannel('Erlang Language Server', 'erlang');
+		lspOutputChannel = Window.createOutputChannel('Erlang Language Server', { log: true });
 
 	lspValue.activate(context, lspOutputChannel);
 	lspRename.activate(context, lspOutputChannel);
@@ -241,7 +241,13 @@ export function activate(context: ExtensionContext) {
 		outputChannel: lspOutputChannel
 	}
 
-	let clientName = erlangCfg.verbose ? 'Erlang Language Server' : '';
+	// vscode-languageclient (>=10) uses this name to lazily create its own
+	// fallback output channel (e.g. from handleFailedRequest/error paths)
+	// whenever clientOptions.outputChannel is unset - an empty string here
+	// makes that fall-back call VS Code's createOutputChannel with a falsy
+	// name and throw. Always give the client a real name; erlang.verbose
+	// still gates whether *our own* lspOutputChannel is created/populated.
+	let clientName = 'Erlang Language Server';
 	client = new ErlangLanguageClient(clientName, async () => {
 		return new Promise<StreamInfo>(async (resolve, reject) => {
 			await compileErlangBridge(context.extensionPath);
