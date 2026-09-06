@@ -100,15 +100,18 @@ retrigger_keeps_the_previous_result_when_the_line_cannot_be_scanned(Config) ->
     ?assertEqual(Previous, Help).
 
 %% CHARACTERIZATION: lsp_signature_doc_layout.erl (an edoc `module/2` layout
-%% callback, like hover_doc_layout.erl's role for hover) is never referenced
-%% by any other module in src/ - lsp_signature.erl renders EEP-48 signatures
-%% itself via eep48_render_signature/5 instead. This is why task 1.0/0.14
-%% finds it missing from vscode_lsp_entry:compile_needed_modules/0: nothing
-%% ever calls it, dev-time hot-loading included.
+%% callback, like hover_doc_layout.erl's role for hover) is never *called*
+%% by any other module in src/ - lsp_signature.erl renders EEP-48
+%% signatures itself via eep48_render_signature/5 instead. Since task 1.0
+%% it is named in vscode_lsp_entry:compile_needed_modules/0's hot-load
+%% list (that was task 0.14's finding: it belonged there regardless of
+%% being unused), so vscode_lsp_entry.erl itself is excluded here - it
+%% only names the module as a path string, it never calls it either.
 lsp_signature_doc_layout_is_dead_code(_Config) ->
     SrcDir = filename:join([code:lib_dir(vscode_lsp), "src"]),
     OtherFiles = [F || F <- filelib:wildcard(filename:join(SrcDir, "*.erl")),
-                        filename:basename(F) =/= "lsp_signature_doc_layout.erl"],
+                        not lists:member(filename:basename(F),
+                                         ["lsp_signature_doc_layout.erl", "vscode_lsp_entry.erl"])],
     References = [F || F <- OtherFiles,
                         {ok, Bin} <- [file:read_file(F)],
                         binary:match(Bin, <<"lsp_signature_doc_layout">>) =/= nomatch],

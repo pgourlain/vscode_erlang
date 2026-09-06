@@ -223,7 +223,7 @@ Only then may `apps/erlangbridge/src/` or `lib/` be edited.
 
 ### 1.0 — Fix the module list
 
-- **Status**: todo
+- **Status**: done
 - **Goal**: add `lsp_fun_utils` and `lsp_signature_doc_layout` to `compile_needed_modules/0`. Makes 0.14 green.
 - **Files**: `apps/erlangbridge/src/vscode_lsp_entry.erl`
 - **Deps**: 0.14
