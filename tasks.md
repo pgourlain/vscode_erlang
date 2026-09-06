@@ -152,7 +152,7 @@ then call the analysis module directly against `.erl` fixtures in `<suite>_SUITE
 
 ### 0.10 — `lsp_rename_SUITE`
 
-- **Status**: todo
+- **Status**: done
 - **Goal**: `prepareRename` accept/reject positions; `rename` of a local variable, local function, exported function (cross-file `WorkspaceEdit`), record, macro.
 - **Files**: `apps/erlangbridge/test/lsp_rename_SUITE.erl` + `_SUITE_data/` (new)
 - **Reference**: `lsp_rename.erl`, `lsp_handlers.erl:354-368`
