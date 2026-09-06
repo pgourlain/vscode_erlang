@@ -160,7 +160,7 @@ then call the analysis module directly against `.erl` fixtures in `<suite>_SUITE
 
 ### 0.11 — Extend `lsp_navigation_SUITE`
 
-- **Status**: todo
+- **Status**: done
 - **Goal**: add `references` coverage (currently untested), plus definition on records, types, macros, includes, behaviour callbacks.
 - **Files**: `apps/erlangbridge/test/lsp_navigation_SUITE.erl` (extend), `lsp_navigation_SUITE_data/` (add fixtures)
 - **Verify**: `./rebar3 ct --suite apps/erlangbridge/test/lsp_navigation_SUITE`

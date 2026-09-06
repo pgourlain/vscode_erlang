@@ -9,7 +9,16 @@
 -include("./testlog.hrl").
 
 % Specify a list of all unit test functions
-all() -> [testnavigation, test_macros].
+all() -> [testnavigation, test_macros,
+    test_references_function_local_and_cross_file,
+    test_references_variable,
+    test_references_unsupported_for_record_and_macro,
+    test_definition_record,
+    test_definition_macro,
+    test_definition_include,
+    test_definition_type_is_unsupported,
+    test_definition_behaviour_callback_is_unsupported
+].
 
 % required, but can just return Config. this is a suite level setup function.
 init_per_suite(Config) ->
@@ -126,7 +135,7 @@ testnavigation(Config) ->
     dotestfiles(AppDir, navigation_datatests()),
     ok.
 
-test_macros(Config) -> 
+test_macros(Config) ->
     % write standard erlang code to test whatever you want
     % use pattern matching to specify expected return values
     AppDir = (?config(data_dir, Config)),
@@ -140,5 +149,136 @@ test_macros(Config) ->
     SyntaxTree = gen_lsp_doc_server:get_dodged_syntax_tree(filename:join(AppDir,"data_goods.erl")),
     Macros = lsp_syntax:get_macros(SyntaxTree),
     ?assertEqual(true, is_list(Macros)),
-    ?assertEqual([{{14,11},'DEFAULT',7}], Macros)    
+    ?assertEqual([{{14,11},'DEFAULT',7}], Macros)
     .
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% task 0.11 extensions: references, plus definition on     %%
+%% records / macros / includes / types / behaviour callbacks %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%
+%% Fixtures: nav_ext_target.erl (record/macro/type/-callback + greet/1),
+%% nav_ext_caller.erl (a cross-file, cross-module caller of greet/1),
+%% nav_ext_include.hrl (a real file to navigate to via -include).
+
+nav_ext_setup(Config) ->
+    AppDir = (?config(data_dir, Config)),
+    gen_lsp_config_server:update_config(root, AppDir),
+    gen_lsp_doc_server:root_available(),
+    gen_lsp_doc_server:config_change(),
+    TargetFile = filename:join(AppDir, "nav_ext_target.erl"),
+    CallerFile = filename:join(AppDir, "nav_ext_caller.erl"),
+    nav_ext_open_and_parse(TargetFile),
+    nav_ext_open_and_parse(CallerFile),
+    {TargetFile, CallerFile}.
+
+nav_ext_open_and_parse(File) ->
+    {ok, Content} = file:read_file(File),
+    gen_lsp_doc_server:document_opened(File, Content),
+    gen_lsp_doc_server:parse_document(File).
+
+%% references/3 supports function references (local same-file calls plus
+%% global cross-file ones via the project-wide references cache): greet/1
+%% has no local caller in its own file, only nav_ext_caller.erl's remote
+%% `nav_ext_target:greet(...)` call.
+test_references_function_local_and_cross_file(Config) ->
+    {TargetFile, CallerFile} = nav_ext_setup(Config),
+    {ok, TargetContent} = file:read_file(TargetFile),
+    {Line, Column} = nav_ext_position_of(TargetContent, "greet(Name) ->"),
+    Refs = lsp_navigation:references(TargetFile, Line, Column),
+    ?assertEqual(1, length(Refs)),
+    [{RefFile, _RefLine, _RefStart, _RefEnd}] = Refs,
+    ?assertEqual(CallerFile, RefFile).
+
+%% Variable references are scoped to the enclosing clause: Identifier is
+%% used twice in use_record/1 (the parameter, and inside the record).
+test_references_variable(Config) ->
+    {TargetFile, _CallerFile} = nav_ext_setup(Config),
+    {ok, TargetContent} = file:read_file(TargetFile),
+    {Line, Column} = nav_ext_position_of(TargetContent, "Identifier}"),
+    Refs = lsp_navigation:references(TargetFile, Line, Column),
+    ?assertEqual(2, length(Refs)),
+    ?assert(lists:all(fun ({RefFile, _, _, _}) -> RefFile =:= TargetFile end, Refs)).
+
+%% CHARACTERIZATION: references/3's own case statement only ever matches a
+%% {function,...} or {variable,...} find_at/3 result (lsp_navigation.erl:
+%% 33-48) - a record name or a macro use both fall through its `_ -> []`
+%% clause, even though find_at/3 itself recognizes both as reference kinds
+%% (used by definition/3, see test_definition_record/test_definition_macro
+%% below). "Find all references" on a record or macro is a silent no-op.
+test_references_unsupported_for_record_and_macro(Config) ->
+    {TargetFile, _CallerFile} = nav_ext_setup(Config),
+    {ok, TargetContent} = file:read_file(TargetFile),
+    {RecordLine, RecordColumn} = nav_ext_position_of(TargetContent, "#item{identifier"),
+    ?assertEqual([], lsp_navigation:references(TargetFile, RecordLine, RecordColumn)),
+    {MacroLine, MacroColumn} = nav_ext_position_of(TargetContent, "?GREETING"),
+    ?assertEqual([], lsp_navigation:references(TargetFile, MacroLine, MacroColumn)).
+
+test_definition_record(Config) ->
+    {TargetFile, _CallerFile} = nav_ext_setup(Config),
+    {ok, TargetContent} = file:read_file(TargetFile),
+    {Line, Column} = nav_ext_position_of(TargetContent, "#item{identifier"),
+    [{DefFile, DefLine, _, _}] = lsp_navigation:definition(TargetFile, Line, Column),
+    ?assertEqual(TargetFile, DefFile),
+    {DeclLine, _} = nav_ext_position_of(TargetContent, "-record(item"),
+    %% CHARACTERIZATION: for a record (unlike function/macro/variable),
+    %% the returned "Line" is itself a {Line, Column} tuple, not a plain
+    %% integer - find_definition_in_file/4's record clause destructures
+    %% the dodged tree's {attr, Line, _, _} node and forwards that inner
+    %% tuple as-is (lsp_navigation.erl:686-690).
+    ?assertMatch({DeclLine, _}, DefLine).
+
+test_definition_macro(Config) ->
+    {TargetFile, _CallerFile} = nav_ext_setup(Config),
+    {ok, TargetContent} = file:read_file(TargetFile),
+    {Line, Column} = nav_ext_position_of(TargetContent, "?GREETING"),
+    [{DefFile, DefLine, _, _}] = lsp_navigation:definition(TargetFile, Line, Column),
+    ?assertEqual(TargetFile, DefFile),
+    {DeclLine, _} = nav_ext_position_of(TargetContent, "-define(GREETING"),
+    ?assertEqual(DeclLine, DefLine).
+
+%% -include("nav_ext_include.hrl") navigates to the included file itself
+%% (position {1,1,1}, not any specific form inside it).
+test_definition_include(Config) ->
+    {_TargetFile, CallerFile} = nav_ext_setup(Config),
+    {ok, CallerContent} = file:read_file(CallerFile),
+    {Line, Column} = nav_ext_position_of(CallerContent, "-include(\"nav_ext_include.hrl\")"),
+    Definitions = lsp_navigation:definition(CallerFile, Line, Column),
+    ?assertEqual(1, length(Definitions)),
+    [{DefFile, 1, 1, 1}] = Definitions,
+    ?assertEqual(<<"nav_ext_include.hrl">>, filename:basename(DefFile)).
+
+%% CHARACTERIZATION: find_at/3 has no reference kind at all for a -type
+%% usage (unlike record/field/macro, which all have dedicated clauses -
+%% lsp_navigation.erl:227-446), so "go to definition" on item_id() in
+%% use_type/1's own -spec finds nothing, even though the type is defined
+%% two lines above in the very same file.
+test_definition_type_is_unsupported(Config) ->
+    {TargetFile, _CallerFile} = nav_ext_setup(Config),
+    {ok, TargetContent} = file:read_file(TargetFile),
+    {Line, Column} = nav_ext_position_of(TargetContent, "item_id()) -> item_id"),
+    ?assertEqual([], lsp_navigation:definition(TargetFile, Line, Column)).
+
+%% CHARACTERIZATION: a -callback declaration is an {attribute,_,callback,_}
+%% form, which find_at/3's case statement never matches either (it only
+%% recognizes {function,...} definitions, never -callback specs) - clicking
+%% directly on "handle" in -callback handle(term()) -> term(). finds
+%% nothing, unlike clicking a real function's own clause head.
+test_definition_behaviour_callback_is_unsupported(Config) ->
+    {TargetFile, _CallerFile} = nav_ext_setup(Config),
+    {ok, TargetContent} = file:read_file(TargetFile),
+    {Line, Column} = nav_ext_position_of(TargetContent, "-callback handle"),
+    ?assertEqual([], lsp_navigation:definition(TargetFile, Line, Column)).
+
+%% 1-based {Line, Column} of the first character of Marker.
+nav_ext_position_of(Content, Marker) ->
+    Lines = binary:split(Content, <<"\n">>, [global]),
+    nav_ext_find_position(Lines, list_to_binary(Marker), 1).
+
+nav_ext_find_position([Line | Rest], MarkerBin, LineNo) ->
+    case binary:match(Line, MarkerBin) of
+        {Start, _Len} -> {LineNo, Start + 1};
+        nomatch -> nav_ext_find_position(Rest, MarkerBin, LineNo + 1)
+    end;
+nav_ext_find_position([], _MarkerBin, _LineNo) ->
+    error(marker_not_found).
