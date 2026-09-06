@@ -47,13 +47,18 @@ legend() ->
 %% semanticTokens/full/delta request can diff against it.
 -spec full_tokens(File :: file:filename()) -> #{resultId := binary(), data := [integer()]} | #{data := []}.
 full_tokens(File) ->
-    case compute(File) of
-        {ok, Data} ->
-            ResultId = result_id(Data),
-            gen_lsp_doc_server:store_semantic_tokens_cache(File, ResultId, Data),
-            #{resultId => ResultId, data => Data};
-        error ->
-            #{data => []}
+    case enabled() of
+        false ->
+            #{data => []};
+        true ->
+            case compute(File) of
+                {ok, Data} ->
+                    ResultId = result_id(Data),
+                    gen_lsp_doc_server:store_semantic_tokens_cache(File, ResultId, Data),
+                    #{resultId => ResultId, data => Data};
+                error ->
+                    #{data => []}
+            end
     end.
 
 %% @doc `textDocument/semanticTokens/full/delta` (task 3.2). If
@@ -69,17 +74,22 @@ full_tokens(File) ->
 -spec full_tokens_delta(File :: file:filename(), PreviousResultId :: binary()) ->
     #{resultId := binary(), edits := [map()]} | #{resultId := binary(), data := [integer()]} | #{data := []}.
 full_tokens_delta(File, PreviousResultId) ->
-    Previous = gen_lsp_doc_server:get_semantic_tokens_cache(File),
-    case compute(File) of
-        {ok, NewData} ->
-            NewResultId = result_id(NewData),
-            gen_lsp_doc_server:store_semantic_tokens_cache(File, NewResultId, NewData),
-            case Previous of
-                {PreviousResultId, OldData} -> #{resultId => NewResultId, edits => diff_tokens(OldData, NewData)};
-                _ -> #{resultId => NewResultId, data => NewData}
-            end;
-        error ->
-            #{data => []}
+    case enabled() of
+        false ->
+            #{data => []};
+        true ->
+            Previous = gen_lsp_doc_server:get_semantic_tokens_cache(File),
+            case compute(File) of
+                {ok, NewData} ->
+                    NewResultId = result_id(NewData),
+                    gen_lsp_doc_server:store_semantic_tokens_cache(File, NewResultId, NewData),
+                    case Previous of
+                        {PreviousResultId, OldData} -> #{resultId => NewResultId, edits => diff_tokens(OldData, NewData)};
+                        _ -> #{resultId => NewResultId, data => NewData}
+                    end;
+                error ->
+                    #{data => []}
+            end
     end.
 
 %% @doc `textDocument/semanticTokens/range` (task 3.2) - the same tokens
@@ -89,15 +99,27 @@ full_tokens_delta(File, PreviousResultId) ->
 %% without waiting on (or contributing a resultId for) the whole document.
 -spec range_tokens(File :: file:filename(), {StartLine :: integer(), EndLine :: integer()}) -> #{data := [integer()]}.
 range_tokens(File, {StartLine, EndLine}) ->
-    Tree = gen_lsp_doc_server:get_syntax_tree(File),
-    case is_list(Tree) of
-        true ->
-            InRange = [T || {Line, _, _, _, _} = T <- collect_tokens(File, Tree),
-                             Line >= StartLine, Line =< EndLine],
-            #{data => encode(InRange)};
+    case enabled() of
         false ->
-            #{data => []}
+            #{data => []};
+        true ->
+            Tree = gen_lsp_doc_server:get_syntax_tree(File),
+            case is_list(Tree) of
+                true ->
+                    InRange = [T || {Line, _, _, _, _} = T <- collect_tokens(File, Tree),
+                                     Line >= StartLine, Line =< EndLine],
+                    #{data => encode(InRange)};
+                false ->
+                    #{data => []}
+            end
     end.
+
+%% @doc `erlang.semanticTokensEnabled`, default true (task 3.4) - unlike
+%% codeLensEnabled/inlayHintsEnabled (both default false: extra UI real
+%% estate a user opts into), this is a strict enhancement layered on top
+%% of the grammar that is already always on, so it defaults on too.
+enabled() ->
+    gen_lsp_config_server:semanticTokensEnabled().
 
 compute(File) ->
     Tree = gen_lsp_doc_server:get_syntax_tree(File),

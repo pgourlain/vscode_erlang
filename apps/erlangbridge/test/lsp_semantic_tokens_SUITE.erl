@@ -34,7 +34,8 @@ all() -> [
     delta_with_unchanged_content_returns_no_edits,
     delta_after_an_edit_returns_a_single_edit_for_the_changed_region,
     delta_with_a_stale_previous_result_id_falls_back_to_full_data,
-    range_tokens_only_includes_the_requested_lines
+    range_tokens_only_includes_the_requested_lines,
+    disabling_the_setting_returns_no_tokens_at_all
 ].
 
 init_per_suite(Config) ->
@@ -214,6 +215,18 @@ range_tokens_only_includes_the_requested_lines(Config) ->
     Decoded = decode(Data, 1, 1),
     Lines = lists:usort([L || {L, _, _, _, _} <- Decoded]),
     ?assertEqual([10, 11, 12, 13], Lines).
+
+%% erlang.semanticTokensEnabled (task 3.4, default true - see
+%% gen_lsp_config_server:semanticTokensEnabled/0) short-circuits full,
+%% delta and range alike to an empty result, with no cache side effect.
+disabling_the_setting_returns_no_tokens_at_all(Config) ->
+    AppDir = ?config(data_dir, Config),
+    File = filename:join(AppDir, "tokens_source.erl"),
+    gen_lsp_config_server:update_config(erlang, #{verbose => false, semanticTokensEnabled => false}),
+    ?assertEqual(#{data => []}, lsp_semantic_tokens:full_tokens(File)),
+    ?assertEqual(#{data => []}, lsp_semantic_tokens:full_tokens_delta(File, <<"anything">>)),
+    ?assertEqual(#{data => []}, lsp_semantic_tokens:range_tokens(File, {1, 100})),
+    gen_lsp_config_server:update_config(erlang, #{verbose => false}).
 
 %%%%%%%%%%%%%
 %% helpers %%

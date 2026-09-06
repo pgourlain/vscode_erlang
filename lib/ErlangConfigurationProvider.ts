@@ -33,6 +33,7 @@ export function configurationChanged(): void {
         codeLensEnabled: erlangConf.get<boolean>('codeLensEnabled', false),
         cacheManagement: erlangConf.get("cacheManagement", "memory"),
         inlayHintsEnabled: erlangConf.get<boolean>('inlayHintsEnabled', false),
+        semanticTokensEnabled: erlangConf.get<boolean>('semanticTokensEnabled', true),
         debuggerRunMode: erlangConf.get<string>("debuggerRunMode", "Server"),
         includePaths: erlangConf.get("includePaths", []),
         linting: erlangConf.get<boolean>('linting', false),

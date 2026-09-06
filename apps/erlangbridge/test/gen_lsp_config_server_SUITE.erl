@@ -51,6 +51,7 @@ getters_read_through_a_realistic_erlang_section(_Config) ->
         cacheManagement => <<"memory">>,
         codeLensEnabled => true,
         inlayHintsEnabled => true,
+        semanticTokensEnabled => false,
         verbose => true,
         verboseExcludeFilter => <<"textDocument/inlayHints,textDocument/hover">>,
         debuggerRunMode => <<"external">>,
@@ -58,6 +59,7 @@ getters_read_through_a_realistic_erlang_section(_Config) ->
     }),
     ?assertEqual(true, gen_lsp_config_server:codeLensEnabled()),
     ?assertEqual(true, gen_lsp_config_server:inlayHintsEnabled()),
+    ?assertEqual(false, gen_lsp_config_server:semanticTokensEnabled()),
     ?assertEqual(false, gen_lsp_config_server:linting()),
     ?assertEqual(true, gen_lsp_config_server:verbose()),
     ?assertEqual(40, gen_lsp_config_server:formatting_line_length()).
@@ -82,6 +84,7 @@ getters_fall_back_to_their_declared_defaults_when_config_is_absent(_Config) ->
     gen_lsp_config_server:update_config(computed, #{}),
     ?assertEqual(false, gen_lsp_config_server:codeLensEnabled()),
     ?assertEqual(false, gen_lsp_config_server:inlayHintsEnabled()),
+    ?assertEqual(true, gen_lsp_config_server:semanticTokensEnabled()),
     ?assertEqual(true, gen_lsp_config_server:linting()),
     ?assertEqual(false, gen_lsp_config_server:verbose()),
     ?assertEqual(100, gen_lsp_config_server:formatting_line_length()),
@@ -99,6 +102,7 @@ server_defaults_match_the_declared_package_json_defaults(_Config) ->
     gen_lsp_config_server:update_config(erlang, #{}),
     ?assertEqual(DeclaredDefault(<<"codeLensEnabled">>), gen_lsp_config_server:codeLensEnabled()),
     ?assertEqual(DeclaredDefault(<<"inlayHintsEnabled">>), gen_lsp_config_server:inlayHintsEnabled()),
+    ?assertEqual(DeclaredDefault(<<"semanticTokensEnabled">>), gen_lsp_config_server:semanticTokensEnabled()),
     ?assertEqual(DeclaredDefault(<<"linting">>), gen_lsp_config_server:linting()),
     ?assertEqual(DeclaredDefault(<<"verbose">>), gen_lsp_config_server:verbose()),
     ?assertEqual(DeclaredDefault(<<"formattingLineLength">>), gen_lsp_config_server:formatting_line_length()).
