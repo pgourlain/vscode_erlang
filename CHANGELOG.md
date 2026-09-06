@@ -1,5 +1,13 @@
 # Change log
 
+## Version 1.1.4 (June 24, 2026)
+
+* [327](https://github.com/pgourlain/vscode_erlang/issues/327) : Use Erlang and rebar3 paths from settings everywhere (from PATH, and the built-in rebar3 only as the last resort)
+
+Thanks to
+* [Wojtek Surowka](https://github.com/wojteksurowka)
+
+
 ## Version 1.1.3 (May 25, 2025)
 
 * [323](https://github.com/pgourlain/vscode_erlang/issues/323) : Bump submodule grammar to the latest version
