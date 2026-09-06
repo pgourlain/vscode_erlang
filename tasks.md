@@ -265,7 +265,7 @@ Only then may `apps/erlangbridge/src/` or `lib/` be edited.
 
 ### 1.5 — Dead code removal
 
-- **Status**: todo
+- **Status**: done (manual "rename still works in Launch Extension" check still needs a human look)
 - **Goal**: three cleanups on the TS side —
   1. delete `lib/lsp/lsp-rename.ts` (`ErlangRenameProvider` throws "not implemented", registration already commented out; rename works via the standard LSP capability);
   2. remove the vestigial `**/.clientrc` watcher (`lspclientextension.ts:231-233`), left over from the LSP sample;

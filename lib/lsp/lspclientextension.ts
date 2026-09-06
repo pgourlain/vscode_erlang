@@ -26,7 +26,6 @@ import * as Net from 'net';
 import * as lspcodelens from './lspcodelens';
 
 import * as lspValue from './lsp-inlinevalues';
-import * as lspRename from './lsp-rename';
 
 
 // import { ErlangShellForDebugging } from '../ErlangShellDebugger';
@@ -104,17 +103,24 @@ namespace Configuration {
 		fileSystemWatcher = workspace.createFileSystemWatcher('**/*.erl');
 		fileSystemWatcher.onDidCreate(uri => {
 			client.sendNotification(DidChangeWatchedFilesNotification.type,
-				{ changes: [{ uri: uri.fsPath, type: FileChangeType.Created }] });
+				{ changes: [{ uri: uri.toString(), type: FileChangeType.Created }] });
+		});
+		fileSystemWatcher.onDidChange(uri => {
+			client.sendNotification(DidChangeWatchedFilesNotification.type,
+				{ changes: [{ uri: uri.toString(), type: FileChangeType.Changed }] });
 		});
 		fileSystemWatcher.onDidDelete(uri => {
 			client.sendNotification(DidChangeWatchedFilesNotification.type,
-				{ changes: [{ uri: uri.fsPath, type: FileChangeType.Deleted }] });
+				{ changes: [{ uri: uri.toString(), type: FileChangeType.Deleted }] });
 		});
 	}
 
 	export function dispose() {
 		if (configurationListener) {
 			configurationListener.dispose();
+		}
+		if (fileSystemWatcher) {
+			fileSystemWatcher.dispose();
 		}
 	}
 }
@@ -207,8 +213,7 @@ export function activate(context: ExtensionContext) {
 		lspOutputChannel = Window.createOutputChannel('Erlang Language Server', { log: true });
 
 	lspValue.activate(context, lspOutputChannel);
-	lspRename.activate(context, lspOutputChannel);
-	
+
 	let middleware: Middleware = {
 		workspace: {
 			configuration: Configuration.computeConfiguration
@@ -228,14 +233,6 @@ export function activate(context: ExtensionContext) {
 	let clientOptions: LanguageClientOptions = {
 		// Register the server for plain text documents
 		documentSelector: [{ scheme: 'file', language: 'erlang' }],
-		synchronize: {
-			// Notify the server about file changes to '.clientrc files contain in the workspace
-			fileEvents: Workspace.createFileSystemWatcher('**/.clientrc'),
-			// In the past this told the client to actively synchronize settings. Since the
-			// client now supports 'getConfiguration' requests this active synchronization is not
-			// necessary anymore. 
-			// configurationSection: [ 'lspMultiRootSample' ]
-		},
 		middleware: middleware,
 		diagnosticCollectionName: 'Erlang Language Server',
 		outputChannel: lspOutputChannel
