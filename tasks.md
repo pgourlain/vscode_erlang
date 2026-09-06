@@ -183,7 +183,7 @@ then call the analysis module directly against `.erl` fixtures in `<suite>_SUITE
 
 ### 0.14 — Module-list guard
 
-- **Status**: todo
+- **Status**: done (suite added; 1 expected failure remains until task 1.0)
 - **Goal**: CT case asserting every `src/lsp_*.erl` and `src/gen_lsp_*.erl` module appears in `vscode_lsp_entry:compile_needed_modules/0`.
 - **Expected**: **this test fails on first write** — `lsp_fun_utils` and `lsp_signature_doc_layout` are missing from the list today. That failure is the point; it is fixed in task 1.0. Until then leave the case in the suite's `all()` and record the known failure here.
 - **Files**: `apps/erlangbridge/test/vscode_lsp_entry_SUITE.erl` (new)
