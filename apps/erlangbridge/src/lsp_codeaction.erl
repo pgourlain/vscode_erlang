@@ -107,8 +107,22 @@ fix(File, #{range := #{start := #{line := Line}}} = Diagnostic,
     Edit = lsp_rename:build_workspace_edit([{File, Line + 1, 1, Line + 2, 1, <<>>}]),
     [action(<<"Remove include of missing file \"", MissingFile/binary, "\"">>, Diagnostic, Edit)];
 
+%% no -module(...) attribute at all: unlike every fix above, erl_lint's own
+%% messageBody here is a bare atom (undefined_module), not a tagged tuple -
+%% there is nothing else to inspect, the fix is always the same. The name
+%% is inferred from the file's own basename, matching the Erlang convention
+%% that a module's name always matches its filename.
+fix(File, Diagnostic, <<"erl_lint">>, <<"undefined_module">>) ->
+    ModuleName = module_name_for_file(File),
+    InsertText = iolist_to_binary(io_lib:format("-module(~s).~n", [ModuleName])),
+    Edit = lsp_rename:build_workspace_edit([{File, 1, 1, 1, 1, InsertText}]),
+    [action(<<"Add -module(", ModuleName/binary, ")">>, Diagnostic, Edit)];
+
 fix(_File, _Diagnostic, _Module, _MessageBody) ->
     [].
+
+module_name_for_file(File) ->
+    unicode:characters_to_binary(filename:basename(File, ".erl")).
 
 action(Title, Diagnostic, Edit) ->
     #{
@@ -179,7 +193,7 @@ actions_for_cursor(File, #{start := #{line := Line0}} = Range) ->
         _ ->
             []
     end,
-    FunctionActions ++ if_case_actions(File, Line0);
+    FunctionActions ++ if_case_actions(File, Line0) ++ organize_export_actions(File, Tree, Line0);
 actions_for_cursor(_File, _Range) ->
     [].
 
@@ -646,6 +660,47 @@ pos_to_offset(Content, Line, Col) ->
     {Before, _} = lists:split(Line - 1, Lines),
     LineStart = lists:foldl(fun (L, Acc) -> Acc + byte_size(L) + 1 end, 0, Before),
     LineStart + (Col - 1).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% task 2.6: source action - sort -export %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% Cursor on a specific -export(...) attribute's own line: offered only
+%% when its entries are not already sorted (Name, then Arity - exactly
+%% lists:sort/1's own term order on {Name, Arity} tuples), so a
+%% already-tidy -export never shows a no-op action.
+organize_export_actions(File, Tree, Line0) ->
+    CursorLine = Line0 + 1,
+    case [{Pos, Exports} || {attribute, {Line, _} = Pos, export, Exports} <- Tree, Line =:= CursorLine] of
+        [{Pos, Exports} | _] ->
+            Sorted = lists:sort(Exports),
+            case Sorted =:= Exports of
+                true -> [];
+                false -> [organize_export_action(File, Pos, Sorted)]
+            end;
+        [] ->
+            []
+    end.
+
+organize_export_action(File, Pos, Sorted) ->
+    Content = read_content(File),
+    {OpenLine, OpenCol} = find_opening_bracket_after(Content, Pos, $[),
+    {CloseLine, CloseCol} = find_closing_bracket_before_dot(Content, Pos, $]),
+    NewText = iolist_to_binary(lists:join(<<", ">>, [export_entry_text(N, A) || {N, A} <- Sorted])),
+    Edit = lsp_rename:build_workspace_edit([{File, OpenLine, OpenCol + 1, CloseLine, CloseCol, NewText}]),
+    #{title => <<"Sort -export list">>, kind => <<"source">>, edit => Edit}.
+
+export_entry_text(Name, Arity) ->
+    iolist_to_binary(io_lib:format("~s/~p", [Name, Arity])).
+
+%% Mirrors find_closing_bracket_before_dot/3, but for the *first* token
+%% matching OpenChar instead of the last one before the form's dot.
+find_opening_bracket_after(Content, {StartLine, StartCol}, OpenChar) ->
+    {ok, Tokens, _} = erl_scan:string(binary_to_list(Content), {1, 1}),
+    RelevantTokens = lists:dropwhile(fun (T) -> token_pos(T) < {StartLine, StartCol} end, Tokens),
+    FormTokens = lists:takewhile(fun (T) -> element(1, T) =/= dot end, RelevantTokens),
+    Brackets = [T || T <- FormTokens, element(1, T) =:= list_to_atom([OpenChar])],
+    token_pos(hd(Brackets)).
 
 %%%%%%%%%%%%%
 %% helpers %%

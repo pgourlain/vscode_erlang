@@ -49,7 +49,10 @@ all() -> [
     cursor_on_multi_use_binding_does_not_offer_inline_variable,
     selecting_a_leading_block_offers_extract_function,
     selecting_a_block_whose_non_result_binding_is_used_after_offers_no_extract,
-    selecting_the_clauses_own_last_statement_offers_no_extract
+    selecting_the_clauses_own_last_statement_offers_no_extract,
+    missing_module_attribute_gets_one_added,
+    cursor_on_unsorted_export_offers_sort_action,
+    cursor_on_already_sorted_export_offers_no_action
 ].
 
 init_per_suite(Config) ->
@@ -343,6 +346,30 @@ selecting_a_block_whose_non_result_binding_is_used_after_offers_no_extract(Confi
 selecting_the_clauses_own_last_statement_offers_no_extract(Config) ->
     Actions = actions_in_range(Config, "extract_multi.erl", {7, 0}, {7, 6}),
     ?assertNot(lists:any(fun (A) -> binary:match(maps:get(title, A), <<"Extract function">>) =/= nomatch end, Actions)).
+
+%% no_module.erl has no -module(...) attribute at all: erl_lint reports
+%% this as an error whose messageBody is a bare atom (undefined_module),
+%% unlike every other fix in this suite, which all match on tagged tuples.
+missing_module_attribute_gets_one_added(Config) ->
+    [Action] = actions_for(Config, "no_module.erl"),
+    ?assertEqual(<<"Add -module(no_module)">>, maps:get(title, Action)),
+    apply_and_assert(Config, "no_module.erl", Action,
+        <<"-module(no_module).\n-export([f/0]).\n\nf() -> ok.\n">>).
+
+%% unsorted_export.erl: -export([c/0, a/1, a/0, b/0]). - lists:sort/1's own
+%% term order on {Name, Arity} tuples is exactly the desired sort key
+%% (Name, then Arity), so no custom comparator is needed.
+cursor_on_unsorted_export_offers_sort_action(Config) ->
+    Action = action_at(Config, "unsorted_export.erl", {1, 4}, <<"Sort -export list">>),
+    ?assertEqual(<<"source">>, maps:get(kind, Action)),
+    apply_and_assert(Config, "unsorted_export.erl", Action,
+        <<"-module(unsorted_export).\n-export([a/0, a/1, b/0, c/0]).\n\n"
+          "a() -> ok.\na(_X) -> ok.\nb() -> ok.\nc() -> ok.\n">>).
+
+%% sorted_export.erl is already in order: offering a no-op action would be
+%% pointless noise.
+cursor_on_already_sorted_export_offers_no_action(Config) ->
+    ?assertEqual([], actions_at(Config, "sorted_export.erl", {1, 4})).
 
 %%%%%%%%%%%%%
 %% helpers %%

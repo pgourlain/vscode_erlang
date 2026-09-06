@@ -288,7 +288,7 @@ Set `codeActionProvider => #{codeActionKinds => [...], resolveProvider => true}`
 | 2.3 | Export/spec actions: add/remove from `-export`; generate `-spec` from inferred clause heads (reuse `lsp_navigation:function_clauses/2` + arg-name logic in `lsp_inlayhints.erl`) | done |
 | 2.4 | Behaviour support: on `-behaviour(X)`, "Implement missing callbacks" — callbacks via `gen_lsp_help_server`/EEP-48, generate stubs | done (see note) |
 | 2.5 | Refactors: extract function from selection; inline variable; convert `if`↔`case`. Ship after 2.2-2.4 | done (minimal scope, see note) |
-| 2.6 | Source actions: organize/sort `-export`; add missing `-module` | todo |
+| 2.6 | Source actions: organize/sort `-export`; add missing `-module` | done |
 
 - **New file**: `apps/erlangbridge/src/lsp_codeaction.erl` (+ add to `compile_needed_modules/0`)
 - **New test**: `apps/erlangbridge/test/lsp_codeaction_SUITE.erl`
@@ -411,7 +411,7 @@ Source of truth: `apps/erlangbridge/src/lsp_handlers.erl:22-54`. Update as flags
 | `typeDefinitionProvider` | ❌ | 4.3 |
 | `implementationProvider` | ❌ | 4.4 |
 | `documentHighlightProvider` | ❌ | 4.7 |
-| `codeActionProvider` | ✅ (infra only, no fix yet) | 2.1 |
+| `codeActionProvider` | ✅ (2.1-2.6 fixes/refactors/source actions shipped) | 2.1 |
 | `documentLinkProvider` | ❌ | 5.7 |
 | `colorProvider` | ❌ | n/a for Erlang |
 | `documentRangeFormattingProvider` | ❌ | 5.3 |
