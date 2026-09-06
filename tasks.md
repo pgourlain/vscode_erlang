@@ -85,7 +85,7 @@ then call the analysis module directly against `.erl` fixtures in `<suite>_SUITE
 
 ### 0.2 — `lsp_syntax_SUITE`
 
-- **Status**: todo
+- **Status**: done
 - **Goal**: `erl_lint` diagnostics for fixtures with: syntax error, unused variable, unused function, missing include, bad record field. Pin severity mapping and the `data`/`correlation_data` field shape. Plus `lsp_parse` on `.src` and `rebar.config` fixtures.
 - **Files**: `apps/erlangbridge/test/lsp_syntax_SUITE.erl` + `_SUITE_data/` (new)
 - **Reference**: `lsp_handlers.erl:472-500` (publishDiagnostics + severity map), `lsp_syntax.erl`, `lsp_parse.erl`
@@ -192,7 +192,7 @@ then call the analysis module directly against `.erl` fixtures in `<suite>_SUITE
 
 ### 0.15 — Shared fixture project
 
-- **Status**: todo
+- **Status**: done
 - **Goal**: one realistic multi-module rebar3 project reused by several suites instead of duplicating `_SUITE_data`: behaviour + implementor, records, macros, includes, types, cross-module calls, a `_SUITE.erl`, an eunit module.
 - **Files**: `apps/erlangbridge/test/fixtures_common/` (new)
 - **Deps**: do early — 0.2 through 0.12 all point at it

@@ -1,0 +1,4 @@
+{application, myapp,
+ [{description, "myapp"},
+  {vsn, "0.1.0"}
+ ]
