@@ -116,6 +116,26 @@
 				"path": "./grammar/Erlang.plist"
 			}
 		],
+		"semanticTokenScopes": [
+			{
+				"language": "erlang",
+				"scopes": {
+					"namespace": ["entity.name.type.class.module.erlang"],
+					"namespace.defaultLibrary": ["support.class.builtin", "entity.name.type.class.module.erlang"],
+					"function": ["entity.name.function.erlang"],
+					"function.definition": ["entity.name.function.definition.erlang"],
+					"function.deprecated": ["invalid.deprecated", "entity.name.function.erlang"],
+					"macro": ["entity.name.function.macro.erlang"],
+					"macro.definition": ["entity.name.function.macro.definition.erlang"],
+					"variable": ["variable.other.erlang"],
+					"parameter": ["variable.parameter.erlang"],
+					"type": ["entity.name.type.erlang"],
+					"struct": ["entity.name.type.class.record.erlang"],
+					"struct.definition": ["entity.name.type.class.record.definition.erlang"],
+					"property": ["variable.other.field.erlang"]
+				}
+			}
+		],
 		"commands": [
 			{
 				"command": "extension.rebarBuild",

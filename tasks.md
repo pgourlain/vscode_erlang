@@ -305,7 +305,7 @@ Highlighting is TextMate-only today. Semantic tokens give real macro/record/type
 |---|---|---|
 | 3.1 | Legend + full-document tokenizer over the cached syntax tree. Types: `namespace` (module), `function`, `macro`, `variable`, `parameter`, `type`, `struct` (record), `property` (record field), `string`, `number`, `comment`, `keyword`, `operator`. Modifiers: `definition`, `declaration`, `readonly`, `deprecated` (from `-deprecated`), `defaultLibrary` (OTP modules — already known to `gen_lsp_config_server`) | done (semantic-only scope, see note) |
 | 3.2 | Range variant + delta (per-document token cache keyed by result id, alongside existing caches) | done |
-| 3.3 | `contributes.semanticTokenScopes` in `package.json` mapping Erlang tokens to TextMate scopes so themes without semantic support degrade correctly | todo |
+| 3.3 | `contributes.semanticTokenScopes` in `package.json` mapping Erlang tokens to TextMate scopes so themes without semantic support degrade correctly | done |
 | 3.4 | Setting `erlang.semanticTokensEnabled` (default `true`), plumbed like `codeLensEnabled` | todo |
 
 - **New file**: `apps/erlangbridge/src/lsp_semantic_tokens.erl` (+ `compile_needed_modules/0`)
