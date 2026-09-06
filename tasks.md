@@ -144,7 +144,7 @@ then call the analysis module directly against `.erl` fixtures in `<suite>_SUITE
 
 ### 0.9 — `lsp_inlinevalues_SUITE`
 
-- **Status**: todo
+- **Status**: done
 - **Goal**: variable values for a paused-frame scenario. Pin the non-standard plural method name `textDocument/inlineValues` (which is what the client actually calls).
 - **Files**: `apps/erlangbridge/test/lsp_inlinevalues_SUITE.erl` + `_SUITE_data/` (new)
 - **Reference**: `lsp_handlers.erl:290-306`, client at `lib/lsp/lsp-inlinevalues.ts:36-38`
