@@ -11,6 +11,10 @@
 -export([textDocument_codeAction/2, codeAction_resolve/2, workspace_executeCommand/2]).
 -export([textDocument_semanticTokens_full/2, textDocument_semanticTokens_full_delta/2,
     textDocument_semanticTokens_range/2]).
+-export([textDocument_declaration/2, textDocument_typeDefinition/2, textDocument_implementation/2,
+    textDocument_documentHighlight/2, workspace_symbol/2, workspaceSymbol_resolve/2]).
+-export([textDocument_prepareCallHierarchy/2, callHierarchy_incomingCalls/2, callHierarchy_outgoingCalls/2]).
+-export([textDocument_prepareTypeHierarchy/2, typeHierarchy_supertypes/2, typeHierarchy_subtypes/2]).
 
 -include("lsp_log.hrl").
 
@@ -23,12 +27,12 @@ initialize(_Socket, Params) ->
         completionProvider => #{triggerCharacters => <<":#.">>},
         hoverProvider => true,
         signatureHelpProvider => #{triggerCharacters => <<"(,">>, retriggerCharacters => <<",">>},
-        %declarationProvider => true
+        declarationProvider => true, %% task 4.2
         definitionProvider => true,
-        typeDefinitionProvider => false,
-        implementationProvider => false,
+        typeDefinitionProvider => true, %% task 4.3
+        implementationProvider => true, %% task 4.4
         referencesProvider => true,
-        documentHighlightProvider => false,
+        documentHighlightProvider => true, %% task 4.7
         documentSymbolProvider => true,
         codeActionProvider => #{
             codeActionKinds => [<<"quickfix">>, <<"source">>, <<"refactor">>],
@@ -49,18 +53,18 @@ initialize(_Socket, Params) ->
         executeCommandProvider => #{commands => []},
         selectionRangeProvider => false,
         linkedEditingRangeProvider => false,
-        callHierarchyProvider => false,
+        callHierarchyProvider => true, %% task 4.5
         semanticTokensProvider => #{
             legend => lsp_semantic_tokens:legend(),
             full => #{delta => true}, %% task 3.2
             range => true %% task 3.2
         },
         monikerProvider => false,
-        typeHierarchyProvider => false,
+        typeHierarchyProvider => true, %% task 4.6
         inlineValueProvider => true,
         inlayHintProvider => true,
         diagnosticProvider => false,
-        workspaceSymbolProvider => false,
+        workspaceSymbolProvider => #{resolveProvider => true}, %% task 4.1
         workspace => #{
             workspaceFolders => #{supported => true, changeNotifications => true}
         }
@@ -244,6 +248,80 @@ textDocument_references(_Socket, Params) ->
             range => lsp_utils:client_range(L, S, E)
         }
     end, lsp_navigation:references(lsp_utils:file_uri_to_file(Uri), Line + 1, Character + 1)).
+
+%% Erlang has no separate declaration/definition distinction (unlike e.g.
+%% a C header vs its .c file) - task 4.2 is exactly this alias.
+textDocument_declaration(_Socket, Params) ->
+    Uri = mapmapget(textDocument, uri, Params),
+    Line = mapmapget(position, line, Params),
+    Character = mapmapget(position, character, Params),
+    Locations = lsp_navigation:definition(lsp_utils:file_uri_to_file(Uri), Line + 1, Character + 1),
+    [#{uri => lsp_utils:file_uri_to_vscode_uri(lsp_utils:file_to_file_uri(File)),
+       range => lsp_utils:client_range(L, S, E)
+     }
+     || {File, L, S, E} <- Locations].
+
+textDocument_typeDefinition(_Socket, Params) ->
+    Uri = mapmapget(textDocument, uri, Params),
+    Line = mapmapget(position, line, Params),
+    Character = mapmapget(position, character, Params),
+    Locations = lsp_navigation:type_definition(lsp_utils:file_uri_to_file(Uri), Line + 1, Character + 1),
+    [#{uri => lsp_utils:file_uri_to_vscode_uri(lsp_utils:file_to_file_uri(File)),
+       range => lsp_utils:client_range(L, S, E)
+     }
+     || {File, L, S, E} <- Locations].
+
+textDocument_implementation(_Socket, Params) ->
+    Uri = mapmapget(textDocument, uri, Params),
+    Line = mapmapget(position, line, Params),
+    Character = mapmapget(position, character, Params),
+    Locations = lsp_navigation:implementation(lsp_utils:file_uri_to_file(Uri), Line + 1, Character + 1),
+    [#{uri => lsp_utils:file_uri_to_vscode_uri(lsp_utils:file_to_file_uri(File)),
+       range => lsp_utils:client_range(L, S, E)
+     }
+     || {File, L, S, E} <- Locations].
+
+textDocument_documentHighlight(_Socket, Params) ->
+    Uri = mapmapget(textDocument, uri, Params),
+    Line = mapmapget(position, line, Params),
+    Character = mapmapget(position, character, Params),
+    Highlights = lsp_navigation:document_highlights(lsp_utils:file_uri_to_file(Uri), Line + 1, Character + 1),
+    [#{range => lsp_utils:client_range(L, S, E), kind => Kind} || {Kind, L, S, E} <- Highlights].
+
+workspace_symbol(_Socket, Params) ->
+    Query = maps:get(query, Params, <<>>),
+    lsp_workspace_symbol:symbols(Query).
+
+workspaceSymbol_resolve(_Socket, Symbol) ->
+    lsp_workspace_symbol:resolve(Symbol).
+
+textDocument_prepareCallHierarchy(_Socket, Params) ->
+    Uri = mapmapget(textDocument, uri, Params),
+    Line = mapmapget(position, line, Params),
+    Character = mapmapget(position, character, Params),
+    lsp_hierarchy:prepare_call_hierarchy(lsp_utils:file_uri_to_file(Uri), Line + 1, Character + 1).
+
+callHierarchy_incomingCalls(_Socket, Params) ->
+    Item = maps:get(item, Params),
+    lsp_hierarchy:incoming_calls(Item).
+
+callHierarchy_outgoingCalls(_Socket, Params) ->
+    Item = maps:get(item, Params),
+    lsp_hierarchy:outgoing_calls(Item).
+
+textDocument_prepareTypeHierarchy(_Socket, Params) ->
+    Uri = mapmapget(textDocument, uri, Params),
+    Line = mapmapget(position, line, Params),
+    Character = mapmapget(position, character, Params),
+    lsp_hierarchy:prepare_type_hierarchy(lsp_utils:file_uri_to_file(Uri), Line + 1, Character + 1).
+
+typeHierarchy_supertypes(_Socket, Params) ->
+    Item = maps:get(item, Params),
+    lsp_hierarchy:supertypes(Item).
+
+typeHierarchy_subtypes(_Socket, Params) ->
+    Item = maps:get(item, Params),
+    lsp_hierarchy:subtypes(Item).
 
 textDocument_hover(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),

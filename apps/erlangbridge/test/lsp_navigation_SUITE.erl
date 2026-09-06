@@ -17,7 +17,13 @@ all() -> [testnavigation, test_macros,
     test_definition_macro,
     test_definition_include,
     test_definition_type_is_unsupported,
-    test_definition_behaviour_callback_is_unsupported
+    test_definition_behaviour_callback_is_unsupported,
+    test_type_definition_from_spec_usage,
+    test_implementation_from_behaviour_attribute,
+    test_implementation_from_callback_declaration,
+    test_document_highlight_variable_write_and_read,
+    test_document_highlight_function_definition_and_call,
+    test_document_highlight_record_usage_sites
 ].
 
 % required, but can just return Config. this is a suite level setup function.
@@ -168,8 +174,10 @@ nav_ext_setup(Config) ->
     gen_lsp_doc_server:config_change(),
     TargetFile = filename:join(AppDir, "nav_ext_target.erl"),
     CallerFile = filename:join(AppDir, "nav_ext_caller.erl"),
+    ImplFile = filename:join(AppDir, "nav_ext_impl.erl"),
     nav_ext_open_and_parse(TargetFile),
     nav_ext_open_and_parse(CallerFile),
+    nav_ext_open_and_parse(ImplFile),
     {TargetFile, CallerFile}.
 
 nav_ext_open_and_parse(File) ->
@@ -269,6 +277,80 @@ test_definition_behaviour_callback_is_unsupported(Config) ->
     {ok, TargetContent} = file:read_file(TargetFile),
     {Line, Column} = nav_ext_position_of(TargetContent, "-callback handle"),
     ?assertEqual([], lsp_navigation:definition(TargetFile, Line, Column)).
+
+%% task 4.3: unlike plain definition/3 (see test_definition_type_is_
+%% unsupported above), type_definition/3 has its own, separate walk for
+%% exactly this - a click on item_id() inside use_type/1's own -spec
+%% resolves to -type item_id() :: pos_integer(). two lines above.
+test_type_definition_from_spec_usage(Config) ->
+    {TargetFile, _CallerFile} = nav_ext_setup(Config),
+    {ok, TargetContent} = file:read_file(TargetFile),
+    {Line, Column} = nav_ext_position_of(TargetContent, "item_id()) -> item_id"),
+    [{DefFile, DefLine, 1, 1}] = lsp_navigation:type_definition(TargetFile, Line, Column),
+    ?assertEqual(TargetFile, DefFile),
+    {DeclLine, _} = nav_ext_position_of(TargetContent, "-type item_id()"),
+    ?assertEqual(DeclLine, DefLine).
+
+%% task 4.4, forward direction: a click anywhere on nav_ext_impl.erl's own
+%% -behaviour(nav_ext_target) line jumps to nav_ext_target's file.
+test_implementation_from_behaviour_attribute(Config) ->
+    {TargetFile, _CallerFile} = nav_ext_setup(Config),
+    AppDir = ?config(data_dir, Config),
+    ImplFile = filename:join(AppDir, "nav_ext_impl.erl"),
+    {ok, ImplContent} = file:read_file(ImplFile),
+    {Line, Column} = nav_ext_position_of(ImplContent, "-behaviour(nav_ext_target)"),
+    ?assertEqual([{TargetFile, 1, 1, 1}], lsp_navigation:implementation(ImplFile, Line, Column)).
+
+%% task 4.4, reverse direction: a click on -callback handle(term()) -> ...
+%% in nav_ext_target.erl finds nav_ext_impl.erl's own handle/1 - the
+%% concrete implementation, not just "some file with a matching
+%% -behaviour" - reusing the same cross-file function search
+%% find_definition/3 already does for a real function reference.
+test_implementation_from_callback_declaration(Config) ->
+    {TargetFile, _CallerFile} = nav_ext_setup(Config),
+    AppDir = ?config(data_dir, Config),
+    ImplFile = filename:join(AppDir, "nav_ext_impl.erl"),
+    {ok, TargetContent} = file:read_file(TargetFile),
+    {Line, Column} = nav_ext_position_of(TargetContent, "-callback handle"),
+    [{DefFile, DefLine, _, _}] = lsp_navigation:implementation(TargetFile, Line, Column),
+    ?assertEqual(ImplFile, DefFile),
+    {ok, ImplContent} = file:read_file(ImplFile),
+    {DeclLine, _} = nav_ext_position_of(ImplContent, "handle(Msg) ->"),
+    ?assertEqual(DeclLine, DefLine).
+
+%% task 4.7: Identifier is use_record/1's own parameter (a "write" - each
+%% clause is its own fresh binding site) and is referenced again inside
+%% the record construction (a plain "read").
+test_document_highlight_variable_write_and_read(Config) ->
+    {TargetFile, _CallerFile} = nav_ext_setup(Config),
+    {ok, TargetContent} = file:read_file(TargetFile),
+    {Line, Column} = nav_ext_position_of(TargetContent, "Identifier)"),
+    Highlights = lists:sort(lsp_navigation:document_highlights(TargetFile, Line, Column)),
+    {ParamLine, ParamCol} = nav_ext_position_of(TargetContent, "Identifier)"),
+    {UseLine, UseCol} = nav_ext_position_of(TargetContent, "Identifier}"),
+    ?assertEqual(
+        lists:sort([{3, ParamLine, ParamCol, ParamCol + 10}, {2, UseLine, UseCol, UseCol + 10}]),
+        Highlights).
+
+%% task 4.7: greet/1's own definition clause plus nav_ext_caller.erl's
+%% remote call site - both files, one document-scoped call.
+test_document_highlight_function_definition_and_call(Config) ->
+    {TargetFile, _CallerFile} = nav_ext_setup(Config),
+    {ok, TargetContent} = file:read_file(TargetFile),
+    {Line, Column} = nav_ext_position_of(TargetContent, "greet(Name) ->"),
+    {DefLine, DefCol} = nav_ext_position_of(TargetContent, "greet(Name) ->"),
+    ?assertEqual([{1, DefLine, DefCol, DefCol + 5}], lsp_navigation:document_highlights(TargetFile, Line, Column)).
+
+%% task 4.7: #item{...} construction in use_record/1 - the only occurrence
+%% of the `item` record in this file (its own -record(item, ...)
+%% declaration line is deliberately not highlighted - see
+%% document_highlights/3's own characterization comment).
+test_document_highlight_record_usage_sites(Config) ->
+    {TargetFile, _CallerFile} = nav_ext_setup(Config),
+    {ok, TargetContent} = file:read_file(TargetFile),
+    {Line, Column} = nav_ext_position_of(TargetContent, "#item{identifier"),
+    {UseLine, UseCol} = nav_ext_position_of(TargetContent, "item{identifier"),
+    ?assertEqual([{1, UseLine, UseCol, UseCol + 4}], lsp_navigation:document_highlights(TargetFile, Line, Column)).
 
 %% 1-based {Line, Column} of the first character of Marker.
 nav_ext_position_of(Content, Marker) ->

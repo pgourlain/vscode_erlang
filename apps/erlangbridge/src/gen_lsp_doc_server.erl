@@ -9,6 +9,7 @@
 -export([get_syntax_tree/1, get_dodged_syntax_tree/1, get_references/1, get_inlayhints/1]).
 -export([get_semantic_tokens_cache/1, store_semantic_tokens_cache/3]).
 -export([root_available/0, config_change/0, project_modules/0, get_module_file/1, get_module_files/1, get_build_dir/0, find_source_file/1]).
+-export([all_project_files/0]).
 
 %% Cache management
 -export([delete_unused_caches/2,
@@ -168,6 +169,19 @@ get_module_file(Module) ->
 
 get_module_files(Module) ->
     gen_server:call(?SERVER, {get_module_files, Module}).
+
+%% @doc Every source file known to the project scan (task 4.1/4.4's shared
+%% enumeration point) - every module's own file list, flattened and
+%% deduplicated (a module can legitimately have more than one file, e.g.
+%% a build-target-specific alternative).
+%%
+%% project_modules/0 returns its keys as *strings* (its own internal map
+%% is keyed that way - see do_add_project_file/3), unlike get_module_file/
+%% get_module_files, which have only ever been called with atoms
+%% (a module name straight from the AST) - this is the first caller to
+%% chain the two together, so the mismatch needs bridging right here.
+all_project_files() ->
+    lists:usort(lists:flatmap(fun (Module) -> get_module_files(list_to_atom(Module)) end, project_modules())).
 
 get_build_dir() ->
     ConfigFilename = filename:join([gen_lsp_config_server:root(), "rebar.config"]),

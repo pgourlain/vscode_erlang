@@ -320,13 +320,13 @@ Highlighting is TextMate-only today. Semantic tokens give real macro/record/type
 
 | id | goal | status |
 |---|---|---|
-| 4.1 | **`workspace/symbol`** — export `workspace_symbol/2`, capability `workspaceSymbolProvider => #{resolveProvider => true}`. Build a symbol index (functions, records, types, macros, behaviours) on the existing `gen_lsp_doc_server` module→file index and project scan. **Single most-missed navigation feature.** | todo |
-| 4.2 | `textDocument/declaration` — the line is already written and commented out at `lsp_handlers.erl:27`. Cheap win. | todo |
-| 4.3 | `textDocument/typeDefinition` — from a `-spec`/`-type` usage to the `-type`/`-opaque` definition. `lsp_fun_utils:get_type_range/1` already exists. | todo |
-| 4.4 | `textDocument/implementation` — from a `-callback` to all modules with `-behaviour(That)`, and from a `-behaviour` attribute to the behaviour module | todo |
-| 4.5 | Call hierarchy — `textDocument/prepareCallHierarchy`, `callHierarchy/incomingCalls`, `outgoingCalls`. Built on `lsp_navigation:local_function_references/*` + the project references cache | todo |
-| 4.6 | Type hierarchy — behaviour ↔ implementors, over the 4.4 index | todo |
-| 4.7 | `textDocument/documentHighlight` — all occurrences of the variable/function/record under the cursor; Read/Write kinds where the AST allows | todo |
+| 4.1 | **`workspace/symbol`** — export `workspace_symbol/2`, capability `workspaceSymbolProvider => #{resolveProvider => true}`. Build a symbol index (functions, records, types, macros, behaviours) on the existing `gen_lsp_doc_server` module→file index and project scan. **Single most-missed navigation feature.** | done |
+| 4.2 | `textDocument/declaration` — the line is already written and commented out at `lsp_handlers.erl:27`. Cheap win. | done |
+| 4.3 | `textDocument/typeDefinition` — from a `-spec`/`-type` usage to the `-type`/`-opaque` definition. `lsp_fun_utils:get_type_range/1` already exists. | done |
+| 4.4 | `textDocument/implementation` — from a `-callback` to all modules with `-behaviour(That)`, and from a `-behaviour` attribute to the behaviour module | done |
+| 4.5 | Call hierarchy — `textDocument/prepareCallHierarchy`, `callHierarchy/incomingCalls`, `outgoingCalls`. Built on `lsp_navigation:local_function_references/*` + the project references cache | done |
+| 4.6 | Type hierarchy — behaviour ↔ implementors, over the 4.4 index | done |
+| 4.7 | `textDocument/documentHighlight` — all occurrences of the variable/function/record under the cursor; Read/Write kinds where the AST allows | done |
 
 - **New files**: `lsp_workspace_symbol.erl`, `lsp_hierarchy.erl` (+ `compile_needed_modules/0`)
 - **Deps**: Phase 0 gate, 0.11, 0.12
@@ -407,10 +407,10 @@ Source of truth: `apps/erlangbridge/src/lsp_handlers.erl:22-54`. Update as flags
 | `renameProvider` | ✅ | — |
 | `inlineValueProvider` | ✅ | — |
 | `inlayHintProvider` | ✅ (no resolve) | 5.8 |
-| `declarationProvider` | ❌ commented out | 4.2 |
-| `typeDefinitionProvider` | ❌ | 4.3 |
-| `implementationProvider` | ❌ | 4.4 |
-| `documentHighlightProvider` | ❌ | 4.7 |
+| `declarationProvider` | ✅ | 4.2 |
+| `typeDefinitionProvider` | ✅ | 4.3 |
+| `implementationProvider` | ✅ | 4.4 |
+| `documentHighlightProvider` | ✅ | 4.7 |
 | `codeActionProvider` | ✅ (2.1-2.6 fixes/refactors/source actions shipped) | 2.1 |
 | `documentLinkProvider` | ❌ | 5.7 |
 | `colorProvider` | ❌ | n/a for Erlang |
@@ -420,12 +420,12 @@ Source of truth: `apps/erlangbridge/src/lsp_handlers.erl:22-54`. Update as flags
 | `executeCommandProvider` | ✅ (empty commands list, infra only) | 2.1 |
 | `selectionRangeProvider` | ❌ | 5.2 |
 | `linkedEditingRangeProvider` | ❌ | not planned |
-| `callHierarchyProvider` | ❌ | 4.5 |
+| `callHierarchyProvider` | ✅ | 4.5 |
 | `semanticTokensProvider` | ✅ (full + delta + range, semantic types - see 3.1/3.2) | 3.1 |
 | `monikerProvider` | ❌ | not planned |
-| `typeHierarchyProvider` | ❌ | 4.6 |
+| `typeHierarchyProvider` | ✅ | 4.6 |
 | `diagnosticProvider` | ❌ (push only) | 5.9 |
-| `workspaceSymbolProvider` | ❌ | 4.1 |
+| `workspaceSymbolProvider` | ✅ | 4.1 |
 | `workspace.workspaceFolders` | ❌ absent | 1.3 |
 
 ## Commands

@@ -103,11 +103,12 @@ golden_initialize_result() ->
         completionProvider => #{triggerCharacters => <<":#.">>},
         hoverProvider => true,
         signatureHelpProvider => #{triggerCharacters => <<"(,">>, retriggerCharacters => <<",">>},
+        declarationProvider => true, %% task 4.2
         definitionProvider => true,
-        typeDefinitionProvider => false,
-        implementationProvider => false,
+        typeDefinitionProvider => true, %% task 4.3
+        implementationProvider => true, %% task 4.4
         referencesProvider => true,
-        documentHighlightProvider => false,
+        documentHighlightProvider => true, %% task 4.7
         documentSymbolProvider => true,
         codeActionProvider => #{ %% task 2.1
             codeActionKinds => [<<"quickfix">>, <<"source">>, <<"refactor">>],
@@ -124,7 +125,7 @@ golden_initialize_result() ->
         executeCommandProvider => #{commands => []}, %% task 2.1, no commands registered yet
         selectionRangeProvider => false,
         linkedEditingRangeProvider => false,
-        callHierarchyProvider => false,
+        callHierarchyProvider => true, %% task 4.5
         semanticTokensProvider => #{ %% task 3.1, range/delta task 3.2
             legend => #{
                 tokenTypes => [<<"namespace">>, <<"function">>, <<"macro">>, <<"variable">>,
@@ -137,11 +138,11 @@ golden_initialize_result() ->
             range => true
         },
         monikerProvider => false,
-        typeHierarchyProvider => false,
+        typeHierarchyProvider => true, %% task 4.6
         inlineValueProvider => true,
         inlayHintProvider => true,
         diagnosticProvider => false,
-        workspaceSymbolProvider => false,
+        workspaceSymbolProvider => #{resolveProvider => true}, %% task 4.1
         workspace => #{
             workspaceFolders => #{supported => true, changeNotifications => true}
         }
