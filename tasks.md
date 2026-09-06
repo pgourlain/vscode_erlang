@@ -127,7 +127,7 @@ then call the analysis module directly against `.erl` fixtures in `<suite>_SUITE
 
 ### 0.7 — `lsp_symbols_SUITE`
 
-- **Status**: todo
+- **Status**: done
 - **Goal**: `documentSymbol` result shape, and `codeLens` counts (exported / references / unused) for a fixture with known call sites.
 - **Files**: `apps/erlangbridge/test/lsp_symbols_SUITE.erl` + `_SUITE_data/` (new)
 - **Reference**: `lsp_handlers.erl:220-250` (codeLens), `:276` (documentSymbol)
