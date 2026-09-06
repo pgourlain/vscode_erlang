@@ -242,7 +242,7 @@ Only then may `apps/erlangbridge/src/` or `lib/` be edited.
 
 ### 1.2 — Manifest hygiene
 
-- **Status**: todo
+- **Status**: done (visual "no trust warning" check in the Extensions view still needs a human look)
 - **Goal**: add the missing `onCommand:extension.rebareunit` to `activationEvents`; declare `capabilities.untrustedWorkspaces` and `capabilities.virtualWorkspaces` (the extension spawns `erl`, so both are restricted — must be explicit or VS Code warns the user).
 - **Files**: `package.json`
 - **Verify**: `npm run compile && npm test`; check the Extensions view shows no trust warning

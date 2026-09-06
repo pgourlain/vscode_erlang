@@ -7,6 +7,16 @@
 	"engines": {
 		"vscode": "^1.136.0"
 	},
+	"capabilities": {
+		"untrustedWorkspaces": {
+			"supported": false,
+			"description": "This extension spawns erl/rebar3 processes and runs their output, so it cannot be used safely in untrusted workspaces."
+		},
+		"virtualWorkspaces": {
+			"supported": false,
+			"description": "This extension needs a real filesystem to spawn erl/rebar3 against, so it does not support virtual workspaces."
+		}
+	},
 	"categories": [
 		"Programming Languages",
 		"Snippets",
@@ -19,6 +29,7 @@
 		"onCommand:extension.rebarBuild",
 		"onCommand:extension.rebarGetDeps",
 		"onCommand:extension.rebarUpdateDeps",
+		"onCommand:extension.rebareunit",
 		"onCommand:extension.erleunit",
 		"onCommand:extension.dialyzer"
 	],
