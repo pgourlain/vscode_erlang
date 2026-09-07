@@ -1,5 +1,7 @@
-%% Task 6.1/6.3: `erlang/discoverTests` and `erlang/runTests` custom LSP
+%% Task 6.1/6.3/6.6: `erlang/discoverTests` and `erlang/runTests` custom LSP
 %% requests - Erlang-driven Test Explorer support (Phase 6, tasks.md).
+%% `run_tests/2` also drives `cover`-based coverage collection when its
+%% Params carry `coverage => true` (task 6.6).
 %%
 %% Discovery walks every project file (reusing gen_lsp_doc_server's project
 %% scan) and classifies it as either a Common Test suite (`*_SUITE.erl`) or
@@ -136,6 +138,7 @@ gather_ct_tests(File) ->
 
 run_tests(Socket, Params) ->
     Requested = maps:get(tests, Params, []),
+    Coverage = maps:get(coverage, Params, false),
     Targets = resolve_targets(Requested),
     {EunitTargets, CtTargets} = lists:partition(fun (#{kind := Kind}) -> Kind =:= eunit end, Targets),
     %% `public`, not `private`/`protected`: eunit's listener and CT's hook
@@ -147,14 +150,118 @@ run_tests(Socket, Params) ->
     %% An atom round-trips fine.
     TableName = list_to_atom("lsp_testing_results_" ++ integer_to_list(erlang:unique_integer([positive]))),
     Table = ets:new(TableName, [set, public, named_table]),
+    %% See `add_project_ebin_paths/0` below: the bridge node's own code path
+    %% has nothing of the project under test on it, so any test calling
+    %% another module of that project would otherwise die with `undef`.
+    AddedPaths = add_project_ebin_paths(),
+    Coverage andalso cover:start(),
     try
-        run_eunit(Socket, EunitTargets, Table),
-        run_ct(Socket, CtTargets, Table),
+        run_eunit(Socket, EunitTargets, Table, Coverage),
+        run_ct(Socket, CtTargets, Table, Coverage),
         ets:delete(Table, '$socket'),
-        #{summary => summarize(ets:tab2list(Table))}
+        Summary = summarize(ets:tab2list(Table)),
+        CoverageResult = case Coverage of
+            true -> collect_coverage([M || #{module := M} <- Targets]);
+            false -> []
+        end,
+        #{summary => Summary, coverage => CoverageResult}
     after
-        ets:delete(Table)
+        ets:delete(Table),
+        %% Reverts every cover-compiled module back to its plain, uninstrumented
+        %% object code - the next (possibly non-coverage) run must not keep
+        %% paying the instrumentation overhead, or keep serving stale line
+        %% counts from this run.
+        Coverage andalso cover:stop(),
+        %% Must run *after* cover:stop/0, which resolves each module's
+        %% original (non-instrumented) object code through the code path.
+        remove_project_ebin_paths(AddedPaths)
     end.
+
+%% ============================================================================
+%% project code path
+%% ============================================================================
+
+%% The bridge node's own code path is *only* the extension's own app: it is
+%% started with cwd = <extension>/_build/default/lib/vscode_lsp and
+%% `-pa src -pa ebin` (lspclientextension.ts:255 -> ErlangShellLSP.ts), so
+%% nothing of the project under test is loadable from it. ensure_module_loaded/2
+%% compiles and loads the *test module itself* from source, but never anything
+%% that module calls - so `foo_tests` calling `foo:start()` dies with `undef`,
+%% for a reason that has nothing to do with the test itself.
+%%
+%% The debugger already solves exactly this for the debuggee node
+%% (ErlangShellDebugger.ts findEbinDirs/2 -> one `-pz` per ebin found under
+%% `_build`, driven by the `addEbinsToCodepath` launch attribute). Do the same
+%% here, for the duration of one run.
+-spec project_ebin_dirs() -> [file:filename()].
+project_ebin_dirs() ->
+    Root = gen_lsp_config_server:root(),
+    %% `undefined` means "no rebar.config at the workspace root". Fall back to
+    %% the conventional name anyway rather than giving up: a non-rebar project
+    %% may still have a `_build`, and if it doesn't, the wildcard below just
+    %% returns [] and this costs one failed directory listing.
+    BuildDir = case gen_lsp_doc_server:get_build_dir() of
+        undefined -> "_build";
+        Dir -> Dir
+    end,
+    %% wildcard/2, not wildcard/1: the pattern must not contain the workspace
+    %% root, or a `[`, `{` or `*` anywhere in the user's own directory names
+    %% would be interpreted as a glob. Cwd-relative matching keeps the root
+    %% itself literal. Results come back relative to Root.
+    Patterns = [
+        filename:join([BuildDir, "**", "ebin"]),  % rebar3
+        "ebin",                                   % flat / erlang.mk layout
+        filename:join(["apps", "*", "ebin"])       % umbrella built in place
+    ],
+    Relative = lists:usort(lists:flatmap(
+        fun (Pattern) -> filelib:wildcard(Pattern, Root) end, Patterns)),
+    [Abs || Rel <- Relative,
+            Abs <- [filename:join(Root, Rel)],
+            filelib:is_dir(Abs)].
+
+%% Returns only the directories this call actually added, so the cleanup
+%% below can never remove an entry that was already there for another reason.
+-spec add_project_ebin_paths() -> [file:filename()].
+add_project_ebin_paths() ->
+    CurrentPath = code:get_path(),
+    Added = [Dir || Dir <- project_ebin_dirs(), not lists:member(Dir, CurrentPath)],
+    %% `add_pathsz` (append), NEVER `add_pathsa`. This node is the language
+    %% server itself: prepending would let a stale .beam in the project under
+    %% test shadow an OTP module or one of the bridge's own modules that
+    %% hasn't been lazily loaded yet - not hypothetical, since the person
+    %% most likely to hit this is an extension developer with vscode_erlang
+    %% itself open as the workspace, whose own `_build/**/lib/vscode_lsp/ebin`
+    %% hold other builds of the very modules running this code. Appending
+    %% keeps them strictly below the node's own `-pa ebin`.
+    code:add_pathsz(Added),
+    Added =/= [] andalso ?LOG("lsp_testing: code path + ~p", [Added]),
+    Added.
+
+%% Undo add_project_ebin_paths/0. The bridge node outlives every test run, so:
+%%  - the extra path entries must not leak into unrelated LSP work afterwards;
+%%  - more importantly, any project module auto-loaded *through* those entries
+%%    must be unloaded, or a second run would keep serving the copy the first
+%%    run happened to load and would silently ignore a `rebar3 compile` done
+%%    in between.
+%% Only modules whose loaded-from filename is inside one of *our* dirs are
+%% touched: the bridge's own modules were loaded through the relative
+%% `-pa ebin` and so never match an absolute path here.
+-spec remove_project_ebin_paths([file:filename()]) -> ok.
+remove_project_ebin_paths([]) ->
+    ok;
+remove_project_ebin_paths(Dirs) ->
+    lists:foreach(fun
+        ({Module, Filename}) when is_list(Filename) ->
+            case lists:member(filename:dirname(Filename), Dirs) of
+                true  -> code:purge(Module), code:delete(Module);
+                false -> ok
+            end;
+        (_) ->
+            %% preloaded modules report their filename as an atom
+            ok
+    end, code:all_loaded()),
+    lists:foreach(fun code:del_path/1, Dirs),
+    ok.
 
 %% No explicit tests requested => run every test discovery finds.
 resolve_targets([]) ->
@@ -189,11 +296,11 @@ kind_atom(<<"eunit">>) -> eunit;
 kind_atom(ct) -> ct;
 kind_atom(eunit) -> eunit.
 
-run_eunit(_Socket, [], _Table) ->
+run_eunit(_Socket, [], _Table, _Coverage) ->
     ok;
-run_eunit(Socket, Targets, Table) ->
+run_eunit(Socket, Targets, Table, Coverage) ->
     Specs = lists:flatmap(fun (#{module := M, functions := Fns}) ->
-        ensure_module_loaded(M),
+        ensure_module_loaded(M, Coverage),
         case Fns of
             [] -> [M];
             _ -> [{M, F} || F <- Fns]
@@ -202,9 +309,9 @@ run_eunit(Socket, Targets, Table) ->
     catch eunit:test(Specs, [{report, {lsp_testing_eunit_report, [{socket, Socket}, {result_table, Table}]}}]),
     ok.
 
-run_ct(_Socket, [], _Table) ->
+run_ct(_Socket, [], _Table, _Coverage) ->
     ok;
-run_ct(Socket, Targets, Table) ->
+run_ct(Socket, Targets, Table, Coverage) ->
     %% `ct:run_test/1` changes the current working directory to its own
     %% log directory while running. If our own hook module or lsp_utils
     %% etc. haven't been loaded yet, the code server's usual lazy load can
@@ -226,7 +333,7 @@ run_ct(Socket, Targets, Table) ->
     %% passed through Opts directly.
     ets:insert(Table, {'$socket', Socket}),
     lists:foreach(fun (#{module := Suite, functions := Fns}) ->
-        ensure_module_loaded(Suite),
+        ensure_module_loaded(Suite, Coverage),
         Opts = [
             {suite, Suite},
             {logdir, LogDir},
@@ -242,14 +349,43 @@ run_ct(Socket, Targets, Table) ->
 ct_log_dir() ->
     filename:join([gen_lsp_config_server:root(), "_build", "test", "lsp_testing_logs"]).
 
-ensure_module_loaded(Module) ->
+%% Task 6.6: with coverage requested, always (re)compile through `cover`
+%% instead of the plain compile+load path - `cover:compile_module/2`
+%% instruments the module for line-hit counting; the ordinary
+%% code:is_loaded/1 short-circuit doesn't apply here, since a module
+%% loaded by an *earlier*, non-coverage run needs to be swapped out for
+%% its instrumented twin.
+ensure_module_loaded(Module, true) ->
+    case gen_lsp_doc_server:get_module_file(Module) of
+        undefined ->
+            ok;
+        SourceFile ->
+            %% Unlike compile:file/2 above, `binary`/`report_errors` aren't
+            %% valid here - cover:compile_module/2 manages the actual
+            %% compile+instrument+load pipeline itself and only wants the
+            %% extra options (include paths/defines) layered on top of it.
+            %% `{d,'TEST'}`: see the comment on the `false` clause below.
+            Options = [{d, 'TEST'} | [{i, Path} || Path <- lsp_parse:get_include_path(SourceFile)]],
+            catch cover:compile_module(SourceFile, Options),
+            ok
+    end;
+ensure_module_loaded(Module, false) ->
     case code:is_loaded(Module) of
         false ->
             case gen_lsp_doc_server:get_module_file(Module) of
                 undefined ->
                     ok;
                 SourceFile ->
-                    Options = [binary, report_errors | [{i, Path} || Path <- lsp_parse:get_include_path(SourceFile)]],
+                    %% `{d,'TEST'}`: exactly what rebar3's eunit provider (and
+                    %% erlang.mk) inject for a test build. Without it, a
+                    %% module whose tests live inside
+                    %% `-ifdef(TEST). ... -endif.` compiles *without* them -
+                    %% discovery still finds them (it reads the dodged tree,
+                    %% which ignores preprocessor conditionals entirely), so
+                    %% without this define the Test Explorer would offer a
+                    %% test that this compile can't possibly produce.
+                    Options = [binary, report_errors, {d, 'TEST'}
+                               | [{i, Path} || Path <- lsp_parse:get_include_path(SourceFile)]],
                     case compile:file(SourceFile, Options) of
                         {ok, ModuleName, Binary} ->
                             code:load_binary(ModuleName, SourceFile, Binary);
@@ -259,6 +395,37 @@ ensure_module_loaded(Module) ->
             end;
         _ ->
             ok
+    end.
+
+%% Task 6.6: per-line call counts for every module that was part of this
+%% run, via `cover:analyse(Module, calls, line)` - a plain executed/not-
+%% executed boolean loses "how many times", which VS Code's
+%% StatementCoverage accepts as a number and is strictly more informative.
+collect_coverage(Modules) ->
+    lists:filtermap(fun module_coverage/1, lists:usort(Modules)).
+
+module_coverage(Module) ->
+    case gen_lsp_doc_server:get_module_file(Module) of
+        undefined ->
+            false;
+        SourceFile ->
+            case cover:analyse(Module, calls, line) of
+                {ok, LineCalls} ->
+                    Statements = [
+                        #{line => Line, executed => Calls}
+                        || {{_M, Line}, Calls} <- LineCalls, Line > 0
+                    ],
+                    case Statements of
+                        [] -> false;
+                        _ ->
+                            {true, #{
+                                uri => lsp_utils:file_uri_to_vscode_uri(lsp_utils:file_to_file_uri(SourceFile)),
+                                statements => Statements
+                            }}
+                    end;
+                {error, _Reason} ->
+                    false
+            end
     end.
 
 summarize(Results) ->

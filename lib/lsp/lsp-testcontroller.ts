@@ -40,10 +40,17 @@ namespace protocol {
 
     export interface RunTestsParams {
         tests: RunTestsTarget[];
+        coverage?: boolean;
+    }
+
+    export interface ErlangFileCoverage {
+        uri: string;
+        statements: { line: number; executed: number }[];
     }
 
     export interface RunTestsResult {
         summary: { passed: number; failed: number; skipped: number };
+        coverage: ErlangFileCoverage[];
     }
 
     export namespace RunTestsRequest {
@@ -76,6 +83,11 @@ interface TestTarget {
 let testTargets = new Map<string, TestTarget>();
 let currentRun: vscode.TestRun | undefined;
 let currentItemsByKey: Map<string, vscode.TestItem> | undefined;
+// Task 6.6: `erlang/runTests` returns every statement's hit count in one
+// shot (there is no separate "fetch detail for this file" request), so
+// `loadDetailedCoverage` below just replays what's already been received
+// rather than asking the server again.
+let coverageDetailsByUri = new Map<string, vscode.StatementCoverage[]>();
 
 function targetKey(module: string, functionName: string): string {
     return `${module}::${functionName}`;
@@ -106,11 +118,16 @@ export function activate(context: vscode.ExtensionContext, lspOutputChannel: vsc
 
     const runProfile = controller.createRunProfile(
         'Run', vscode.TestRunProfileKind.Run,
-        (request, token) => runTests(controller, request, token), true);
+        (request, token) => runTests(controller, request, token, false), true);
     const debugProfile = controller.createRunProfile(
         'Debug', vscode.TestRunProfileKind.Debug,
         (request, token) => debugTests(controller, request, token), false);
-    context.subscriptions.push(runProfile, debugProfile);
+    const coverageProfile = controller.createRunProfile(
+        'Coverage', vscode.TestRunProfileKind.Coverage,
+        (request, token) => runTests(controller, request, token, true), false);
+    coverageProfile.loadDetailedCoverage = async (_testRun, fileCoverage) =>
+        coverageDetailsByUri.get(fileCoverage.uri.toString()) ?? [];
+    context.subscriptions.push(runProfile, debugProfile, coverageProfile);
 
     client.onNotification(protocol.TestProgressNotification.type, (params) => {
         handleProgress(params);
@@ -171,7 +188,7 @@ function itemsToRun(controller: vscode.TestController, request: vscode.TestRunRe
     return leaves.filter((item) => !excluded.has(item.id));
 }
 
-async function runTests(controller: vscode.TestController, request: vscode.TestRunRequest, token: CancellationToken) {
+async function runTests(controller: vscode.TestController, request: vscode.TestRunRequest, token: CancellationToken, withCoverage: boolean) {
     const run = controller.createTestRun(request);
     const itemsByKey = new Map<string, vscode.TestItem>();
     const tests: protocol.RunTestsTarget[] = [];
@@ -189,7 +206,10 @@ async function runTests(controller: vscode.TestController, request: vscode.TestR
     currentRun = run;
     currentItemsByKey = itemsByKey;
     try {
-        await client.sendRequest(protocol.RunTestsRequest.type, { tests }, token);
+        const result = await client.sendRequest(protocol.RunTestsRequest.type, { tests, coverage: withCoverage }, token);
+        if (withCoverage) {
+            applyCoverage(run, result.coverage);
+        }
     } catch (e) {
         // erlang/runTests failed outright (e.g. LSP request error) - leave
         // whatever state the `erlang/testRunProgress` notifications already
@@ -199,6 +219,23 @@ async function runTests(controller: vscode.TestController, request: vscode.TestR
         currentRun = undefined;
         currentItemsByKey = undefined;
         run.end();
+    }
+}
+
+// Task 6.6: turn the per-line call counts lsp_testing.erl's `cover:analyse`
+// call returned into a vscode.FileCoverage (the file-level summary shown
+// directly in the Test Coverage view) plus the vscode.StatementCoverage[]
+// detail `loadDetailedCoverage` above hands back on demand (the per-line
+// gutter highlights, only computed when a file is actually opened there).
+function applyCoverage(run: vscode.TestRun, coverage: protocol.ErlangFileCoverage[]) {
+    coverageDetailsByUri.clear();
+    for (const fileCoverage of coverage) {
+        const uri = vscode.Uri.parse(fileCoverage.uri);
+        const statements = fileCoverage.statements.map((statement) =>
+            new vscode.StatementCoverage(statement.executed, new vscode.Position(Math.max(0, statement.line - 1), 0)));
+        coverageDetailsByUri.set(uri.toString(), statements);
+        const covered = statements.filter((s) => Number(s.executed) > 0).length;
+        run.addCoverage(new vscode.FileCoverage(uri, new vscode.TestCoverageCount(covered, statements.length)));
     }
 }
 

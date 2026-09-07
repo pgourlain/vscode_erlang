@@ -31,6 +31,23 @@
 			"outFiles": ["${workspaceRoot}/out"],
 		},
 		{
+			// Opens the sample project (see TESTING.md there) as the workspace,
+			// for manually exercising code actions, navigation/hierarchies and
+			// the Test Explorer. No `--disable-extensions`, unlike "Launch
+			// Tests" below: this wants a normal editing environment.
+			"name": "Launch Extension (sample project)",
+			"type": "extensionHost",
+			"request": "launch",
+			"runtimeExecutable": "${execPath}",
+			"args": [
+				"${workspaceFolder}/../../erlang/sample",
+				"--extensionDevelopmentPath=${workspaceFolder}"
+			],
+			"sourceMaps": true,
+			"outFiles": ["${workspaceFolder}/out/**/*.js"],
+			"preLaunchTask": "npm: compile"
+		},
+		{
 			"name": "Launch Tests",
 			"type": "extensionHost",
 			"request": "launch",
