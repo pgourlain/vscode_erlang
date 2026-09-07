@@ -19,8 +19,9 @@
 -export([textDocument_foldingRange/2, textDocument_selectionRange/2]).
 -export([completionItem_resolve/2, textDocument_documentLink/2, documentLink_resolve/2]).
 -export([codeLens_resolve/2, inlayHint_resolve/2]).
--export([textDocument_diagnostic/2, workspace_diagnostic/2]).
+-export([textDocument_diagnostic/2, workspace_diagnostic/2, workspace_diagnostic_refresh/2]).
 -export([erlang_discoverTests/2, erlang_runTests/2]).
+-export([maybe_send_diagnostics/4]).
 
 -include("lsp_log.hrl").
 
@@ -742,10 +743,12 @@ validate_file(Socket, File) ->
     end.
 
 validate_parsed_source_file(Socket, File) ->
+    ValidatingVersion = gen_lsp_doc_server:get_document_version(File),
     ErrorsWarnings = lsp_syntax:validate_parsed_source_file(File),
-    send_diagnostics(Socket, File, maps:get(errors_warnings, ErrorsWarnings, [])).
+    maybe_send_diagnostics(Socket, File, ValidatingVersion, maps:get(errors_warnings, ErrorsWarnings, [])).
 
 validate_config_file(Socket, File) ->
+    ValidatingVersion = gen_lsp_doc_server:get_document_version(File),
     {ContentsFile, Cleaner} = case gen_lsp_doc_server:get_document_contents(File) of
         undefined ->
             {File, fun () -> ok end};
@@ -754,7 +757,7 @@ validate_config_file(Socket, File) ->
             {InnerContentsFile, fun () -> file:delete(InnerContentsFile) end}
     end,
     ErrorsWarnings = lsp_parse:parse_config_file(File, ContentsFile),
-    send_diagnostics(Socket, File, maps:get(errors_warnings, ErrorsWarnings, [])),
+    maybe_send_diagnostics(Socket, File, ValidatingVersion, maps:get(errors_warnings, ErrorsWarnings, [])),
     Cleaner().
 
 -ifdef(OTP_RELEASE).
@@ -803,6 +806,49 @@ request_configuration(Socket) ->
                               #{section => <<"<computed>">>},
                               #{section => <<"http">>},
                               #{section => <<"search">>}]}
+    }).
+
+%% @doc Only publish diagnostics computed against ValidatingVersion (the
+%% document_version captured right before the - possibly slow - parse/lint
+%% work started) if no newer document_opened/document_changed has landed
+%% in the meantime. Prevents an out-of-order validate_file/2 call, started
+%% before a since-applied edit (e.g. a quick fix's workspace/applyEdit
+%% firing a normal textDocument/didChange), from finishing late and
+%% clobbering a fresher/correct publishDiagnostics with stale results.
+%%
+%% Also nudges pull-mode clients: a client showing a diagnostic it pulled
+%% via textDocument/diagnostic rather than push is not guaranteed to
+%% re-pull right after this edit on its own schedule, so every fresh push
+%% is followed by a workspace/diagnostic/refresh request asking it to
+%% re-pull now. Sent unconditionally (not gated on the client having
+%% declared workspace.diagnostics.refreshSupport) - a client that never
+%% declared support simply has nothing registered for the request and
+%% ignores/errors on it harmlessly, matching how request_configuration/1
+%% already sends without checking a capability first.
+maybe_send_diagnostics(Socket, File, ValidatingVersion, Diagnostics) ->
+    case gen_lsp_doc_server:get_document_version(File) of
+        ValidatingVersion ->
+            send_diagnostics(Socket, File, Diagnostics),
+            request_diagnostic_refresh(Socket);
+        _ -> ok
+    end.
+
+%% @doc No-op handler for the client's reply to a server-initiated
+%% workspace/diagnostic/refresh request (see request_diagnostic_refresh/1)
+%% - the response body carries nothing meaningful (LSP 3.17 defines it as
+%% an empty result), it only needs to be routed here instead of falling
+%% into gen_lsp_server's "Notification not handled" error log.
+workspace_diagnostic_refresh(_Socket, _Result) ->
+    ok.
+
+%% @doc Server-initiated request (LSP 3.17 workspace/diagnostic/refresh)
+%% asking every pull-capable client to discard whatever diagnostics it last
+%% pulled and pull again. See the comment on maybe_send_diagnostics/4.
+request_diagnostic_refresh(Socket) ->
+    gen_lsp_server:send_to_client(Socket, #{
+        id => <<"workspace_diagnostic_refresh">>,
+        method => <<"workspace/diagnostic/refresh">>,
+        params => null
     }).
 
 send_diagnostics(Socket, File, Diagnostics) ->

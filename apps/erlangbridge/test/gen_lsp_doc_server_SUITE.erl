@@ -22,6 +22,8 @@
 all() -> [
     document_opened_is_readable_via_get_document_contents,
     document_changed_replaces_the_cached_contents,
+    document_version_increases_on_open_and_on_each_change,
+    document_version_resets_after_close,
     document_range_changed_replaces_text_inside_a_range,
     document_range_changed_inserts_at_a_zero_width_range,
     document_range_changed_deletes_when_replacement_is_empty,
@@ -83,6 +85,30 @@ document_changed_replaces_the_cached_contents(Config) ->
     NewContent = <<"-module(docserver_a).\n-export([go/0]).\n\ngo() -> changed.\n">>,
     gen_lsp_doc_server:document_changed(File, NewContent),
     ?assertEqual(NewContent, gen_lsp_doc_server:get_document_contents(File)).
+
+%% The LSP `didSave` message carries no `version` field (unlike `didOpen`/
+%% `didChange`), so lsp_handlers relies on this internal counter rather
+%% than the client-supplied one to detect a stale, late-finishing
+%% validate_file/2 call - see maybe_send_diagnostics/4.
+document_version_increases_on_open_and_on_each_change(Config) ->
+    File = ?config(file_a, Config),
+    Content = ?config(content_a, Config),
+    gen_lsp_doc_server:document_opened(File, Content),
+    V1 = gen_lsp_doc_server:get_document_version(File),
+    ?assert(V1 > 0),
+    gen_lsp_doc_server:document_changed(File, <<Content/binary, "\n">>),
+    V2 = gen_lsp_doc_server:get_document_version(File),
+    ?assert(V2 > V1),
+    gen_lsp_doc_server:document_range_changed(File, {0, 0}, {0, 0}, <<"">>),
+    ?assert(gen_lsp_doc_server:get_document_version(File) > V2).
+
+document_version_resets_after_close(Config) ->
+    File = ?config(file_a, Config),
+    Content = ?config(content_a, Config),
+    gen_lsp_doc_server:document_opened(File, Content),
+    ?assert(gen_lsp_doc_server:get_document_version(File) > 0),
+    gen_lsp_doc_server:document_closed(File),
+    ?assertEqual(0, gen_lsp_doc_server:get_document_version(File)).
 
 %% docserver_a.erl content: "-module(docserver_a).\n-export([go/0]).\n\ngo() -> ok.\n"
 %% Line 3 (0-based) is "go() -> ok.", where "ok" sits at characters 8-10.
@@ -199,6 +225,7 @@ project_file_deleted_clears_every_cache_for_that_file(Config) ->
     gen_lsp_doc_server:project_file_deleted(File),
     sys:get_state(gen_lsp_doc_server),
     ?assertEqual(undefined, gen_lsp_doc_server:get_document_contents(File)),
+    ?assertEqual(0, gen_lsp_doc_server:get_document_version(File)),
     ?assertEqual([], ets:lookup(syntax_tree, File)),
     ?assertEqual([], ets:lookup(dodged_syntax_tree, File)),
     ?assertEqual([], ets:lookup(references, File)),

@@ -4,7 +4,7 @@
 %% API
 -export([start_link/0]).
 
--export([document_opened/2, document_changed/2, document_range_changed/4, document_closed/1, opened_documents/0, get_document_contents/1, parse_document/1]).
+-export([document_opened/2, document_changed/2, document_range_changed/4, document_closed/1, opened_documents/0, get_document_contents/1, get_document_version/1, parse_document/1]).
 -export([project_file_added/1, project_file_changed/1, project_file_deleted/1]).
 -export([get_syntax_tree/1, get_dodged_syntax_tree/1, get_references/1, get_inlayhints/1]).
 -export([get_semantic_tokens_cache/1, store_semantic_tokens_cache/3]).
@@ -31,10 +31,12 @@
         }).
 
 document_opened(File, Contents) ->
-    ?XETS:insert(document_contents, {File, Contents}).
+    ?XETS:insert(document_contents, {File, Contents}),
+    bump_document_version(File).
 
 document_changed(File, Contents) ->
-    ?XETS:insert(document_contents, {File, Contents}).
+    ?XETS:insert(document_contents, {File, Contents}),
+    bump_document_version(File).
 
 %% @doc Apply one incremental (range + replacement text) content change
 %% against the currently cached buffer for File, for `textDocumentSync`
@@ -70,7 +72,8 @@ line_char_to_offset(Lines, Line, Character) ->
     LineStart + min(Character, byte_size(TargetLine)).
 
 document_closed(File) ->
-    ?XETS:delete(document_contents, File).
+    ?XETS:delete(document_contents, File),
+    ?XETS:delete(document_version, File).
 
 opened_documents() ->
     do_opened_documents(?XETS).
@@ -88,6 +91,25 @@ get_document_contents(File) ->
         [{File, Contents}] -> Contents;
         _ -> undefined
     end.
+
+%% @doc Internal, monotonically increasing per-file version counter -
+%% bumped on every document_opened/2 or document_changed/2 (i.e. on every
+%% textDocument/didOpen and every applied textDocument/didChange content
+%% change), independent of the client-supplied LSP `version` field (which
+%% textDocument/didSave is not guaranteed to carry per the LSP spec).
+%% Used by lsp_handlers to detect and drop a validate_file/2 call that
+%% finishes after a newer edit has already landed, so it can't clobber a
+%% fresher publishDiagnostics with stale results.
+get_document_version(File) ->
+    case ?XETS:lookup(document_version, File) of
+        [{File, Version}] -> Version;
+        _ -> 0
+    end.
+
+bump_document_version(File) ->
+    NewVersion = get_document_version(File) + 1,
+    ?XETS:insert(document_version, {File, NewVersion}),
+    NewVersion.
 
 parse_document(File) ->
     case filename:extension(File) of
@@ -216,6 +238,7 @@ as_string(Text) ->
 start_link() ->
     ExtraCreateOpts = persistent_term:get(large_cache_create_opts, []),
     safe_new_table(document_contents, ?XETS, set, ExtraCreateOpts),
+    safe_new_table(document_version, ?XETS, set, ExtraCreateOpts),
     safe_new_table(syntax_tree, ?XETS, set, ExtraCreateOpts),
     safe_new_table(dodged_syntax_tree, ?XETS, set, ExtraCreateOpts),
     safe_new_table(references, ets, bag, []),
@@ -282,6 +305,7 @@ handle_info(_Info, State) ->
 
 terminate(_Reason, _State) ->
     delete_cache_file(document_contents),
+    delete_cache_file(document_version),
     delete_cache_file(syntax_tree),
     delete_cache_file(dodged_syntax_tree),
     delete_cache_file(document_inlayhints),
@@ -484,6 +508,7 @@ delete_project_files([], State) ->
     State;
 delete_project_files([File | Files], State) ->
     ?XETS:delete(document_contents, File),
+    ?XETS:delete(document_version, File),
     ?XETS:delete(syntax_tree, File),
     ?XETS:delete(dodged_syntax_tree, File),
     ets:delete(references, File),
