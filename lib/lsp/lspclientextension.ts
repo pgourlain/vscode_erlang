@@ -26,6 +26,7 @@ import * as Net from 'net';
 import * as lspcodelens from './lspcodelens';
 
 import * as lspValue from './lsp-inlinevalues';
+import * as lspTest from './lsp-testcontroller';
 
 
 // import { ErlangShellForDebugging } from '../ErlangShellDebugger';
@@ -265,6 +266,11 @@ export function activate(context: ExtensionContext) {
 	Configuration.initialize();
 	// Start the client. This will also launch the server
 	client.start();
+	// `client` (imported by lsp-testcontroller as a live binding) must be
+	// assigned before this runs - it registers an onNotification handler
+	// eagerly, unlike lspValue.activate above which only dereferences
+	// `client` lazily inside request calls.
+	lspTest.activate(context, lspOutputChannel);
 }
 
 export function debugLog(msg: string): void {

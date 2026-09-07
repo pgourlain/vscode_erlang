@@ -20,6 +20,7 @@
 -export([completionItem_resolve/2, textDocument_documentLink/2, documentLink_resolve/2]).
 -export([codeLens_resolve/2, inlayHint_resolve/2]).
 -export([textDocument_diagnostic/2, workspace_diagnostic/2]).
+-export([erlang_discoverTests/2, erlang_runTests/2]).
 
 -include("lsp_log.hrl").
 
@@ -848,6 +849,16 @@ workspace_diagnostic(_Socket, _Params) ->
         items => diagnostics_for(File)
     } || File <- gen_lsp_doc_server:all_project_files()],
     #{items => Items}.
+
+%% @doc `erlang/discoverTests` - task 6.1. Delegates to lsp_testing.erl.
+erlang_discoverTests(Socket, Params) ->
+    lsp_testing:discover_tests(Socket, Params).
+
+%% @doc `erlang/runTests` - task 6.3. Delegates to lsp_testing.erl; progress
+%% is streamed to the client as `erlang/testRunProgress` notifications
+%% while this request is in flight, the response carries only the summary.
+erlang_runTests(Socket, Params) ->
+    lsp_testing:run_tests(Socket, Params).
 
 diagnostics_for(File) ->
     ErrorsWarnings = lsp_syntax:validate_parsed_source_file(File),
