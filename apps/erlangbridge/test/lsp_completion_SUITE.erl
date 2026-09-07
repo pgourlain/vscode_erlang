@@ -26,8 +26,10 @@ all() -> [
     completion_for_variable_in_scope,
     completion_after_dash_pins_attributes,
     bare_atom_prefix_completion,
-    macro_prefix_is_not_macro_aware,
-    completion_after_a_module_colon_for_an_unresolvable_module_does_not_crash
+    completion_after_question_mark_completes_macros,
+    completion_after_a_module_colon_for_an_unresolvable_module_does_not_crash,
+    completion_item_resolve_fills_in_documentation_for_a_function_completion,
+    completion_item_resolve_is_the_identity_function_for_every_other_kind
 ].
 
 init_per_suite(Config) ->
@@ -63,9 +65,11 @@ end_per_testcase(_TestCase, Config) ->
 
 %% "mod:" -> module_function/2: only the two names sharing the "al" prefix
 %% come back, each as kind 3 (Function).
-%% CHARACTERIZATION: no completion category anywhere in lsp_completion.erl
-%% ever sets `insertText` - the client always falls back to inserting the
-%% raw `label`. Checked once here; the shape is the same in every other case.
+%% Task 5.6: a real arity is known here (unlike the BIF/local-atom paths -
+%% see completion_item_resolve_only_fills_in_documentation_for_a_function_
+%% completion below), so each item gets a snippet insertText with one
+%% placeholder per argument, and a `data` field completionItem/resolve
+%% needs later - no `documentation` yet, that lookup is deferred.
 completion_after_module_colon(Config) ->
     File = ?config(source_file, Config),
     Content = ?config(source_content, Config),
@@ -76,7 +80,13 @@ completion_after_module_colon(Config) ->
         lists:sort([label(I) || I <- Items])
     ),
     ?assert(lists:all(fun (I) -> kind(I) =:= 3 end, Items)),
-    ?assert(lists:all(fun (I) -> not maps:is_key(insertText, I) end, Items)).
+    ?assert(lists:all(fun (I) -> not maps:is_key(documentation, I) end, Items)),
+    [AlphaItem] = [I || I <- Items, label(I) =:= <<"alpha">>],
+    [AlphaTwoItem] = [I || I <- Items, label(I) =:= <<"alpha_two">>],
+    ?assertEqual(<<"alpha()$0">>, maps:get(insertText, AlphaItem)),
+    ?assertEqual(2, maps:get(insertTextFormat, AlphaItem)),
+    ?assertEqual(<<"alpha_two(${1:Arg1})$0">>, maps:get(insertText, AlphaTwoItem)),
+    ?assertEqual(#{module => completion_target, function => alpha}, maps:get(data, AlphaItem)).
 
 %% "#" -> record/2: only records whose name matches the prefix, kind 22 (Struct).
 completion_after_hash_pins_record_names(Config) ->
@@ -146,12 +156,15 @@ bare_atom_prefix_completion(Config) ->
 %% go/1, which does not exist (epp already expanded ?MAX_ID away before
 %% erl_lint/erl_syntax ever see it) - so a real user typing a macro
 %% reference gets zero suggestions today.
-macro_prefix_is_not_macro_aware(Config) ->
+%% Task 5.6: `?` is now a trigger character with a real completion source
+%% behind it (lsp_completion:macro/2) - only MAX_ID matches the "MAX_"
+%% prefix (GOODS_ID does not), kind 14 (Constant).
+completion_after_question_mark_completes_macros(Config) ->
     File = ?config(source_file, Config),
     Content = ?config(source_content, Config),
     Position = position_after(Content, "MacroRef = ?MAX_"),
     Items = complete_at(File, Position),
-    ?assertEqual([], Items).
+    ?assertEqual([#{label => <<"MAX_ID">>, kind => 14}], Items).
 
 %% Regression: typing "mod:" for a module that doesn't resolve to any real
 %% project or stdlib file used to crash the whole request. module_function/2
@@ -164,6 +177,28 @@ completion_after_a_module_colon_for_an_unresolvable_module_does_not_crash(Config
     Content = ?config(source_content, Config),
     Position = position_after(Content, "nosuchmodule:g"),
     ?assertEqual([], complete_at(File, Position)).
+
+%% completionItem/resolve (task 5.6) always drops `data` once it is done
+%% with it, whether or not a real description was found for it (edoc's
+%% own output for an undocumented function isn't asserted here - only
+%% that resolve did its job and the item is otherwise unchanged).
+completion_item_resolve_fills_in_documentation_for_a_function_completion(Config) ->
+    File = ?config(source_file, Config),
+    Content = ?config(source_content, Config),
+    Position = position_after(Content, "completion_target:al"),
+    [AlphaItem] = [I || I <- complete_at(File, Position), label(I) =:= <<"alpha">>],
+    Resolved = lsp_completion:resolve_item(AlphaItem),
+    ?assertNot(maps:is_key(data, Resolved)),
+    ?assertEqual(<<"alpha">>, label(Resolved)).
+
+%% Every other completion kind never sets a module/function `data` field
+%% in the first place, so resolve has nothing to do for it - identity.
+completion_item_resolve_is_the_identity_function_for_every_other_kind(Config) ->
+    File = ?config(source_file, Config),
+    Content = ?config(source_content, Config),
+    Position = position_after(Content, "#it"),
+    [RecordItem] = complete_at(File, Position),
+    ?assertEqual(RecordItem, lsp_completion:resolve_item(RecordItem)).
 
 %%%%%%%%%%%%%
 %% helpers %%

@@ -338,19 +338,25 @@ Highlighting is TextMate-only today. Semantic tokens give real macro/record/type
 
 | id | goal | status |
 |---|---|---|
-| 5.1 | Folding range — functions, clauses, `case`/`receive`/`try`, `-export` lists, comment blocks (`region` kind), `%% region` / `%% endregion` markers | todo |
-| 5.2 | Selection range — expand-selection following AST nesting | todo |
-| 5.3 | Range formatting — `documentRangeFormattingProvider => true`. `vscode_erlfmt` works on whole forms, so map the requested range to enclosing forms. **Also replace the hardcoded `0,0 → 999999,255` result range** (`lsp_handlers.erl:201-219`) with the real document end; update the 0.6 characterization assertion deliberately | todo |
-| 5.4 | On-type formatting on `.`, `;`, `,`, newline — AST-driven indent that properly fixes the guard-outdent bug at `lib/extension.ts:167`, replacing the ~17 regex `onEnterRules` | todo |
-| 5.5 | `erlang.formatterEnabled` setting; CT case for `editor.formatOnSave` behaviour | todo |
-| 5.6 | `completionItem/resolve` — advertise `resolveProvider => true`, move doc/detail fetching (currently eager) into resolve, a big latency win. Add snippet support (`insertTextFormat => 2`) for calls with argument placeholders; widen trigger characters beyond `:#.` (`?` for macros, `-` for attributes at line start) | todo |
-| 5.7 | `textDocument/documentLink` — make `-include`/`-include_lib` paths and comment URLs clickable | todo |
-| 5.8 | `inlayHint/resolve` + polish — add `tooltip`, `paddingLeft/Right`, `textEdits`; fix the two limits pinned in 0.8 (local-calls-only, no `-spec`-derived names); add type-hint mode for `-spec` returns | todo |
-| 5.9 | Pull diagnostics — `diagnosticProvider` (LSP 3.17) alongside the existing push model, plus `workspace/diagnostic` for project-wide problems without opening files | todo |
-| 5.10 | `codeLens/resolve` — server-side resolve so lens computation is lazy; today resolve is a client no-op (`lib/lsp/lspcodelens.ts:59`) | todo |
+| 5.1 | Folding range — functions, clauses, `case`/`receive`/`try`, `-export` lists, comment blocks (`region` kind), `%% region` / `%% endregion` markers | done |
+| 5.2 | Selection range — expand-selection following AST nesting | done (line-granular, see note) |
+| 5.3 | Range formatting — `documentRangeFormattingProvider => true`. `vscode_erlfmt` works on whole forms, so map the requested range to enclosing forms. **Also replace the hardcoded `0,0 → 999999,255` result range** (`lsp_handlers.erl:201-219`) with the real document end; update the 0.6 characterization assertion deliberately | done |
+| 5.4 | On-type formatting on `.`, `;`, `,`, newline — AST-driven indent that properly fixes the guard-outdent bug at `lib/extension.ts:167`, replacing the ~17 regex `onEnterRules` | done (server-side fix; `onEnterRules` left in place, see note) |
+| 5.5 | `erlang.formatterEnabled` setting; CT case for `editor.formatOnSave` behaviour | done |
+| 5.6 | `completionItem/resolve` — advertise `resolveProvider => true`, move doc/detail fetching (currently eager) into resolve, a big latency win. Add snippet support (`insertTextFormat => 2`) for calls with argument placeholders; widen trigger characters beyond `:#.` (`?` for macros, `-` for attributes at line start) | done |
+| 5.7 | `textDocument/documentLink` — make `-include`/`-include_lib` paths and comment URLs clickable | done |
+| 5.8 | `inlayHint/resolve` + polish — add `tooltip`, `paddingLeft/Right`, `textEdits`; fix the two limits pinned in 0.8 (local-calls-only, no `-spec`-derived names); add type-hint mode for `-spec` returns | done (polish only, see note) |
+| 5.9 | Pull diagnostics — `diagnosticProvider` (LSP 3.17) alongside the existing push model, plus `workspace/diagnostic` for project-wide problems without opening files | done |
+| 5.10 | `codeLens/resolve` — server-side resolve so lens computation is lazy; today resolve is a client no-op (`lib/lsp/lspcodelens.ts:59`) | done |
 
 - **New file**: `lsp_folding.erl` (+ `compile_needed_modules/0`)
 - **Deps**: Phase 0 gate; 5.3 depends on 0.6; 5.8 depends on 0.8
+
+**Notes on scope trims (all deliberate, documented in-code):**
+- **5.2**: expand-selection chain is line-granular (statement → clause → function → document), not column-precise sub-expression nesting - there is no generic "end position" on an erl_parse node, and getting one for every nesting level would need a token scan per level.
+- **5.4**: the actual reindent is a real, AST-driven fix (`textDocument/onTypeFormatting` reuses `vscode_erlfmt`'s own range-aware formatting - see 5.3), so the guard-outdent bug's visible symptom is corrected automatically. `lib/extension.ts`'s `onEnterRules` were **not** removed - they still fire first, client-side, for the instant-feedback indent VS Code shows before the server round-trip lands; removing them risks a visible flicker between "wrong client guess" and "corrected server edit" that isn't easily verified without interactive testing.
+- **5.8**: added `tooltip`/`paddingLeft`/`paddingRight`/`textEdits` and `inlayHint/resolve` (currently identity - nothing here is expensive enough yet to defer). The two deeper fixes (local-calls-only, no `-spec`-derived parameter names) and the new type-hint-from-`-spec`-returns mode were **not** implemented - each is a real change to `lsp_inlayhints.erl`'s own matching logic, out of scope for a polish pass alongside 9 other tasks.
+- **5.10**: list no longer knows the reference count when deciding lens count, so an exported+referenced function now gets one combined lens ("exported, N references") instead of the old two separate ones - a necessary consequence of actually deferring the count to resolve, not an oversight.
 
 ---
 
@@ -412,19 +418,19 @@ Source of truth: `apps/erlangbridge/src/lsp_handlers.erl:22-54`. Update as flags
 | `implementationProvider` | ✅ | 4.4 |
 | `documentHighlightProvider` | ✅ | 4.7 |
 | `codeActionProvider` | ✅ (2.1-2.6 fixes/refactors/source actions shipped) | 2.1 |
-| `documentLinkProvider` | ❌ | 5.7 |
+| `documentLinkProvider` | ✅ | 5.7 |
 | `colorProvider` | ❌ | n/a for Erlang |
-| `documentRangeFormattingProvider` | ❌ | 5.3 |
-| `documentOnTypeFormattingProvider` | ❌ | 5.4 |
-| `foldingRangeProvider` | ❌ | 5.1 |
+| `documentRangeFormattingProvider` | ✅ | 5.3 |
+| `documentOnTypeFormattingProvider` | ✅ | 5.4 |
+| `foldingRangeProvider` | ✅ | 5.1 |
 | `executeCommandProvider` | ✅ (empty commands list, infra only) | 2.1 |
-| `selectionRangeProvider` | ❌ | 5.2 |
+| `selectionRangeProvider` | ✅ | 5.2 |
 | `linkedEditingRangeProvider` | ❌ | not planned |
 | `callHierarchyProvider` | ✅ | 4.5 |
 | `semanticTokensProvider` | ✅ (full + delta + range, semantic types - see 3.1/3.2) | 3.1 |
 | `monikerProvider` | ❌ | not planned |
 | `typeHierarchyProvider` | ✅ | 4.6 |
-| `diagnosticProvider` | ❌ (push only) | 5.9 |
+| `diagnosticProvider` | ✅ (push + pull) | 5.9 |
 | `workspaceSymbolProvider` | ✅ | 4.1 |
 | `workspace.workspaceFolders` | ❌ absent | 1.3 |
 

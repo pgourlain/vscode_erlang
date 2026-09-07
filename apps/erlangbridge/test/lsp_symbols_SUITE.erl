@@ -22,7 +22,7 @@ all() -> [
     document_symbol_shape_and_kinds,
     document_symbol_omits_macros_and_exports_themselves,
     codelens_disabled_by_default_returns_nothing,
-    codelens_shows_both_lenses_for_an_exported_referenced_function,
+    codelens_shows_one_combined_lens_for_an_exported_referenced_function,
     codelens_shows_only_exported_for_an_exported_but_unreferenced_function,
     codelens_shows_reference_count_for_a_private_referenced_function,
     codelens_shows_unused_for_a_private_unreferenced_function
@@ -91,46 +91,50 @@ document_symbol_omits_macros_and_exports_themselves(Config) ->
 codelens_disabled_by_default_returns_nothing(Config) ->
     ?assertEqual([], code_lenses(Config)).
 
-codelens_shows_both_lenses_for_an_exported_referenced_function(Config) ->
+%% Task 5.10: list no longer knows the reference count (that is exactly
+%% what moved to resolve), so it can no longer decide to split an
+%% exported+referenced function into two lenses the way it used to -
+%% there is now always exactly one lens per function, and resolve folds
+%% both pieces of information into that single lens's own title, still
+%% clickable (still a findReferences command).
+codelens_shows_one_combined_lens_for_an_exported_referenced_function(Config) ->
     with_codelens_enabled(fun () ->
-        Lenses = lenses_for(Config, <<"exported_used">>),
-        Titles = lists:sort([title(L) || L <- Lenses]),
-        ?assertEqual([<<"1 references">>, <<"exported">>], Titles),
-        [ReferenceLens] = [L || L <- Lenses, title(L) =:= <<"1 references">>],
+        [Lens] = resolved_lenses_for(Config, <<"exported_used">>),
+        ?assertEqual(<<"exported, 1 references">>, title(Lens)),
         ?assertMatch(
-            #{data := #{function := exported_used, count := 1, exported := true},
+            #{data := #{function := exported_used, exported := true},
               command := #{command := <<"editor.action.findReferences">>}},
-            ReferenceLens
+            Lens
         )
     end).
 
-%% CHARACTERIZATION: an exported function with zero in-project references
-%% shows ONLY the "exported" lens - not "unused". The {false, true} branch
-%% of textDocument_codeLens/2's case drops the reference-count lens
-%% entirely, so a genuinely dead but exported function never gets flagged.
+%% An exported function with zero in-project references shows just
+%% "exported", not "exported, 0 references" - and is not clickable
+%% (nothing to jump to).
 codelens_shows_only_exported_for_an_exported_but_unreferenced_function(Config) ->
     with_codelens_enabled(fun () ->
-        Lenses = lenses_for(Config, <<"exported_unused">>),
-        ?assertEqual([<<"exported">>], [title(L) || L <- Lenses])
+        [Lens] = resolved_lenses_for(Config, <<"exported_unused">>),
+        ?assertEqual(<<"exported">>, title(Lens)),
+        ?assertMatch(#{command := #{command := <<>>}}, Lens)
     end).
 
 codelens_shows_reference_count_for_a_private_referenced_function(Config) ->
     with_codelens_enabled(fun () ->
-        Lenses = lenses_for(Config, <<"helper">>),
-        ?assertEqual([<<"1 references">>], [title(L) || L <- Lenses]),
+        [Lens] = resolved_lenses_for(Config, <<"helper">>),
+        ?assertEqual(<<"1 references">>, title(Lens)),
         ?assertMatch(
-            [#{data := #{function := helper, count := 1, exported := false}}],
-            Lenses
+            [#{data := #{function := helper, exported := false}}],
+            [Lens]
         )
     end).
 
 codelens_shows_unused_for_a_private_unreferenced_function(Config) ->
     with_codelens_enabled(fun () ->
-        Lenses = lenses_for(Config, <<"unused_private">>),
-        ?assertEqual([<<"unused">>], [title(L) || L <- Lenses]),
+        [Lens] = resolved_lenses_for(Config, <<"unused_private">>),
+        ?assertEqual(<<"unused">>, title(Lens)),
         ?assertMatch(
-            [#{data := #{function := unused_private, count := 0, exported := false}}],
-            Lenses
+            [#{data := #{function := unused_private, exported := false}}],
+            [Lens]
         )
     end).
 
@@ -157,6 +161,11 @@ code_lenses(Config) ->
 lenses_for(Config, FunctionName) ->
     Width = byte_size(FunctionName),
     [L || L <- code_lenses(Config), lens_width(L) =:= Width].
+
+%% codeLens/list no longer includes `command` at all (task 5.10) - resolve
+%% each lens the same way a real client would before inspecting its title.
+resolved_lenses_for(Config, FunctionName) ->
+    [lsp_handlers:codeLens_resolve(undefined, L) || L <- lenses_for(Config, FunctionName)].
 
 lens_width(#{range := #{<<"start">> := #{character := S}, <<"end">> := #{character := E}}}) ->
     E - S.

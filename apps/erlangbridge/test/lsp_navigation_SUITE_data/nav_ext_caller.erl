@@ -4,3 +4,5 @@
 
 call_it() ->
     nav_ext_target:greet("world").
+
+%% see https://www.erlang.org/doc for more.

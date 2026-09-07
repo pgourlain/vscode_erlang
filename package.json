@@ -277,6 +277,11 @@
 					"default": true,
 					"description": "Enable/disable semantic highlighting (module/function/macro/variable/type/record coloring computed from the real syntax tree, on top of the base TextMate grammar)."
 				},
+				"erlang.formatterEnabled": {
+					"type": "boolean",
+					"default": true,
+					"description": "Enable/disable the Erlang formatter (whole-document, selection and on-type formatting)."
+				},
 				"erlang.verbose": {
 					"type": "boolean",
 					"description": "Enable/disable technical traces for use in the extension development.",

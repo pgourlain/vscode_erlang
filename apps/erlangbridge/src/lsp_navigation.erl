@@ -1,12 +1,14 @@
 -module(lsp_navigation).
 
 -export([definition/3, hover_info/3, function_description/2, function_description/3, references/3, function_clauses/3]).
--export([codelens_info/1, symbol_info/1, record_fields/2, find_function_with_line/2, fold_references/4]).
+-export([codelens_positions/1, codelens_ref_count/3, symbol_info/1, record_fields/2, find_function_with_line/2, fold_references/4]).
 -export([inlayhints_info/3, full_inlayhints_info/3, functions/2]).
 -export([inlinevalues_info/2, local_function_references/3]).
 -export([find_at/3, find_definition/3]).
 -export([type_definition/3, document_highlights/3, implementation/3]).
 -export([behaviour_implementors/1, module_behaviours/1]).
+-export([document_links/1]).
+-export([selection_range/3]).
 -import(lsp_syntax,[fold_in_syntax_tree/4, find_in_syntax_tree/2, fold_in_syntax_tree/3]).
 
 -include("lsp_log.hrl").
@@ -286,7 +288,14 @@ record_highlights(File, Record) ->
             Acc
     end, [], File).
 
-codelens_info(File) ->
+%% @doc task 5.10: codeLens/list's own cheap half - every function's
+%% position and exported-ness, but deliberately no reference count (that
+%% needs local_function_references/3 plus the project-wide references
+%% cache for every single function in the file, eagerly, before the
+%% editor can show anything at all) - see codelens_ref_count/3, moved to
+%% codeLens/resolve, computed only for whichever lens is actually about to
+%% become visible.
+codelens_positions(File) ->
     {Functions, Exports} = fold_in_syntax_tree(fun
         ({function, {L, Start}, Function, Arity, _}, CurrentFile, {FunAcc, ExportAcc}) when CurrentFile =:= File ->
             {[{Function, Arity, L, Start} | FunAcc], ExportAcc};
@@ -298,12 +307,12 @@ codelens_info(File) ->
         (_SyntaxTree, _CurrentFile, Acc) ->
             Acc
     end, {[], #{}}, File),
+    [{Function, Arity, maps:is_key({Function, Arity}, Exports), L, Start} || {Function, Arity, L, Start} <- Functions].
+
+codelens_ref_count(File, Function, Arity) ->
     FileModule = list_to_atom(filename:rootname(filename:basename(File))),
-    lists:map(fun ({Function, Arity, L, Start}) ->
-        RefCount = length(local_function_references(File, Function, Arity)) +
-            length(gen_lsp_doc_server:get_references({function, FileModule, Function, Arity})),
-        {Function, RefCount, maps:is_key({Function, Arity}, Exports), L, Start}
-    end, Functions).
+    length(local_function_references(File, Function, Arity)) +
+        length(gen_lsp_doc_server:get_references({function, FileModule, Function, Arity})).
 
 %
 % return { Position, Label} => {{0,0}, "sample"}
@@ -688,6 +697,199 @@ column_in_atom(_Atom, Start, Column) when Column < Start->
     false;
 column_in_atom(Atom, Start, Column) ->
     Column =< Start + length(atom_to_list(Atom)).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% task 5.7: textDocument/documentLink                    %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% @doc Every -include/-include_lib whose target resolves to a real file
+%% (reusing the exact same resolve_include_file_paths/find_libdir this
+%% module already uses for go-to-definition on the same attributes),
+%% plus any http(s):// URL found in a comment. Returns
+%% {Line, StartColumn, EndColumn, Target} (1-based) - Target is
+%% {file, Path} for an include, {url, Url} for a comment link.
+%%
+%% CHARACTERIZATION: Target is deliberately tagged rather than left for
+%% the caller to tell apart by Erlang term type (a list vs. a binary, the
+%% way find_include/find_at do it) - resolve_include_file_paths/2 (and
+%% filename:join/2, which it uses) return a *binary* path whenever the
+%% workspace root itself was configured as a binary, which real clients
+%% (and, it turns out, common_test's own data_dir) sometimes do - an
+%% include target is then indistinguishable from a URL by type alone.
+-spec document_links(File :: file:filename()) ->
+    [{pos_integer(), pos_integer(), pos_integer(), {file, file:filename()} | {url, binary()}}].
+document_links(File) ->
+    Content = read_whole_file(File),
+    Lines = binary:split(Content, <<"\n">>, [global]),
+    IndexedLines = lists:zip(lists:seq(1, length(Lines)), Lines),
+    lists:flatmap(fun ({LineNum, LineContent}) ->
+        include_links(File, LineNum, LineContent) ++ comment_url_links(LineNum, LineContent)
+    end, IndexedLines).
+
+include_links(File, LineNum, LineContent) ->
+    case re:run(LineContent, <<"-(include|include_lib)\\(\"([^\"]+)\"\\)">>, [global]) of
+        {match, Matches} ->
+            lists:filtermap(fun ([_Whole, AttributePL, {FStart, FLen} = FilenamePL]) ->
+                IncludeFileName = binary:part(LineContent, FilenamePL),
+                Target = case binary:part(LineContent, AttributePL) of
+                    <<"include">> ->
+                        case resolve_include_file_paths(File, IncludeFileName) of
+                            [Found | _] -> Found;
+                            [] -> undefined
+                        end;
+                    <<"include_lib">> ->
+                        find_libdir(IncludeFileName)
+                end,
+                case Target of
+                    undefined -> false;
+                    _ -> {true, {LineNum, FStart + 1, FStart + FLen + 1, {file, Target}}}
+                end
+            end, Matches);
+        nomatch ->
+            []
+    end.
+
+%% Non-greedy up to the first `%` so a trailing end-of-line comment (code
+%% then " % see http://...") still counts, without needing a real lexer to
+%% know where the comment actually starts.
+comment_url_links(LineNum, LineContent) ->
+    case re:run(LineContent, <<"%.*?(https?://[^\\s\"'>]+)">>, [global, {capture, [1], index}]) of
+        {match, Matches} ->
+            [{LineNum, Start + 1, Start + Len + 1, {url, binary:part(LineContent, Start, Len)}}
+             || [{Start, Len}] <- Matches];
+        nomatch ->
+            []
+    end.
+
+read_whole_file(File) ->
+    case gen_lsp_doc_server:get_document_contents(File) of
+        undefined ->
+            {ok, Bin} = file:read_file(File),
+            Bin;
+        Bin ->
+            Bin
+    end.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% task 5.2: textDocument/selectionRange                  %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% @doc A chain of {StartLine, EndLine} (1-based, both inclusive),
+%% innermost first: the cursor's own enclosing top-level statement, then
+%% its clause, then its function (only when that differs from the clause -
+%% a single-clause function has nothing more to add there), then the
+%% whole document. Deliberately line-granular, not column-precise sub-
+%% expression nesting: getting a real column-accurate *end* position for
+%% an arbitrary erl_parse node requires either per-node-shape handling
+%% (there is no generic "end position" the AST carries) or a token scan -
+%% line-level chunks are still a genuinely useful expand-selection chain
+%% (whole statement, whole clause, whole function, whole file) with only
+%% one token scan, not one per nesting level.
+%%
+%% CHARACTERIZATION: a clause's or statement's own real last line is found
+%% via a token scan (scan_to_separator/3 below - the same depth-tracked
+%% "is this end/,/;/. mine, or a nested block's" idea lsp_folding.erl's
+%% clause_end_line/2 uses), not by walking the AST and taking the largest
+%% line any node happens to carry - the latter would miss a `case`/`if`/
+%% `receive`/`try`/`begin`/`fun` block whose own closing `end` sits alone
+%% on the line after the last real expression, a common Erlang formatting
+%% style.
+-spec selection_range(File :: file:filename(), Line :: pos_integer(), Column :: pos_integer()) ->
+    [{pos_integer(), pos_integer()}].
+selection_range(File, Line, _Column) ->
+    Tree = gen_lsp_doc_server:get_syntax_tree(File),
+    DocRange = {1, document_line_count(File)},
+    case is_list(Tree) andalso find_function_with_line(Tree, Line) of
+        {function, {FStart, _}, _Name, _Arity, Clauses} ->
+            Tokens = file_tokens(File),
+            ClauseEnds = [{CLine, CCol, clause_end_line(Tokens, {CLine, CCol})}
+                          || {clause, {CLine, CCol}, _, _, _} <- Clauses],
+            FEnd = lists:max([EL || {_, _, EL} <- ClauseEnds]),
+            case find_enclosing_clause(Clauses, Line) of
+                {clause, {CStart, CCol}, _, _, Body} ->
+                    {CStart, CCol, CEnd} = lists:keyfind(CStart, 1, ClauseEnds),
+                    StatementRange = case find_enclosing_statement(Tokens, Body, Line) of
+                        {SStart, SEnd} -> [{SStart, SEnd}];
+                        undefined -> []
+                    end,
+                    dedup_ranges(StatementRange ++ [{CStart, CEnd}, {FStart, FEnd}, DocRange]);
+                undefined ->
+                    dedup_ranges([{FStart, FEnd}, DocRange])
+            end;
+        _ ->
+            [DocRange]
+    end.
+
+find_enclosing_clause(Clauses, Line) ->
+    case [C || {clause, {CLine, _}, _, _, _} = C <- Clauses, CLine =< Line] of
+        [] -> undefined;
+        Candidates -> lists:last(Candidates)
+    end.
+
+find_enclosing_statement(Tokens, Body, Line) ->
+    case [S || S <- Body, node_start_line(S) =< Line] of
+        [] ->
+            undefined;
+        Candidates ->
+            Stmt = lists:last(Candidates),
+            StmtPos = {node_start_line(Stmt), node_start_col(Stmt)},
+            {node_start_line(Stmt), scan_to_separator(Tokens, StmtPos, [',', ';', dot])}
+    end.
+
+node_start_line(Node) -> element(1, element(2, Node)).
+node_start_col(Node) -> element(2, element(2, Node)).
+
+%% A clause's own last line is the line of the `;` before the next clause,
+%% or the form's own terminating `.` - never a `,` (those only separate
+%% statements *within* the clause's own body).
+clause_end_line(Tokens, StartPos) ->
+    scan_to_separator(Tokens, StartPos, [';', dot]).
+
+%% Scans forward from StartPos, depth-tracking every construct that closes
+%% with a bare `end` (if/case/receive/begin/try/fun - see
+%% lsp_codeaction:find_matching_end/2 for the original version of this
+%% idea), and returns the line of the first token in StopSeps seen at
+%% depth 0 - or the last token's own line, if the scan runs out first.
+scan_to_separator(Tokens, StartPos, StopSeps) ->
+    Relevant = lists:dropwhile(fun (T) -> token_pos(T) < StartPos end, Tokens),
+    {StartLine, _} = StartPos,
+    scan_to_sep(Relevant, 0, StartLine, StopSeps).
+
+scan_to_sep([{Kind, {L, _}} | Rest], Depth, _Last, Stops)
+        when Kind =:= 'if'; Kind =:= 'case'; Kind =:= 'receive'; Kind =:= 'begin'; Kind =:= 'try'; Kind =:= 'fun' ->
+    scan_to_sep(Rest, Depth + 1, L, Stops);
+scan_to_sep([{'end', {L, _}} | Rest], Depth, _Last, Stops) when Depth > 0 ->
+    scan_to_sep(Rest, Depth - 1, L, Stops);
+scan_to_sep([{Sep, {L, _}} | Rest], 0, _Last, Stops) ->
+    case lists:member(Sep, Stops) of
+        true -> L;
+        false -> scan_to_sep(Rest, 0, L, Stops)
+    end;
+scan_to_sep([Tok | Rest], Depth, _Last, Stops) ->
+    scan_to_sep(Rest, Depth, token_line(Tok), Stops);
+scan_to_sep([], _Depth, Last, _Stops) ->
+    Last.
+
+token_line({_Type, {L, _C}}) -> L;
+token_line({_Type, {L, _C}, _Value}) -> L.
+
+token_pos({_Type, Pos}) -> Pos;
+token_pos({_Type, Pos, _Value}) -> Pos.
+
+file_tokens(File) ->
+    {ok, Tokens, _} = erl_scan:string(binary_to_list(read_whole_file(File)), {1, 1}),
+    Tokens.
+
+dedup_ranges(Ranges) ->
+    dedup_ranges(Ranges, undefined).
+
+dedup_ranges([], _Prev) -> [];
+dedup_ranges([R | Rest], R) -> dedup_ranges(Rest, R);
+dedup_ranges([R | Rest], _Prev) -> [R | dedup_ranges(Rest, R)].
+
+document_line_count(File) ->
+    Content = read_whole_file(File),
+    length(binary:split(Content, <<"\n">>, [global])).
 
 resolve_include_file_paths(File, IncludeFileName) ->
     IncludePaths = lsp_parse:get_include_path(File),

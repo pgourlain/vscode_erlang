@@ -15,6 +15,11 @@
     textDocument_documentHighlight/2, workspace_symbol/2, workspaceSymbol_resolve/2]).
 -export([textDocument_prepareCallHierarchy/2, callHierarchy_incomingCalls/2, callHierarchy_outgoingCalls/2]).
 -export([textDocument_prepareTypeHierarchy/2, typeHierarchy_supertypes/2, typeHierarchy_subtypes/2]).
+-export([textDocument_rangeFormatting/2, textDocument_onTypeFormatting/2]).
+-export([textDocument_foldingRange/2, textDocument_selectionRange/2]).
+-export([completionItem_resolve/2, textDocument_documentLink/2, documentLink_resolve/2]).
+-export([codeLens_resolve/2, inlayHint_resolve/2]).
+-export([textDocument_diagnostic/2, workspace_diagnostic/2]).
 
 -include("lsp_log.hrl").
 
@@ -24,7 +29,7 @@ initialize(_Socket, Params) ->
     gen_lsp_doc_server:root_available(),
     #{capabilities => #{
         textDocumentSync => 2, % Incremental
-        completionProvider => #{triggerCharacters => <<":#.">>},
+        completionProvider => #{triggerCharacters => <<":#.?-">>, resolveProvider => true}, %% task 5.6
         hoverProvider => true,
         signatureHelpProvider => #{triggerCharacters => <<"(,">>, retriggerCharacters => <<",">>},
         declarationProvider => true, %% task 4.2
@@ -38,20 +43,23 @@ initialize(_Socket, Params) ->
             codeActionKinds => [<<"quickfix">>, <<"source">>, <<"refactor">>],
             resolveProvider => true
         },
-        codeLensProvider => true,
-        documentLinkProvider => false,
+        codeLensProvider => #{resolveProvider => true}, %% task 5.10
+        documentLinkProvider => #{resolveProvider => false}, %% task 5.7
         colorProvider => false,
         documentFormattingProvider => true,
-        documentRangeFormattingProvider => false,
-        documentOnTypeFormattingProvider => false,
+        documentRangeFormattingProvider => true, %% task 5.3
+        documentOnTypeFormattingProvider => #{ %% task 5.4
+            firstTriggerCharacter => <<".">>,
+            moreTriggerCharacter => [<<";">>, <<",">>, <<"\n">>]
+        },
         renameProvider => #{ prepareProvider => true },
-        foldingRangeProvider => false,
+        foldingRangeProvider => true, %% task 5.1
         %% CHARACTERIZATION / known limitation: no command is registered yet
         %% (task 2.1 is infrastructure only) - this list grows as task 2.2+
         %% adds fixes that need workspace/executeCommand rather than a plain
         %% WorkspaceEdit.
         executeCommandProvider => #{commands => []},
-        selectionRangeProvider => false,
+        selectionRangeProvider => true, %% task 5.2
         linkedEditingRangeProvider => false,
         callHierarchyProvider => true, %% task 4.5
         semanticTokensProvider => #{
@@ -62,8 +70,8 @@ initialize(_Socket, Params) ->
         monikerProvider => false,
         typeHierarchyProvider => true, %% task 4.6
         inlineValueProvider => true,
-        inlayHintProvider => true,
-        diagnosticProvider => false,
+        inlayHintProvider => #{resolveProvider => true}, %% task 5.8
+        diagnosticProvider => #{interFileDependencies => true, workspaceDiagnostics => true}, %% task 5.9
         workspaceSymbolProvider => #{resolveProvider => true}, %% task 4.1
         workspace => #{
             workspaceFolders => #{supported => true, changeNotifications => true}
@@ -345,80 +353,206 @@ text_before_character(File, Line, Character) ->
     LineText = lists:nth(Line + 1, binary:split(Contents, <<"\n">>, [global])),
     {binary:part(LineText, 0, min(Character + 1, byte_size(LineText))), LineText}.
 
+%% @doc task 5.5: erlang.formatterEnabled (default true) gates all three
+%% formatting entry points below - like codeLensEnabled/inlayHintsEnabled/
+%% semanticTokensEnabled, the capability itself stays permanently
+%% advertised (VS Code has no easy way to flip that dynamically) and each
+%% handler just returns no edits when disabled.
 textDocument_formatting(_Socket, Params) ->
-    File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
-    Contents = case gen_lsp_doc_server:get_document_contents(File) of
-        undefined ->
-            {ok, FileContents} = file:read_file(File),
-            FileContents;
-        StoredContents ->
-            StoredContents
-    end,
-    UpdatedContents = formatting(Contents),
-    [
-        #{range =>
-            #{
-                <<"start">> => #{line => 0, character => 0},
-                <<"end">> => #{line => 999999, character => 255}
-            },
-        newText => UpdatedContents}
-    ].
+    case gen_lsp_config_server:formatterEnabled() of
+        false ->
+            [];
+        true ->
+            File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
+            Contents = case gen_lsp_doc_server:get_document_contents(File) of
+                undefined ->
+                    {ok, FileContents} = file:read_file(File),
+                    FileContents;
+                StoredContents ->
+                    StoredContents
+            end,
+            UpdatedContents = formatting(Contents),
+            %% task 5.3: the result range used to be a hardcoded
+            %% {0,0}-{999999,255} sentinel, regardless of the document's
+            %% real length - now the actual end position.
+            {EndLine, EndCol} = lsp_formatting:document_end(Contents),
+            [#{range => lsp_utils:client_range(1, 1, EndLine, EndCol), newText => UpdatedContents}]
+    end.
 
+textDocument_rangeFormatting(_Socket, Params) ->
+    case gen_lsp_config_server:formatterEnabled() of
+        false ->
+            [];
+        true ->
+            File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
+            #{line := LS} = mapmapget(range, start, Params),
+            #{line := LE} = mapmapget(range, 'end', Params),
+            lsp_formatting:range(File, LS + 1, LE + 1)
+    end.
+
+textDocument_onTypeFormatting(_Socket, Params) ->
+    case gen_lsp_config_server:formatterEnabled() of
+        false ->
+            [];
+        true ->
+            File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
+            Line = mapmapget(position, line, Params),
+            lsp_formatting:on_type(File, Line + 1)
+    end.
+
+%% @doc task 5.10: list only ever does the cheap half
+%% (lsp_navigation:codelens_positions/1 - position and exported-ness, no
+%% reference count) and leaves `command` out entirely; codeLens/resolve
+%% below computes the (project-wide-search-requiring) reference count for
+%% just the one lens actually about to be shown, not eagerly for every
+%% function in the file the moment it opens.
+%%
+%% CHARACTERIZATION: the old eager version could show an exported,
+%% referenced function *two* lenses ("exported" and "N references" side
+%% by side), because it already knew the count before deciding how many
+%% lenses to emit. list can no longer make that decision (it doesn't have
+%% the count yet, by design), so there is always exactly one lens per
+%% function now; for an exported function with real references, resolve
+%% combines both pieces of information into that one lens's own title
+%% ("exported, N references"), still clickable (still a
+%% findReferences command), rather than dropping either one.
 textDocument_codeLens(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),
     case gen_lsp_config_server:codeLensEnabled() of
         false ->
             [];
         _ ->
-            lists:foldl(fun ({Function, RefCount, Exported, Line, Column}, Acc) ->
-                Range = lsp_utils:client_range(Line, Column, Column + length(atom_to_list(Function))),
-                Base = #{range => Range, data => #{function => Function, count => RefCount, exported => Exported}},
-                ExportedCL = Base#{command => #{title => <<"exported">>, command => <<>>}},
-                ReferenceCL = case RefCount of
-                    0 ->
-                        Base#{command => #{title => <<"unused">>, command => <<>>}};
-                    _ ->
-                        Base#{command => #{
-                            title => list_to_binary(integer_to_list(RefCount) ++ " references"),
-                            command => <<"editor.action.findReferences">>,
-                            arguments => [
-                                lsp_utils:file_uri_to_vscode_uri(Uri),
-                                #{lineNumber => Line, column => Column}
-                            ]
-                        }}
-                end,
-                case {RefCount > 0, Exported} of
-                    {_, false} -> [ReferenceCL | Acc];
-                    {false, true} -> [ExportedCL | Acc];
-                    {true, true} -> [ReferenceCL, ExportedCL | Acc]
-                end
-            end, [], lsp_navigation:codelens_info(lsp_utils:file_uri_to_file(Uri)))
+            File = lsp_utils:file_uri_to_file(Uri),
+            [#{
+                range => lsp_utils:client_range(Line, Column, Column + length(atom_to_list(Function))),
+                data => #{
+                    file => unicode:characters_to_binary(File),
+                    function => Function,
+                    arity => Arity,
+                    exported => Exported,
+                    line => Line,
+                    column => Column
+                }
+             } || {Function, Arity, Exported, Line, Column} <- lsp_navigation:codelens_positions(File)]
     end.
+
+codeLens_resolve(_Socket, #{data := Data} = Lens) ->
+    #{file := FileBin, function := FunctionData, arity := Arity, exported := Exported, line := Line, column := Column} = Data,
+    File = binary_to_list(FileBin),
+    Function = to_atom(FunctionData),
+    RefCount = lsp_navigation:codelens_ref_count(File, Function, Arity),
+    Lens#{command => codelens_command(Exported, RefCount, File, Line, Column)}.
+
+codelens_command(true, 0, _File, _Line, _Column) ->
+    #{title => <<"exported">>, command => <<>>};
+codelens_command(true, RefCount, File, Line, Column) ->
+    #{
+        title => iolist_to_binary(io_lib:format("exported, ~p references", [RefCount])),
+        command => <<"editor.action.findReferences">>,
+        arguments => [lsp_utils:file_uri_to_vscode_uri(lsp_utils:file_to_file_uri(File)), #{lineNumber => Line, column => Column}]
+    };
+codelens_command(false, 0, _File, _Line, _Column) ->
+    #{title => <<"unused">>, command => <<>>};
+codelens_command(false, RefCount, File, Line, Column) ->
+    #{
+        title => list_to_binary(integer_to_list(RefCount) ++ " references"),
+        command => <<"editor.action.findReferences">>,
+        arguments => [lsp_utils:file_uri_to_vscode_uri(lsp_utils:file_to_file_uri(File)), #{lineNumber => Line, column => Column}]
+    }.
+
+to_atom(Value) when is_atom(Value) -> Value;
+to_atom(Value) when is_binary(Value) -> binary_to_atom(Value, utf8).
 
 
 textDocument_inlayHint(_Socket, Params) ->
     textDocument_inlayHints(_Socket, Params).
 
+%% @doc task 5.8: `kind` used to be sent as the literal string "parameter"/
+%% "type" - InlayHintKind is actually a number (1 Type, 2 Parameter) per
+%% spec, so this was previously sending a value no real client field
+%% expects (harmless in practice - VS Code just never applies the kind-
+%% specific styling - but not what the protocol says). Also adds
+%% paddingRight/paddingLeft and, for a parameter hint, a tooltip and a
+%% textEdit that materializes the inferred name into real source text if
+%% the hint is double-clicked.
+%%
+%% CHARACTERIZATION / known limitations *not* addressed by this pass (see
+%% tasks.md 5.8's own list): inlayhints_info/3 still only ever looks at
+%% local (same-file) calls, never a -spec's own parameter names for a
+%% call into another module; and there is still no type-hint mode at all
+%% for -spec return types ("type" is a real, reachable kind value below,
+%% but lsp_inlayhints.erl never actually produces one today).
 textDocument_inlayHints(_Socket, Params) ->
-    %gen_lsp_server:lsp_log("textDocument_inlayHints ~p", [Params]),
     Uri = mapmapget(textDocument, uri, Params),
     case gen_lsp_config_server:inlayHintsEnabled() of
         false -> [];
         _ ->
-            %#{range =>
-            %   #{'end' => #{character => 51,line => 73},
-            %     start => #{character => 0,line => 0}},
             #{line:=LS, character:=CS} = mapmapget(range, start, Params),
             #{line:=LE, character:=CE} = mapmapget(range, 'end', Params),
-            lists:map(fun ({Position, Label, Kind}) ->
-                #{
-                    position => lsp_utils:client_position(Position),
-                    kind => lsp_utils:to_binary(Kind), %"type" or "parameter"
-                    label => lsp_utils:to_binary(Label)
-                }
-                end, 
-                lsp_navigation:inlayhints_info(lsp_utils:file_uri_to_file(Uri), {LS,CS}, {LE,CE}))
+            [inlay_hint_item(Position, Label, Kind)
+             || {Position, Label, Kind} <- lsp_navigation:inlayhints_info(lsp_utils:file_uri_to_file(Uri), {LS,CS}, {LE,CE})]
     end.
+
+textDocument_foldingRange(_Socket, Params) ->
+    Uri = mapmapget(textDocument, uri, Params),
+    File = lsp_utils:file_uri_to_file(Uri),
+    [folding_range_item(StartLine, EndLine, Kind) || {StartLine, EndLine, Kind} <- lsp_folding:folding_ranges(File)].
+
+folding_range_item(StartLine, EndLine, Kind) ->
+    Base = #{startLine => StartLine - 1, endLine => EndLine - 1},
+    case Kind of
+        undefined -> Base;
+        _ -> Base#{kind => Kind}
+    end.
+
+%% Params has a `positions` array (multi-cursor support) - one
+%% SelectionRange chain per position, same order, each linked
+%% innermost-to-outermost via its own `parent` field.
+textDocument_selectionRange(_Socket, Params) ->
+    Uri = mapmapget(textDocument, uri, Params),
+    File = lsp_utils:file_uri_to_file(Uri),
+    Positions = maps:get(positions, Params),
+    [selection_range_chain(lsp_navigation:selection_range(File, maps:get(line, P) + 1, maps:get(character, P) + 1))
+     || P <- Positions].
+
+selection_range_chain([{StartLine, EndLine}]) ->
+    #{range => full_lines_range(StartLine, EndLine)};
+selection_range_chain([{StartLine, EndLine} | Rest]) ->
+    #{range => full_lines_range(StartLine, EndLine), parent => selection_range_chain(Rest)}.
+
+%% Whole lines StartLine..EndLine inclusive - see
+%% lsp_navigation:selection_range/3's own note on why this stays
+%% line-granular rather than column-precise.
+full_lines_range(StartLine, EndLine) ->
+    lsp_utils:client_range(StartLine, 1, EndLine + 1, 1).
+
+inlay_hint_item({Line, Col} = Position, Label, "parameter") ->
+    LabelBin = lsp_utils:to_binary(Label),
+    #{
+        position => lsp_utils:client_position(Position),
+        kind => 2, % Parameter
+        label => LabelBin,
+        paddingRight => true,
+        tooltip => #{value => <<"Inferred parameter name">>, kind => <<"plaintext">>},
+        textEdits => [#{range => lsp_utils:client_range(Line, Col, Line, Col), newText => LabelBin}]
+    };
+inlay_hint_item(Position, Label, Kind) ->
+    #{
+        position => lsp_utils:client_position(Position),
+        kind => inlay_kind_number(Kind),
+        label => lsp_utils:to_binary(Label),
+        paddingLeft => true
+    }.
+
+inlay_kind_number("type") -> 1;
+inlay_kind_number(_) -> 2.
+
+%% Nothing is deferred here - list already computes everything cheaply
+%% (see textDocument_inlayHints/2's own note) - identity, like
+%% documentLink_resolve/2 and workspaceSymbol_resolve/2, whose features
+%% likewise have no lazy half to defer to begin with.
+inlayHint_resolve(_Socket, Hint) ->
+    Hint.
 
 textDocument_codeAction(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),
@@ -453,6 +587,26 @@ textDocument_semanticTokens_range(_Socket, Params) ->
     #{line := LS} = mapmapget(range, start, Params),
     #{line := LE} = mapmapget(range, 'end', Params),
     lsp_semantic_tokens:range_tokens(lsp_utils:file_uri_to_file(Uri), {LS + 1, LE + 1}).
+
+%% Target tells an include (file:filename(), a list) apart from a comment
+%% URL (binary) - a documentLink's `target` is a URI string either way.
+textDocument_documentLink(_Socket, Params) ->
+    Uri = mapmapget(textDocument, uri, Params),
+    File = lsp_utils:file_uri_to_file(Uri),
+    [#{
+        range => lsp_utils:client_range(Line, StartCol, EndCol),
+        target => link_target(Target)
+     } || {Line, StartCol, EndCol, Target} <- lsp_navigation:document_links(File)].
+
+link_target({url, Url}) -> Url;
+link_target({file, Path}) -> lsp_utils:file_uri_to_vscode_uri(lsp_utils:file_to_file_uri(Path)).
+
+%% No lazy work is deferred to resolve for this feature (every link
+%% already carries its own real target up front) - resolveProvider is
+%% declared false in the capability, so the client should never call this,
+%% but identity is the correct answer if it ever does.
+documentLink_resolve(_Socket, Link) ->
+    Link.
 
 textDocument_documentSymbol(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),
@@ -655,18 +809,49 @@ send_diagnostics(Socket, File, Diagnostics) ->
         method => <<"textDocument/publishDiagnostics">>,
         params => #{
             uri => lsp_utils:file_uri_to_vscode_uri(lsp_utils:file_to_file_uri(File)),
-            diagnostics => lists:map(fun (Diagnostic) ->
-                Info = maps:get(info, Diagnostic),
-                #{
-                    severity => severity(maps:get(type, Diagnostic)),
-                    range => get_range(Info),
-                    message => maps:get(message, Info),
-                    source => lsp_utils:try_get(source, Diagnostic, <<"erl">>),
-                    data => lsp_utils:try_get(correlation_data, Diagnostic, null)
-                }
-            end, Diagnostics)
+            diagnostics => lists:map(fun to_lsp_diagnostic/1, Diagnostics)
         }
     }).
+
+to_lsp_diagnostic(Diagnostic) ->
+    Info = maps:get(info, Diagnostic),
+    #{
+        severity => severity(maps:get(type, Diagnostic)),
+        range => get_range(Info),
+        message => maps:get(message, Info),
+        source => lsp_utils:try_get(source, Diagnostic, <<"erl">>),
+        data => lsp_utils:try_get(correlation_data, Diagnostic, null)
+    }.
+
+%% @doc task 5.9: `textDocument/diagnostic` (LSP 3.17 pull model),
+%% alongside the existing push (publishDiagnostics, unchanged - the two
+%% are meant to coexist per spec) - reuses the exact same validation and
+%% wire-shape as the push path (lsp_syntax:validate_parsed_source_file/1,
+%% to_lsp_diagnostic/1), just returned synchronously instead of sent as a
+%% notification.
+textDocument_diagnostic(_Socket, Params) ->
+    Uri = mapmapget(textDocument, uri, Params),
+    File = lsp_utils:file_uri_to_file(Uri),
+    #{kind => <<"full">>, items => diagnostics_for(File)}.
+
+%% @doc `workspace/diagnostic` - the same, for every project file, so
+%% problems can be seen without opening each one. CHARACTERIZATION: this
+%% parses and lints every project file synchronously on each pull (there
+%% is no persistent, incrementally-updated project-wide diagnostic cache)
+%% - acceptable for a first pass, since this endpoint is refreshed
+%% on demand, not polled continuously.
+workspace_diagnostic(_Socket, _Params) ->
+    Items = [#{
+        uri => lsp_utils:file_uri_to_vscode_uri(lsp_utils:file_to_file_uri(File)),
+        version => null,
+        kind => <<"full">>,
+        items => diagnostics_for(File)
+    } || File <- gen_lsp_doc_server:all_project_files()],
+    #{items => Items}.
+
+diagnostics_for(File) ->
+    ErrorsWarnings = lsp_syntax:validate_parsed_source_file(File),
+    lists:map(fun to_lsp_diagnostic/1, maps:get(errors_warnings, ErrorsWarnings, [])).
 
 get_range(Info) ->
     LS = maps:get(line, Info),
@@ -686,6 +871,11 @@ auto_complete(File, Line, Text) ->
         {"[^a-zA-Z0-9_@]([a-z][a-zA-Z0-9_@]*):((?:[a-z][a-zA-Z0-9_@]*)?)\r?$", module_function},
         {"#((?:[a-z][a-zA-Z0-9_@]*)?)\r?$", record},
         {"#([a-z][a-zA-Z0-9_@]*)\.((?:[a-z][a-zA-Z0-9_@]*)?)\r?$", field},
+        %% task 5.6: must come before `variable` - "...= ?MAX_" also
+        %% matches variable's own "non-word char then [A-Z]..." pattern
+        %% (the `?` counts as the delimiter), which would otherwise always
+        %% win and dispatch a macro prefix to variable completion instead.
+        {"\\?([A-Za-z0-9_@]*)\r?$", macro},
         {"[^a-zA-Z0-9_@]([A-Z][a-zA-Z0-9_@]*)\r?$", variable},
         {"^-([a-z]*)\r?$", attribute},
         {"([a-z][a-zA-Z0-9_@]*)\r?$", atom}
@@ -703,11 +893,16 @@ auto_complete(File, Line, Text) ->
             lsp_completion:variable(File, Line, binary_to_list(Variable));
         {attribute, [Attribute]} ->
             lsp_completion:attribute(binary_to_list(Attribute));
+        {macro, [Macro]} ->
+            lsp_completion:macro(File, binary_to_list(Macro));
         {atom, [Atom]} ->
             lsp_completion:atom(File, binary_to_list(Atom));
         {nomatch, _}
             -> []
     end.
+
+completionItem_resolve(_Socket, Item) ->
+    lsp_completion:resolve_item(Item).
   
 match_regex(Str, [{Pattern, Result} | T]) ->
     case re:run(Str, Pattern) of

@@ -23,7 +23,9 @@ all() -> [testnavigation, test_macros,
     test_implementation_from_callback_declaration,
     test_document_highlight_variable_write_and_read,
     test_document_highlight_function_definition_and_call,
-    test_document_highlight_record_usage_sites
+    test_document_highlight_record_usage_sites,
+    test_selection_range_expands_from_statement_to_document,
+    test_document_links_finds_include_target_and_comment_url
 ].
 
 % required, but can just return Config. this is a suite level setup function.
@@ -351,6 +353,41 @@ test_document_highlight_record_usage_sites(Config) ->
     {Line, Column} = nav_ext_position_of(TargetContent, "#item{identifier"),
     {UseLine, UseCol} = nav_ext_position_of(TargetContent, "item{identifier"),
     ?assertEqual([{1, UseLine, UseCol, UseCol + 4}], lsp_navigation:document_highlights(TargetFile, Line, Column)).
+
+%% task 5.2: a chain innermost-first, each level strictly containing the
+%% one before it, ending at the whole document - checked structurally
+%% (not against hardcoded line numbers, which would make this fixture-
+%% fragile) since the exact levels a given cursor sees depend on exactly
+%% which statement/clause/function it lands in.
+test_selection_range_expands_from_statement_to_document(Config) ->
+    {TargetFile, _CallerFile} = nav_ext_setup(Config),
+    {ok, TargetContent} = file:read_file(TargetFile),
+    {Line, Column} = nav_ext_position_of(TargetContent, "#item{identifier"),
+    Chain = lsp_navigation:selection_range(TargetFile, Line, Column),
+    ?assert(length(Chain) >= 2),
+    [{FirstStart, FirstEnd} | _] = Chain,
+    ?assert(FirstStart =< Line andalso Line =< FirstEnd),
+    {LastStart, LastEnd} = lists:last(Chain),
+    ?assertEqual(1, LastStart),
+    TotalLines = length(binary:split(TargetContent, <<"\n">>, [global])),
+    ?assertEqual(TotalLines, LastEnd),
+    Pairs = lists:zip(lists:droplast(Chain), tl(Chain)),
+    %% each level strictly contains the previous one, AND dedup_ranges/1
+    %% must never have left two consecutive identical levels.
+    ?assert(lists:all(fun ({Inner, Outer}) -> Inner =/= Outer end, Pairs)),
+    ?assert(lists:all(fun ({{S1, E1}, {S2, E2}}) -> S2 =< S1 andalso E1 =< E2 end, Pairs)).
+
+%% task 5.7: nav_ext_caller.erl's own -include("nav_ext_include.hrl")
+%% resolves to that real file (found the same way go-to-definition
+%% already resolves it - see test_definition_include above), and the
+%% http(s) URL in its trailing comment is found too.
+test_document_links_finds_include_target_and_comment_url(Config) ->
+    {_TargetFile, CallerFile} = nav_ext_setup(Config),
+    Links = lsp_navigation:document_links(CallerFile),
+    [IncludePath] = [P || {_, _, _, {file, P}} <- Links],
+    ?assertEqual(<<"nav_ext_include.hrl">>, filename:basename(unicode:characters_to_binary(IncludePath))),
+    [UrlTarget] = [U || {_, _, _, {url, U}} <- Links],
+    ?assertEqual(<<"https://www.erlang.org/doc">>, UrlTarget).
 
 %% 1-based {Line, Column} of the first character of Marker.
 nav_ext_position_of(Content, Marker) ->

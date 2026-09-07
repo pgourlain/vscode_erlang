@@ -100,7 +100,7 @@ exit_closes_the_connection(Config) ->
 golden_initialize_result() ->
     #{capabilities => #{
         textDocumentSync => 2, %% Incremental, task 1.4
-        completionProvider => #{triggerCharacters => <<":#.">>},
+        completionProvider => #{triggerCharacters => <<":#.?-">>, resolveProvider => true}, %% task 5.6
         hoverProvider => true,
         signatureHelpProvider => #{triggerCharacters => <<"(,">>, retriggerCharacters => <<",">>},
         declarationProvider => true, %% task 4.2
@@ -114,16 +114,19 @@ golden_initialize_result() ->
             codeActionKinds => [<<"quickfix">>, <<"source">>, <<"refactor">>],
             resolveProvider => true
         },
-        codeLensProvider => true,
-        documentLinkProvider => false,
+        codeLensProvider => #{resolveProvider => true}, %% task 5.10
+        documentLinkProvider => #{resolveProvider => false}, %% task 5.7
         colorProvider => false,
         documentFormattingProvider => true,
-        documentRangeFormattingProvider => false,
-        documentOnTypeFormattingProvider => false,
+        documentRangeFormattingProvider => true, %% task 5.3
+        documentOnTypeFormattingProvider => #{ %% task 5.4
+            firstTriggerCharacter => <<".">>,
+            moreTriggerCharacter => [<<";">>, <<",">>, <<"\n">>]
+        },
         renameProvider => #{prepareProvider => true},
-        foldingRangeProvider => false,
+        foldingRangeProvider => true, %% task 5.1
         executeCommandProvider => #{commands => []}, %% task 2.1, no commands registered yet
-        selectionRangeProvider => false,
+        selectionRangeProvider => true, %% task 5.2
         linkedEditingRangeProvider => false,
         callHierarchyProvider => true, %% task 4.5
         semanticTokensProvider => #{ %% task 3.1, range/delta task 3.2
@@ -140,8 +143,8 @@ golden_initialize_result() ->
         monikerProvider => false,
         typeHierarchyProvider => true, %% task 4.6
         inlineValueProvider => true,
-        inlayHintProvider => true,
-        diagnosticProvider => false,
+        inlayHintProvider => #{resolveProvider => true}, %% task 5.8
+        diagnosticProvider => #{interFileDependencies => true, workspaceDiagnostics => true}, %% task 5.9
         workspaceSymbolProvider => #{resolveProvider => true}, %% task 4.1
         workspace => #{
             workspaceFolders => #{supported => true, changeNotifications => true}
