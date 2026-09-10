@@ -59,5 +59,5 @@ start_sup_help() ->
     supervisor:start_child(?MODULE, help_spec()).
 
 start_child(Arg) ->
-    error_logger:error_msg([{vscode_lsp_app_sup, start_child}, {arg, Arg}]),
+    logger:error([{vscode_lsp_app_sup, start_child}, {arg, Arg}]),
     error.

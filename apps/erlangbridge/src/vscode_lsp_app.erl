@@ -49,6 +49,8 @@ get_port() ->
     end.
 
 start(_Type, _Args) ->
+    % Setup LSP logging format
+    lsp_log:setup(),
     application:start(inets),
     %uncomment to monitor erlang processes
     %spawn(fun() -> observer:start() end),

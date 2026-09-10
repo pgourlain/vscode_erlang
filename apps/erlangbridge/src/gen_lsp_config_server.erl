@@ -34,7 +34,7 @@ compute_erlang_section(Key) ->
     if 
         Key =:= erlang ->
             Excludes = get_config_entry(erlang, verboseExcludeFilter, ""),
-            Splitted = lists:map(fun(X) -> {lsp_utils:to_binary(X), false} end, lists:flatmap( fun(X) -> string:split(X, ",") end, string:split(Excludes, ";"))),
+            Splitted = lists:map(fun(X) -> {lsp_utils:to_binary(X), false} end, lists:flatmap( fun(X) -> string:split(X, ",",all) end, string:split(Excludes, ";",all))),
             gen_server:call(?SERVER, {update_config, erlang_computed, #{ verboseExcludeFilter => maps:from_list(Splitted)}});
         true -> ok
     end.
@@ -74,6 +74,8 @@ verbose() ->
 verbose_is_include(Method) ->
     M = get_config_entry(erlang_computed, verboseExcludeFilter, #{}),
     lsp_utils:try_get(Method, M, true).
+    %lsp_log:info(<<"is_include">>,"verbose_is_include: ~p in ~p => ~p", [Method,M,R]),
+    %R.
 
 autosave() ->
     get_config_entry(computed, autosave, true).

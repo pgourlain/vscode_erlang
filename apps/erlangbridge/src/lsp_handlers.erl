@@ -125,12 +125,12 @@ configuration(Socket, [ErlangSection, FilesSection, ComputedSection, HttpSection
     Documents = gen_lsp_doc_server:opened_documents(),
     gen_lsp_config_server:update_config(erlang, ErlangSection),
     %% because 'verbose' is stored in erlang section, loggin should be after update erlang config
-    gen_lsp_server:lsp_log("Opened documents ~p", [Documents]),
+    ?LOG(<<"diag">>, "configuration: Opened documents ~p", [Documents]),
     gen_lsp_config_server:update_config(files, FilesSection),
     gen_lsp_config_server:update_config(computed, ComputedSection),
     gen_lsp_config_server:update_config(http, HttpSection),
     gen_lsp_config_server:update_config(search, SearchSection),
-    gen_lsp_server:lsp_log("vscode configuration:~n"
+    ?LOG(<<"config">>, "vscode configuration:~n"
                            " - erlang: ~p~n"
                            " - files: ~p~n"
                            " - computed: ~p~n"
@@ -150,9 +150,10 @@ configuration(Socket, [ErlangSection, FilesSection, ComputedSection, HttpSection
     %% Scan workspace for source files
     gen_lsp_doc_server:config_change(),
 
+    ?LOG(<<"diag">>, "configuration: Starting validation for documents ~p", [Documents]),
     lists:foreach(fun (File) ->
-        gen_lsp_server:lsp_log("File = ~p",[File]),
         send_diagnostics(Socket, File, []),
+        ?LOG(<<"diag">>, "configuration: Starting validation for file ~p", [File]),
         validate_file(Socket, File)
     end, Documents).
 
@@ -161,11 +162,14 @@ workspace_didChangeConfiguration(Socket, _Params) ->
 
 workspace_didChangeWatchedFiles(_Socket, Params) ->
     lists:foreach(fun
-        (#{uri := Uri, type := 1}) -> % Created 
+        (#{uri := Uri, type := 1} = Change) -> % Created
+            ?LOG(<<"diag">>, "watchedFiles: Created ~p", [Change]),
             gen_lsp_doc_server:project_file_added(lsp_utils:file_uri_to_file(Uri));
-        (#{uri := Uri, type := 2}) -> % Changed  
+        (#{uri := Uri, type := 2} = Change) -> % Changed
+            ?LOG(<<"diag">>, "watchedFiles: Changed ~p", [Change]),
             gen_lsp_doc_server:project_file_changed(lsp_utils:file_uri_to_file(Uri));
-        (#{uri := Uri, type := 3}) -> % Deleted
+        (#{uri := Uri, type := 3} = Change) -> % Deleted
+            ?LOG(<<"diag">>, "watchedFiles: Deleted ~p", [Change]),
             gen_lsp_doc_server:project_file_deleted(lsp_utils:file_uri_to_file(Uri))
     end, maps:get(changes, Params)).
 
@@ -191,10 +195,12 @@ workspace_didChangeWorkspaceFolders(_Socket, Params) ->
 
 textDocument_didOpen(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
+    ?LOG(<<"diag">>, "didOpen: ~p version=~p", [File, mapmapget(textDocument, version, Params)]),
     gen_lsp_doc_server:document_opened(File, mapmapget(textDocument, text, Params)),
     case gen_lsp_config_server:autosave() of
         true ->
             gen_lsp_doc_server:parse_document(File),
+            ?LOG(<<"diag">>, "didOpen: Parsing document for file ~p", [File]),
             validate_file(Socket, File);
         _ ->
             ok
@@ -202,14 +208,17 @@ textDocument_didOpen(Socket, Params) ->
 
 textDocument_didClose(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
+    ?LOG(<<"diag">>, "didClose: ~p", [File]),
     send_diagnostics(Socket, File, []),
     gen_lsp_doc_server:document_closed(File).
 
 textDocument_didSave(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
+    ?LOG(<<"diag">>, "didSave: ~p", [File]),
     case gen_lsp_config_server:autosave() of
         true ->
             gen_lsp_doc_server:parse_document(File),
+            ?LOG(<<"diag">>, "didsave: Parsing document for file ~p", [File]),
             validate_file(Socket, File);
         _ ->
             ok
@@ -222,12 +231,14 @@ textDocument_didSave(Socket, Params) ->
 textDocument_didChange(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
     ContentChanges = maps:get(contentChanges, Params),
+    ?LOG(<<"diag">>, "didChange: ~p version=~p changes=~p", [File, mapmapget(textDocument, version, Params), length(ContentChanges)]),
     lists:foreach(fun (ContentChange) -> apply_content_change(File, ContentChange) end, ContentChanges),
     case gen_lsp_config_server:autosave() of
         true ->
             ok;
         _ ->
             gen_lsp_doc_server:parse_document(File),
+            ?LOG(<<"diag">>, "didChange: Parsing document for file ~p", [File]),
             validate_file(Socket, File)
     end.
 
@@ -744,6 +755,7 @@ validate_file(Socket, File) ->
 
 validate_parsed_source_file(Socket, File) ->
     ValidatingVersion = gen_lsp_doc_server:get_document_version(File),
+    ?LOG(<<"diag">>, "Validating parsed source file ~p at version ~p", [File, ValidatingVersion]),
     ErrorsWarnings = lsp_syntax:validate_parsed_source_file(File),
     maybe_send_diagnostics(Socket, File, ValidatingVersion, maps:get(errors_warnings, ErrorsWarnings, [])).
 
@@ -828,9 +840,13 @@ request_configuration(Socket) ->
 maybe_send_diagnostics(Socket, File, ValidatingVersion, Diagnostics) ->
     case gen_lsp_doc_server:get_document_version(File) of
         ValidatingVersion ->
+            ?LOG(<<"diag">>, "maybe_send_diagnostics: pushing for ~p at version ~p (~p diagnostics)",
+                [File, ValidatingVersion, length(Diagnostics)]),
             send_diagnostics(Socket, File, Diagnostics),
             request_diagnostic_refresh(Socket);
-        _ -> ok
+        CurrentVersion ->
+            ?LOG(<<"diag">>, "maybe_send_diagnostics: SKIPPED for ~p, stale version ~p (current ~p)",
+                [File, ValidatingVersion, CurrentVersion])
     end.
 
 %% @doc No-op handler for the client's reply to a server-initiated
@@ -839,12 +855,14 @@ maybe_send_diagnostics(Socket, File, ValidatingVersion, Diagnostics) ->
 %% an empty result), it only needs to be routed here instead of falling
 %% into gen_lsp_server's "Notification not handled" error log.
 workspace_diagnostic_refresh(_Socket, _Result) ->
+    ?LOG(<<"diag">>, "workspace_diagnostic_refresh: client acknowledged refresh", []),
     ok.
 
 %% @doc Server-initiated request (LSP 3.17 workspace/diagnostic/refresh)
 %% asking every pull-capable client to discard whatever diagnostics it last
 %% pulled and pull again. See the comment on maybe_send_diagnostics/4.
 request_diagnostic_refresh(Socket) ->
+    ?LOG(<<"diag">>, "request_diagnostic_refresh: asking client to re-pull diagnostics", []),
     gen_lsp_server:send_to_client(Socket, #{
         id => <<"workspace_diagnostic_refresh">>,
         method => <<"workspace/diagnostic/refresh">>,
@@ -852,6 +870,7 @@ request_diagnostic_refresh(Socket) ->
     }).
 
 send_diagnostics(Socket, File, Diagnostics) ->
+    ?LOG(<<"diag">>, "send_diagnostics: ~p (~p diagnostics)", [File, length(Diagnostics)]),
     gen_lsp_server:send_to_client(Socket, #{
         method => <<"textDocument/publishDiagnostics">>,
         params => #{
@@ -879,6 +898,7 @@ to_lsp_diagnostic(Diagnostic) ->
 textDocument_diagnostic(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),
     File = lsp_utils:file_uri_to_file(Uri),
+    ?LOG(<<"diag">>, "textDocument_diagnostic: client pulled ~p", [File]),
     #{kind => <<"full">>, items => diagnostics_for(File)}.
 
 %% @doc `workspace/diagnostic` - the same, for every project file, so
@@ -888,6 +908,8 @@ textDocument_diagnostic(_Socket, Params) ->
 %% - acceptable for a first pass, since this endpoint is refreshed
 %% on demand, not polled continuously.
 workspace_diagnostic(_Socket, _Params) ->
+    ?LOG(<<"diag">>, "workspace_diagnostic: client pulled whole workspace (~p files)",
+        [length(gen_lsp_doc_server:all_project_files())]),
     Items = [#{
         uri => lsp_utils:file_uri_to_vscode_uri(lsp_utils:file_to_file_uri(File)),
         version => null,

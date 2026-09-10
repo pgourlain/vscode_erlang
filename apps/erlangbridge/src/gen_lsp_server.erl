@@ -10,7 +10,7 @@
 
 %% API
 -export([start_link/1, start_link/2]).
--export([lsp_log/2, send_to_client/2]).
+-export([lsp_log/2, lsp_log/3, send_to_client/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -33,10 +33,11 @@ safeApply(Function, Socket, ArgsMap) ->
             lsp_log("LSP handler returned '~p'", [Reason]),
             {handler_error, list_to_binary(Reason)};
         Error:Exception:StackTrace ->
-            error_logger:error_msg("LSP handler error ~p:~p while executing lsp_handlers:~p(_, ~p), stacktrace:~p", 
+            lsp_log:error(<<"LSP">>, "LSP handler error ~p:~p while executing lsp_handlers:~p(_, ~p), stacktrace:~p", 
                     [Error, Exception,Function,ArgsMap, StackTrace]),
             {handler_error, <<"Handler error">>}
-    end.    
+    end. 
+
 -else.
 safeApply(Function, Socket, ArgsMap) ->
     try apply(lsp_handlers, Function, [Socket, ArgsMap]) of
@@ -50,10 +51,11 @@ safeApply(Function, Socket, ArgsMap) ->
             lsp_log("LSP handler returned '~p'", [Reason]),
             {handler_error, list_to_binary(Reason)};
         Error:Exception ->
-            error_logger:error_msg("LSP handler error ~p:~p while executing lsp_handlers:~p(_, ~p), stacktrace:~p", 
+            lsp_log:error(<<"LSP">>,"LSP handler error ~p:~p while executing lsp_handlers:~p(_, ~p), stacktrace:~p", 
                     [Error, Exception,Function,ArgsMap, erlang:get_stacktrace()]),
             {handler_error, <<"Handler error">>}
     end.
+
 -endif.
 
 
@@ -84,11 +86,11 @@ handle_info(_Data, State) ->
     {noreply, State}.
 
 lsp_log(Msg, Args) ->
-    gen_lsp_config_server:verbose() andalso error_logger:info_msg(Msg, Args).
+    gen_lsp_config_server:verbose() andalso lsp_log:info(<<"LSP">>, Msg, Args).
 
 lsp_log(Method, Msg, Args) ->
     % Method can be excluded from verbose logging by adding it to verboseExcludeFilter in the config
-    gen_lsp_config_server:verbose() andalso gen_lsp_config_server:verbose_is_include(Method) andalso error_logger:info_msg(Msg, Args).
+    gen_lsp_config_server:verbose() andalso gen_lsp_config_server:verbose_is_include(Method) andalso lsp_log:info(Method, Msg, Args).
 
 remove_text_for_logging(#{params := #{contentChanges := ChangesList} = Params} = Input) ->
     Input#{params := Params#{contentChanges := lists:map(fun 
@@ -105,27 +107,37 @@ remove_text_for_logging(Input) ->
     Input.
 
 do_contents(Socket, #{method := Method} = Input) ->
-    lsp_log(Method, "LSP received ~p", [remove_text_for_logging(Input)]),    
+    %% Always-on compact trace (gated only by erlang.verbose, not by the
+    %% per-method exclude filter) so the sequence/timing of every message
+    %% stays visible even with the noisy methods excluded below.
+    lsp_log("LSP received ~s id=~p", [Method, maps:get(id, Input, undefined)]),
+    lsp_log(Method, "LSP received detail ~p", [remove_text_for_logging(Input)]),
     case call_handler(Socket, Method, maps:get(params, Input, undefined)) of
         {ok, Result} ->
             send_response_with_id(Socket, Input, #{result => Result});
         {error, Result} ->
             send_response_with_id(Socket, Input, #{error => Result});
         handler_not_found ->
-            error_logger:error_msg("Method not handled: ~p", [Method]),
+            lsp_log:error(<<"LSP">>, "Method not handled: ~p", [Method]),
             send_response_with_id(Socket, Input, #{error => #{code => -32001, message => <<"Method not handled">>}});
         {handler_error, Message} ->
             send_response_with_id(Socket, Input, #{error => #{code => -32001, message => Message}})
     end;
+
 do_contents(Socket, #{id := Id} = Input) ->
-    lsp_log("LSP received ~p", [Input]),
+    %% Client's reply to a server-initiated request (e.g. workspace/configuration,
+    %% workspace/diagnostic/refresh) - Id is the atom/binary we picked when
+    %% we sent that request, so this line alone lets us see when/if the
+    %% client acknowledged it, without the full result body.
+    lsp_log("LSP received response id=~p", [Id]),
+    lsp_log(<<"lsp/response">>, "LSP received response detail ~p", [Input]),
     case call_handler(Socket, Id, maps:get(result, Input, undefined)) of
         {ok, _Result} ->
             ok;
         {error, _Result} ->
             ok;
         handler_not_found ->
-            error_logger:error_msg("Notification not handled: ~p ~p", [Id, Input]);
+            lsp_log:error(<<"LSP">>, "Notification not handled: ~p ~p", [Id, Input]);
         {handler_error, Message} ->
             Message
     end.
@@ -160,7 +172,9 @@ send_response_with_id(Socket, #{method := Method} = Input, Response) ->
     end.
 
 send_to_client(Socket, Method, Body) ->
-    lsp_log(Method, "LSP sends ~p", [Body]),
+    %% Always-on compact trace, see do_contents/2 comment above.
+    lsp_log(<<"diag">>, "LSP sends ~s id=~p", [Method, maps:get(id, Body, undefined)]),
+    lsp_log(Method, "LSP sends detail ~p", [Body]),
     {ok, Json} = vscode_jsone:encode(Body),
     Header = iolist_to_binary(io_lib:fwrite("Content-Length: ~p", [byte_size(Json)])),
     gen_tcp:send(Socket, <<Header/binary, "\r\n\r\n", Json/binary>>).

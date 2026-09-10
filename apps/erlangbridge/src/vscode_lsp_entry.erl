@@ -16,12 +16,12 @@ init_lsp() ->
         case application:start(vscode_lsp, permanent) of
         {ok, _Started} -> ok;
         {error, Reason} -> 
-            error_logger:error_msg("application start error : ~p",[Reason]), 
+            lsp_log:error(<<"lsp/app">>,"application start error : ~p",[Reason]), 
             {error, Reason};
         _ -> ok
         end;
     {error, Reason} -> 
-        error_logger:error_msg("compile_needed_modules failed : ~p",[Reason]),
+        lsp_log:error(<<"lsp/app">>,"compile_needed_modules failed : ~p",[Reason]),
         {error, Reason}
     end.
 
@@ -34,7 +34,7 @@ compile_needed_modules() ->
         "src/gen_connection", "src/vscode_jsone","src/vscode_jsone_decode","src/hover_doc_layout", "src/worker", "src/lsp_rename",
         "src/lsp_fun_utils", "src/lsp_signature_doc_layout", "src/lsp_codeaction", "src/lsp_semantic_tokens",
         "src/lsp_workspace_symbol", "src/lsp_hierarchy", "src/lsp_folding", "src/lsp_formatting",
-        "src/lsp_testing", "src/lsp_testing_eunit_report", "src/lsp_testing_ct_hook"], CompileOptions)
+        "src/lsp_testing", "src/lsp_testing_eunit_report", "src/lsp_testing_ct_hook", "src/lsp_log"], CompileOptions)
     .
 
 do_compile([H|T], CompileOptions) ->
@@ -48,7 +48,7 @@ do_compile([H|T], CompileOptions) ->
             {error, Reason}
         end;
     _Any -> 
-        error_logger:error_msg("compile result of ~p: ~p",[H, _Any]),
+        lsp_log:error(<<"lsp/app">>,"compile result of ~p: ~p",[H, _Any]),
         {error, _Any}
 
     end;
