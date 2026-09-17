@@ -26,15 +26,19 @@ init_lsp() ->
     end.
 
 compile_needed_modules() ->
-    CompileOptions = [verbose, binary, report],
-    do_compile(["src/vscode_lsp_app", "src/gen_lsp_server", 
+    %% No `verbose`: it makes the compiler print "Old inliner: ..." for the
+    %% -compile({inline, ...}) attributes in vscode_jsone* on every start.
+    CompileOptions = [binary, report],
+    %% lsp_log first - do_compile/2 itself logs through it.
+    do_compile(["src/lsp_log", "src/vscode_lsp_app", "src/gen_lsp_server", 
         "src/gen_lsp_sup", "src/gen_lsp_doc_sup","src/gen_lsp_doc_server", "src/gen_lsp_config_sup","src/gen_lsp_config_server",
         "src/gen_lsp_help_sup","src/gen_lsp_help_server", "src/lsp_handlers", "src/lsp_utils",
         "src/vscode_lsp_app_sup", "src/lsp_navigation", "src/lsp_signature", "src/lsp_parse", "src/lsp_syntax", "src/lsp_completion", "src/lsp_inlayhints",
         "src/gen_connection", "src/vscode_jsone","src/vscode_jsone_decode","src/hover_doc_layout", "src/worker", "src/lsp_rename",
         "src/lsp_fun_utils", "src/lsp_signature_doc_layout", "src/lsp_codeaction", "src/lsp_semantic_tokens",
         "src/lsp_workspace_symbol", "src/lsp_hierarchy", "src/lsp_folding", "src/lsp_formatting",
-        "src/lsp_testing", "src/lsp_testing_eunit_report", "src/lsp_testing_ct_hook", "src/lsp_log"], CompileOptions)
+        "src/lsp_testing", "src/lsp_testing_eunit_report", "src/lsp_testing_ct_hook",
+        "src/lsp_diagnostics"], CompileOptions)
     .
 
 do_compile([H|T], CompileOptions) ->

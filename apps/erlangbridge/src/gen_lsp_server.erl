@@ -10,7 +10,8 @@
 
 %% API
 -export([start_link/1, start_link/2]).
--export([lsp_log/2, lsp_log/3, send_to_client/2]).
+-export([lsp_log/2, lsp_log/3, send_to_client/3]).
+-export([next_request_id/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -92,6 +93,19 @@ lsp_log(Method, Msg, Args) ->
     % Method can be excluded from verbose logging by adding it to verboseExcludeFilter in the config
     gen_lsp_config_server:verbose() andalso gen_lsp_config_server:verbose_is_include(Method) andalso lsp_log:info(Method, Msg, Args).
 
+%% @doc JSON-RPC ids of server-initiated requests must be unique per in-flight
+%% request. Base carries provenance (e.g. <<"configuration#initialized">>) and
+%% survives into the log line; base_request_id/1 strips the sequence back off
+%% when the client's response is routed to a handler.
+next_request_id(Base) ->
+    Seq = erlang:unique_integer([positive, monotonic]),
+    <<Base/binary, "#", (integer_to_binary(Seq))/binary>>.
+
+base_request_id(Id) when is_binary(Id) ->
+    hd(binary:split(Id, <<"#">>));
+base_request_id(Id) ->
+    Id.
+
 remove_text_for_logging(#{params := #{contentChanges := ChangesList} = Params} = Input) ->
     Input#{params := Params#{contentChanges := lists:map(fun 
         (#{text := <<Text/binary>>} = Change) when byte_size(Text) > 20 ->
@@ -131,7 +145,7 @@ do_contents(Socket, #{id := Id} = Input) ->
     %% client acknowledged it, without the full result body.
     lsp_log("LSP received response id=~p", [Id]),
     lsp_log(<<"lsp/response">>, "LSP received response detail ~p", [Input]),
-    case call_handler(Socket, Id, maps:get(result, Input, undefined)) of
+    case call_handler(Socket, base_request_id(Id), maps:get(result, Input, undefined)) of
         {ok, _Result} ->
             ok;
         {error, _Result} ->
@@ -173,14 +187,11 @@ send_response_with_id(Socket, #{method := Method} = Input, Response) ->
 
 send_to_client(Socket, Method, Body) ->
     %% Always-on compact trace, see do_contents/2 comment above.
-    lsp_log(<<"diag">>, "LSP sends ~s id=~p", [Method, maps:get(id, Body, undefined)]),
+    lsp_log("LSP sends ~s id=~p", [Method, maps:get(id, Body, undefined)]),
     lsp_log(Method, "LSP sends detail ~p", [Body]),
     {ok, Json} = vscode_jsone:encode(Body),
     Header = iolist_to_binary(io_lib:fwrite("Content-Length: ~p", [byte_size(Json)])),
     gen_tcp:send(Socket, <<Header/binary, "\r\n\r\n", Json/binary>>).
-
-send_to_client(Socket, Body) ->
-    send_to_client(Socket, <<"unknown">>, Body).
 
 
 handle_tcp_data(Socket, Contents, State) ->

@@ -56,7 +56,7 @@ record(#{table := Table}, Suite, TestCase, StatusBin, Message) ->
     ets:insert(Table, {{Suite, TestCase, 0}, StatusBin, Message, undefined}).
 
 notify(#{socket := Socket}, Suite, TestCase, StatusBin, Message) ->
-    gen_lsp_server:send_to_client(Socket, #{
+    gen_lsp_server:send_to_client(Socket, <<"erlang/testRunProgress">>, #{
         method => <<"erlang/testRunProgress">>,
         params => #{
             kind => <<"ct">>,

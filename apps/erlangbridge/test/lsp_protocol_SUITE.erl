@@ -26,7 +26,9 @@ all() -> [
     cancel_request_is_a_silent_notification,
     set_trace_is_a_silent_notification,
     shutdown_closes_the_connection,
-    exit_closes_the_connection
+    exit_closes_the_connection,
+    initialized_requests_configuration_with_a_tagged_unique_id,
+    did_change_configuration_burst_collapses_to_one_configuration_call
 ].
 
 init_per_testcase(_TestCase, Config) ->
@@ -92,6 +94,52 @@ exit_closes_the_connection(Config) ->
     Socket = ?config(socket, Config),
     ok = send_request(Socket, <<"exit">>, 8, #{}),
     ?assertEqual({error, closed}, wait_for_socket_close(Socket, 5000)).
+
+%% Server-initiated requests used to share a constant JSON-RPC id, which is a
+%% spec violation the moment two are in flight (three refresh requests went out
+%% under one id, one response came back) and left no way to tell which call site
+%% asked. Ids now carry provenance plus a sequence, and the response is routed
+%% back on the base id alone.
+initialized_requests_configuration_with_a_tagged_unique_id(Config) ->
+    Socket = ?config(socket, Config),
+    ok = send_notification(Socket, <<"initialized">>, #{}),
+    Request = recv_message(Socket, 5000),
+    ?assertMatch(#{method := <<"workspace/configuration">>}, Request),
+    Id = maps:get(id, Request),
+    ?assertMatch({match, _}, re:run(Id, "^configuration#initialized#[0-9]+$")),
+
+    %% Answer as the client would - the tagged id must still reach
+    %% lsp_handlers:configuration/2 rather than falling through as unhandled.
+    ok = send_message(Socket, #{jsonrpc => <<"2.0">>, id => Id,
+                                result => [#{verbose => false}, #{}, #{}, #{}, #{}]}),
+    assert_connection_still_responsive(Socket).
+
+%% VS Code's Workspace.onDidChangeConfiguration can fire more than once for a
+%% single logical settings change (once per settings scope that resolves) -
+%% each firing independently sending this notification used to launch its own
+%% full workspace/configuration round-trip, racing full project rescans and
+%% per-document revalidations against each other (see
+%% lsp_handlers:workspace_didChangeConfiguration/2's doc comment, and the
+%% "diagnostic desynchronised after a manual edit" bug that race caused). A
+%% burst must collapse into a single request.
+did_change_configuration_burst_collapses_to_one_configuration_call(Config) ->
+    Socket = ?config(socket, Config),
+    lists:foreach(fun (_) ->
+        ok = send_notification(Socket, <<"workspace/didChangeConfiguration">>, #{settings => null})
+    end, lists:seq(1, 5)),
+
+    Request = recv_message(Socket, 5000),
+    ?assertMatch(#{method := <<"workspace/configuration">>}, Request),
+    Id = maps:get(id, Request),
+    ?assertMatch({match, _}, re:run(Id, "^configuration#didChangeConfiguration#[0-9]+$")),
+
+    %% Well past the debounce window: nothing else was sent - five
+    %% notifications collapsed into this one request.
+    ?assertEqual({error, timeout}, gen_tcp:recv(Socket, 0, 1000)),
+
+    ok = send_message(Socket, #{jsonrpc => <<"2.0">>, id => Id,
+                                result => [#{verbose => false}, #{}, #{}, #{}, #{}]}),
+    assert_connection_still_responsive(Socket).
 
 %%%%%%%%%%%%%%%%%%%%%%
 %% golden reference %%

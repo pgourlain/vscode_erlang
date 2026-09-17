@@ -75,7 +75,7 @@ notify(#state{socket = Socket}, Data, StatusBin, Message) ->
             ok;
         {Module, Function, Arity} ->
             Line = proplists:get_value(line, Data),
-            gen_lsp_server:send_to_client(Socket, #{
+            gen_lsp_server:send_to_client(Socket, <<"erlang/testRunProgress">>, #{
                 method => <<"erlang/testRunProgress">>,
                 params => #{
                     kind => <<"eunit">>,

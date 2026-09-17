@@ -21,9 +21,17 @@
 -export([codeLens_resolve/2, inlayHint_resolve/2]).
 -export([textDocument_diagnostic/2, workspace_diagnostic/2, workspace_diagnostic_refresh/2]).
 -export([erlang_discoverTests/2, erlang_runTests/2]).
+%% Exported for lsp_diagnostic_SUITE, which drives the stale-version drop and
+%% the refresh nudge directly - they are unreachable through a handler.
 -export([maybe_send_diagnostics/4]).
+%% Exported for lsp_diagnostics, which debounces workspace/didChangeConfiguration
+%% notifications into a single call.
+-export([request_configuration/2]).
 
 -include("lsp_log.hrl").
+
+%% How long workspace_diagnostic/2 parks a pull that has nothing new to report.
+-define(WORKSPACE_DIAGNOSTIC_POLL_MS, 30000).
 
 initialize(_Socket, Params) ->
     RootPath = resolve_root(Params),
@@ -107,7 +115,7 @@ resolve_root_path(Params) ->
     end.
 
 initialized(Socket, _Params) ->
-    request_configuration(Socket).
+    request_configuration(Socket, <<"initialized">>).
 
 shutdown(_Socket, _) ->
     init:stop().
@@ -121,8 +129,14 @@ cancelRequest(_Socket, _Params) ->
 setTrace(_Socket, _Params) ->
     ok.
 
-configuration(Socket, [ErlangSection, FilesSection, ComputedSection, HttpSection, SearchSection]) ->
+configuration(Socket, [ErlangSection, FilesSection, ComputedSection, HttpSection, SearchSection] = Sections) ->
     Documents = gen_lsp_doc_server:opened_documents(),
+    %% Captured before the updates below: a workspace/configuration response
+    %% carrying exactly the settings we already hold means nothing to rescan or
+    %% revalidate, and the full project scan + a validation pass per open
+    %% document is far too expensive to repeat for nothing.
+    PreviousSections = [gen_lsp_config_server:get_section(Key) ||
+                        Key <- [erlang, files, computed, http, search]],
     gen_lsp_config_server:update_config(erlang, ErlangSection),
     %% because 'verbose' is stored in erlang section, loggin should be after update erlang config
     ?LOG(<<"diag">>, "configuration: Opened documents ~p", [Documents]),
@@ -147,18 +161,40 @@ configuration(Socket, [ErlangSection, FilesSection, ComputedSection, HttpSection
             ok
     end,
 
-    %% Scan workspace for source files
-    gen_lsp_doc_server:config_change(),
+    case PreviousSections =:= Sections of
+        true ->
+            ?LOG(<<"diag">>, "configuration: unchanged, skipping project scan and validation of ~p", [Documents]);
+        false ->
+            %% Scan workspace for source files
+            gen_lsp_doc_server:config_change(),
+            ?LOG(<<"diag">>, "configuration: Starting validation for documents ~p", [Documents]),
+            %% NOTE: no send_diagnostics(Socket, File, []) clear ahead of
+            %% validate_file here - see the "Why validate_file alone is enough"
+            %% note above configuration/2. That clear used to be unguarded
+            %% (unlike every other diagnostic publish, which goes through
+            %% maybe_send_diagnostics/4's version check), so a lagging
+            %% configuration/2 call - and more than one can be in flight at
+            %% once, see workspace_didChangeConfiguration/2 - could blank a
+            %% file's diagnostics after a genuinely newer edit had already
+            %% published the correct ones, with nothing to catch it.
+            %% validate_file publishes the file's actual current state on its
+            %% own, version-guarded.
+            lists:foreach(fun (File) ->
+                ?LOG(<<"diag">>, "configuration: Starting validation for file ~p", [File]),
+                validate_file(Socket, File)
+            end, Documents)
+    end.
 
-    ?LOG(<<"diag">>, "configuration: Starting validation for documents ~p", [Documents]),
-    lists:foreach(fun (File) ->
-        send_diagnostics(Socket, File, []),
-        ?LOG(<<"diag">>, "configuration: Starting validation for file ~p", [File]),
-        validate_file(Socket, File)
-    end, Documents).
-
+%% @doc VS Code's Workspace.onDidChangeConfiguration can fire more than once
+%% for a single logical settings change (once per settings scope that
+%% resolves), each independently sending this notification - without
+%% debouncing, each launches its own full workspace/configuration round-trip
+%% plus (for however many the identical-sections check in configuration/2
+%% doesn't catch as a true duplicate) a full project rescan and per-document
+%% revalidation, all running concurrently. lsp_diagnostics collapses a burst
+%% into a single request_configuration/2 call.
 workspace_didChangeConfiguration(Socket, _Params) ->
-    request_configuration(Socket).
+    lsp_diagnostics:schedule_configuration_request(Socket, <<"didChangeConfiguration">>).
 
 workspace_didChangeWatchedFiles(_Socket, Params) ->
     lists:foreach(fun
@@ -195,7 +231,7 @@ workspace_didChangeWorkspaceFolders(_Socket, Params) ->
 
 textDocument_didOpen(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
-    ?LOG(<<"diag">>, "didOpen: ~p version=~p", [File, mapmapget(textDocument, version, Params)]),
+    ?LOG(<<"diag">>, "didOpen: ~p version=~p", [File, mapmapfind(textDocument, version, Params, fun () -> undefined end)]),
     gen_lsp_doc_server:document_opened(File, mapmapget(textDocument, text, Params)),
     case gen_lsp_config_server:autosave() of
         true ->
@@ -231,7 +267,8 @@ textDocument_didSave(Socket, Params) ->
 textDocument_didChange(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
     ContentChanges = maps:get(contentChanges, Params),
-    ?LOG(<<"diag">>, "didChange: ~p version=~p changes=~p", [File, mapmapget(textDocument, version, Params), length(ContentChanges)]),
+    ?LOG(<<"diag">>, "didChange: ~p version=~p changes=~p",
+        [File, mapmapfind(textDocument, version, Params, fun () -> undefined end), length(ContentChanges)]),
     lists:foreach(fun (ContentChange) -> apply_content_change(File, ContentChange) end, ContentChanges),
     case gen_lsp_config_server:autosave() of
         true ->
@@ -809,9 +846,12 @@ formatting(Contents) ->
 
 -endif.
 
-request_configuration(Socket) ->
-    gen_lsp_server:send_to_client(Socket, #{
-        id => <<"configuration">>,
+%% @doc Source is the call site that asked (<<"initialized">> or
+%% <<"didChangeConfiguration">>) - it rides along in the request id, so the log
+%% for the response says outright which trigger produced it.
+request_configuration(Socket, Source) ->
+    gen_lsp_server:send_to_client(Socket, <<"workspace/configuration">>, #{
+        id => gen_lsp_server:next_request_id(<<"configuration#", Source/binary>>),
         method => <<"workspace/configuration">>,
         params => #{items => [#{section => <<"erlang">>},
                               #{section => <<"files">>},
@@ -830,12 +870,15 @@ request_configuration(Socket) ->
 %%
 %% Also nudges pull-mode clients: a client showing a diagnostic it pulled
 %% via textDocument/diagnostic rather than push is not guaranteed to
-%% re-pull right after this edit on its own schedule, so every fresh push
-%% is followed by a workspace/diagnostic/refresh request asking it to
-%% re-pull now. Sent unconditionally (not gated on the client having
-%% declared workspace.diagnostics.refreshSupport) - a client that never
-%% declared support simply has nothing registered for the request and
-%% ignores/errors on it harmlessly, matching how request_configuration/1
+%% re-pull right after this edit on its own schedule, so a fresh push is
+%% followed by a workspace/diagnostic/refresh request asking it to re-pull
+%% now. That request is *debounced* in gen_lsp_server (a burst of pushes
+%% produces one refresh) - one refresh per push restarts the client's whole
+%% workspace pull each time and is a large part of what made the pull spin.
+%% Not gated on the client having declared
+%% workspace.diagnostics.refreshSupport - a client that never declared
+%% support simply has nothing registered for the request and
+%% ignores/errors on it harmlessly, matching how request_configuration/2
 %% already sends without checking a capability first.
 maybe_send_diagnostics(Socket, File, ValidatingVersion, Diagnostics) ->
     case gen_lsp_doc_server:get_document_version(File) of
@@ -843,6 +886,9 @@ maybe_send_diagnostics(Socket, File, ValidatingVersion, Diagnostics) ->
             ?LOG(<<"diag">>, "maybe_send_diagnostics: pushing for ~p at version ~p (~p diagnostics)",
                 [File, ValidatingVersion, length(Diagnostics)]),
             send_diagnostics(Socket, File, Diagnostics),
+            %% Releases any workspace/diagnostic long poll parked in
+            %% workspace_diagnostic/2 waiting for exactly this.
+            lsp_diagnostics:notify_changed(),
             request_diagnostic_refresh(Socket);
         CurrentVersion ->
             ?LOG(<<"diag">>, "maybe_send_diagnostics: SKIPPED for ~p, stale version ~p (current ~p)",
@@ -861,17 +907,13 @@ workspace_diagnostic_refresh(_Socket, _Result) ->
 %% @doc Server-initiated request (LSP 3.17 workspace/diagnostic/refresh)
 %% asking every pull-capable client to discard whatever diagnostics it last
 %% pulled and pull again. See the comment on maybe_send_diagnostics/4.
+%% lsp_diagnostics does the actual send, debounced, with a unique request id.
 request_diagnostic_refresh(Socket) ->
-    ?LOG(<<"diag">>, "request_diagnostic_refresh: asking client to re-pull diagnostics", []),
-    gen_lsp_server:send_to_client(Socket, #{
-        id => <<"workspace_diagnostic_refresh">>,
-        method => <<"workspace/diagnostic/refresh">>,
-        params => null
-    }).
+    lsp_diagnostics:schedule_refresh(Socket).
 
 send_diagnostics(Socket, File, Diagnostics) ->
     ?LOG(<<"diag">>, "send_diagnostics: ~p (~p diagnostics)", [File, length(Diagnostics)]),
-    gen_lsp_server:send_to_client(Socket, #{
+    gen_lsp_server:send_to_client(Socket, <<"textDocument/publishDiagnostics">>, #{
         method => <<"textDocument/publishDiagnostics">>,
         params => #{
             uri => lsp_utils:file_uri_to_vscode_uri(lsp_utils:file_to_file_uri(File)),
@@ -895,28 +937,81 @@ to_lsp_diagnostic(Diagnostic) ->
 %% wire-shape as the push path (lsp_syntax:validate_parsed_source_file/1,
 %% to_lsp_diagnostic/1), just returned synchronously instead of sent as a
 %% notification.
+%% A `resultId` is what lets the client say "this is what I already have" on
+%% the next pull (as `previousResultId` here, `previousResultIds` for the
+%% workspace pull) and lets us answer `unchanged` instead of resending - and,
+%% for workspace_diagnostic/2 below, recognise that there is nothing to report
+%% at all.
 textDocument_diagnostic(_Socket, Params) ->
     Uri = mapmapget(textDocument, uri, Params),
     File = lsp_utils:file_uri_to_file(Uri),
     ?LOG(<<"diag">>, "textDocument_diagnostic: client pulled ~p", [File]),
-    #{kind => <<"full">>, items => diagnostics_for(File)}.
+    Diagnostics = diagnostics_for(File),
+    ResultId = result_id(File, Diagnostics),
+    case maps:get(previousResultId, Params, undefined) of
+        ResultId ->
+            #{kind => <<"unchanged">>, resultId => ResultId};
+        _ ->
+            #{kind => <<"full">>, resultId => ResultId, items => Diagnostics}
+    end.
 
 %% @doc `workspace/diagnostic` - the same, for every project file, so
-%% problems can be seen without opening each one. CHARACTERIZATION: this
-%% parses and lints every project file synchronously on each pull (there
-%% is no persistent, incrementally-updated project-wide diagnostic cache)
-%% - acceptable for a first pass, since this endpoint is refreshed
-%% on demand, not polled continuously.
-workspace_diagnostic(_Socket, _Params) ->
+%% problems can be seen without opening each one.
+%%
+%% This is a *long poll*, not a plain request/response: vscode-languageclient
+%% re-issues it as soon as we answer. Answering an all-unchanged pull straight
+%% away therefore spins the server, re-linting every project file per round -
+%% which is exactly what it did before every report carried a resultId. So when
+%% nothing has changed since the resultIds the client sent back, park here until
+%% something does (or ?WORKSPACE_DIAGNOSTIC_POLL_MS elapses) and answer then.
+%%
+%% Blocking is safe: gen_lsp_server spawns a process per incoming message, so
+%% this holds up nothing but this one request. cancelRequest/2 is a no-op, so a
+%% cancelled pull stays parked until the timeout rather than being released
+%% early - bounded, and cheap while parked.
+workspace_diagnostic(_Socket, Params) ->
+    Previous = previous_result_ids(Params),
     ?LOG(<<"diag">>, "workspace_diagnostic: client pulled whole workspace (~p files)",
         [length(gen_lsp_doc_server:all_project_files())]),
-    Items = [#{
-        uri => lsp_utils:file_uri_to_vscode_uri(lsp_utils:file_to_file_uri(File)),
-        version => null,
-        kind => <<"full">>,
-        items => diagnostics_for(File)
-    } || File <- gen_lsp_doc_server:all_project_files()],
-    #{items => Items}.
+    case workspace_diagnostic_items(Previous) of
+        {changed, Items} ->
+            #{items => Items};
+        {unchanged, Items} ->
+            case lsp_diagnostics:wait_for_change(?WORKSPACE_DIAGNOSTIC_POLL_MS) of
+                changed ->
+                    {_, FreshItems} = workspace_diagnostic_items(Previous),
+                    ?LOG(<<"diag">>, "workspace_diagnostic: long poll woken by a change", []),
+                    #{items => FreshItems};
+                timeout ->
+                    ?LOG(<<"diag">>, "workspace_diagnostic: long poll timed out, reporting unchanged", []),
+                    #{items => Items}
+            end
+    end.
+
+%% Reports for every project file, plus whether any of them differs from what
+%% the client says it already has.
+workspace_diagnostic_items(Previous) ->
+    Items = [workspace_diagnostic_item(File, Previous) || File <- gen_lsp_doc_server:all_project_files()],
+    case lists:any(fun (#{kind := Kind}) -> Kind =:= <<"full">> end, Items) of
+        true -> {changed, Items};
+        false -> {unchanged, Items}
+    end.
+
+workspace_diagnostic_item(File, Previous) ->
+    Uri = lsp_utils:file_uri_to_vscode_uri(lsp_utils:file_to_file_uri(File)),
+    Diagnostics = diagnostics_for(File),
+    ResultId = result_id(File, Diagnostics),
+    case maps:get(Uri, Previous, undefined) of
+        ResultId ->
+            #{uri => Uri, version => null, kind => <<"unchanged">>, resultId => ResultId};
+        _ ->
+            #{uri => Uri, version => null, kind => <<"full">>, resultId => ResultId, items => Diagnostics}
+    end.
+
+%% `previousResultIds` is a list of #{uri, value} - flatten it to a lookup map.
+previous_result_ids(Params) ->
+    maps:from_list([{Uri, Value} ||
+        #{uri := Uri, value := Value} <- maps:get(previousResultIds, Params, [])]).
 
 %% @doc `erlang/discoverTests` - task 6.1. Delegates to lsp_testing.erl.
 erlang_discoverTests(Socket, Params) ->
@@ -929,8 +1024,20 @@ erlang_runTests(Socket, Params) ->
     lsp_testing:run_tests(Socket, Params).
 
 diagnostics_for(File) ->
-    ErrorsWarnings = lsp_syntax:validate_parsed_source_file(File),
-    lists:map(fun to_lsp_diagnostic/1, maps:get(errors_warnings, ErrorsWarnings, [])).
+    case gen_lsp_doc_server:get_diagnostics_cache(File) of
+        undefined ->
+            ErrorsWarnings = lsp_syntax:validate_parsed_source_file(File),
+            Diagnostics = lists:map(fun to_lsp_diagnostic/1, maps:get(errors_warnings, ErrorsWarnings, [])),
+            gen_lsp_doc_server:store_diagnostics_cache(File, Diagnostics),
+            Diagnostics;
+        Cached ->
+            Cached
+    end.
+
+%% @doc Stable identity of a file's current diagnostics, so an unchanged pull
+%% can be recognised without resending them.
+result_id(File, Diagnostics) ->
+    integer_to_binary(erlang:phash2({File, Diagnostics})).
 
 get_range(Info) ->
     LS = maps:get(line, Info),
