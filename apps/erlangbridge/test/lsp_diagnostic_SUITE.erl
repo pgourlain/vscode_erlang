@@ -18,6 +18,8 @@ all() -> [
     pull_diagnostic_reports_a_real_warning,
     pull_diagnostic_reports_nothing_for_a_clean_file,
     workspace_diagnostic_covers_every_project_file,
+    workspace_diagnostic_reports_an_open_document_as_empty,
+    an_unsaved_edit_republishes_diagnostics_for_the_new_contents,
     stale_validation_result_is_dropped_once_a_newer_edit_has_landed,
     fresh_publish_is_followed_by_a_diagnostic_refresh_request,
     pull_diagnostic_reports_unchanged_when_result_id_matches,
@@ -66,6 +68,66 @@ workspace_diagnostic_covers_every_project_file(_Config) ->
     ?assertMatch(#{kind := <<"full">>, version := null, resultId := _, items := [_]}, WithWarningReport),
     [CleanReport] = [R || R <- Reports, binary:match(maps:get(uri, R), <<"clean.erl">>) =/= nomatch],
     ?assertMatch(#{kind := <<"full">>, resultId := _, items := []}, CleanReport).
+
+%% Regression test for every problem being listed twice (and every quick fix
+%% offered twice): while a document is open, its diagnostics belong to the
+%% push channel, so the workspace pull must not report them a second time
+%% into the client's own DiagnosticCollection. Reported as an empty `full`
+%% report rather than omitted - a URI missing from the report keeps whatever
+%% the client last pulled for it, which would freeze the duplicate on screen
+%% instead of clearing it.
+workspace_diagnostic_reports_an_open_document_as_empty(Config) ->
+    AppDir = ?config(data_dir, Config),
+    File = filename:join(AppDir, "with_warning.erl"),
+    {ok, Content} = file:read_file(File),
+
+    ?assertMatch(#{kind := <<"full">>, items := [_]}, workspace_report(<<"with_warning.erl">>)),
+
+    gen_lsp_doc_server:document_opened(File, Content),
+    ?assertMatch(#{kind := <<"full">>, items := []}, workspace_report(<<"with_warning.erl">>)),
+    %% the file that stayed closed is still reported for real (clean.erl has
+    %% nothing to report, but it is reported)
+    ?assertMatch(#{kind := <<"full">>, items := []}, workspace_report(<<"clean.erl">>)),
+
+    %% closing it hands the file back to the pull channel
+    gen_lsp_doc_server:document_closed(File),
+    ?assertMatch(#{kind := <<"full">>, items := [_]}, workspace_report(<<"with_warning.erl">>)).
+
+%% Regression test for "the quick fix is applied but the problem stays in the
+%% Problems list": a quick fix's WorkspaceEdit reaches the server as a plain
+%% textDocument/didChange on an unsaved buffer. That used to be a no-op
+%% whenever files.autoSave was on - nothing reparsed, nothing revalidated,
+%% nothing published - so the problem the fix had just removed stayed listed
+%% until the file was saved. The edit must publish the diagnostics of the new
+%% contents, by itself.
+an_unsaved_edit_republishes_diagnostics_for_the_new_contents(Config) ->
+    AppDir = ?config(data_dir, Config),
+    File = filename:join(AppDir, "with_warning.erl"),
+    {ok, Content} = file:read_file(File),
+    Uri = lsp_utils:file_to_file_uri(File),
+
+    {ServerSocket, ClientSocket} = open_socket_pair(),
+    lsp_handlers:textDocument_didOpen(ServerSocket, #{textDocument =>
+        #{uri => Uri, text => Content, version => 1}}),
+    OpenRaw = drain_raw(ClientSocket, 5000, <<>>),
+    %% opening reports the warning the file really has
+    ?assertNotEqual(nomatch, binary:match(OpenRaw, <<"variable 'X' is unused">>)),
+
+    %% the fix: use X, so erl_lint has nothing left to say. No didSave, and
+    %% no parse_document/1 - exactly what a quick fix's applyEdit produces.
+    Fixed = <<"-module(with_warning).\n-export([go/0]).\n\ngo() ->\n    X = 1,\n    X.\n">>,
+    lsp_handlers:textDocument_didChange(ServerSocket, #{
+        textDocument => #{uri => Uri, version => 2},
+        contentChanges => [#{text => Fixed}]}),
+    ChangeRaw = drain_raw(ClientSocket, 5000, <<>>),
+    gen_tcp:close(ServerSocket),
+    gen_tcp:close(ClientSocket),
+
+    ?assertNotEqual(nomatch, binary:match(ChangeRaw, <<"textDocument\\/publishDiagnostics">>)),
+    ?assertNotEqual(nomatch, binary:match(ChangeRaw, <<"\"diagnostics\":[]">>)),
+    ?assertEqual(nomatch, binary:match(ChangeRaw, <<"variable 'X' is unused">>)),
+
+    gen_lsp_doc_server:document_closed(File).
 
 %% Regression test for the out-of-order validate_file/2 race behind the
 %% "quick fix leaves a stale red squiggle" bug: every incoming LSP message
@@ -311,6 +373,14 @@ pull(Config, FileName) ->
     File = filename:join(AppDir, FileName),
     Params = #{textDocument => #{uri => lsp_utils:file_to_file_uri(File)}},
     lsp_handlers:textDocument_diagnostic(undefined, Params).
+
+%% One named file's report out of a fresh whole-workspace pull. Sending no
+%% previousResultIds makes every report `full`, so the pull answers at once
+%% rather than parking in its long poll.
+workspace_report(FileName) ->
+    #{items := Reports} = lsp_handlers:workspace_diagnostic(undefined, #{}),
+    [Report] = [R || R <- Reports, binary:match(maps:get(uri, R), FileName) =/= nomatch],
+    Report.
 
 open_socket_pair() ->
     {ok, LSock} = gen_tcp:listen(0, [binary, {active, false}, {packet, raw}, {ip, {127, 0, 0, 1}}]),

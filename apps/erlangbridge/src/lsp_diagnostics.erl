@@ -14,6 +14,7 @@
 -export([start_link/0]).
 -export([schedule_refresh/1, wait_for_change/1, notify_changed/0]).
 -export([schedule_configuration_request/2]).
+-export([schedule_validation/2, cancel_validation/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -34,8 +35,17 @@
 %% lsp_handlers:configuration/2's "Why validate_file alone is enough" note.
 -define(CONFIGURATION_DEBOUNCE_MS, 300).
 
+%% Keystrokes inside a textDocument/didChange burst are coalesced into a
+%% single validation per file. Open documents are reported through the push
+%% channel only (see lsp_handlers:workspace_diagnostic_item/2), so a change
+%% has to revalidate to keep unsaved edits - a quick fix's WorkspaceEdit
+%% among them - from leaving a fixed problem in the Problems list; this is
+%% what keeps that off the per-keystroke path.
+-define(VALIDATION_DEBOUNCE_MS, 400).
+
 -record(state, {refresh_timer, refresh_socket, waiters = [],
-                configuration_timer, configuration_socket, configuration_source}).
+                configuration_timer, configuration_socket, configuration_source,
+                validation_timers = #{} :: #{file:filename() => reference()}}).
 
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
@@ -68,6 +78,20 @@ notify_changed() ->
 schedule_configuration_request(Socket, Source) ->
     gen_server:cast(?SERVER, {schedule_configuration_request, Socket, Source}).
 
+%% @doc Ask for one validation (lint + publishDiagnostics) of File, debounced
+%% per file - a later call within the window restarts the wait, so a burst of
+%% edits lints once, at the end.
+schedule_validation(Socket, File) ->
+    gen_server:cast(?SERVER, {schedule_validation, Socket, File}).
+
+%% @doc Drop any validation still pending for File. Called when the document
+%% closes: textDocument/didClose clears the file's push diagnostics, and a
+%% debounced validation landing just after that would publish them straight
+%% back - for a file the workspace pull has meanwhile taken back over, i.e.
+%% the duplicate all over again.
+cancel_validation(File) ->
+    gen_server:cast(?SERVER, {cancel_validation, File}).
+
 init(_Args) ->
     {ok, #state{}}.
 
@@ -92,6 +116,24 @@ handle_cast({schedule_configuration_request, Socket, Source}, State) ->
     %% A request is already pending - coalesce into it.
     {noreply, State#state{configuration_socket = Socket, configuration_source = Source}};
 
+handle_cast({schedule_validation, Socket, File}, #state{validation_timers = Timers} = State) ->
+    case maps:get(File, Timers, undefined) of
+        undefined -> ok;
+        Pending -> erlang:cancel_timer(Pending)
+    end,
+    Timer = erlang:send_after(?VALIDATION_DEBOUNCE_MS, self(), {validate, Socket, File}),
+    {noreply, State#state{validation_timers = Timers#{File => Timer}}};
+
+handle_cast({cancel_validation, File}, #state{validation_timers = Timers} = State) ->
+    case maps:get(File, Timers, undefined) of
+        undefined -> ok;
+        Pending -> erlang:cancel_timer(Pending)
+    end,
+    %% A {validate, ...} message already in this process's own mailbox is
+    %% dropped by handle_info's cancelled clause below, which is why the
+    %% timers map is the authority on what is still wanted.
+    {noreply, State#state{validation_timers = maps:remove(File, Timers)}};
+
 handle_cast(notify_changed, State) ->
     lists:foreach(fun ({Pid, Ref}) ->
         is_process_alive(Pid) andalso (Pid ! {diagnostics_changed, Ref})
@@ -114,6 +156,20 @@ handle_info(send_refresh, #state{refresh_socket = Socket} = State) ->
         params => null
     }),
     {noreply, State#state{refresh_timer = undefined}};
+%% Linting a large file is slow and this process also services the workspace
+%% pull's waiters, so the validation itself runs outside it - like
+%% gen_lsp_server does for every incoming message.
+handle_info({validate, Socket, File}, #state{validation_timers = Timers} = State) ->
+    case maps:is_key(File, Timers) of
+        false ->
+            %% cancel_validation/1 came in after this timer had already fired
+            ?LOG(<<"diag">>, "schedule_validation: dropping cancelled validation of ~p", [File]),
+            {noreply, State};
+        true ->
+            ?LOG(<<"diag">>, "schedule_validation: debounce elapsed, validating ~p", [File]),
+            spawn(fun () -> lsp_handlers:validate_file(Socket, File) end),
+            {noreply, State#state{validation_timers = maps:remove(File, Timers)}}
+    end;
 handle_info(send_configuration_request, #state{configuration_socket = undefined} = State) ->
     {noreply, State#state{configuration_timer = undefined}};
 handle_info(send_configuration_request, #state{configuration_socket = Socket,

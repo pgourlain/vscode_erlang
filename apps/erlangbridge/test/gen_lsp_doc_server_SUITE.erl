@@ -30,6 +30,8 @@ all() -> [
     document_range_changed_spans_multiple_lines,
     document_closed_removes_the_cached_contents,
     get_syntax_tree_lazily_parses_and_caches_on_first_call,
+    get_syntax_tree_reparses_the_buffer_after_an_unsaved_change,
+    get_syntax_tree_of_an_open_document_never_comes_from_disk,
     project_file_changed_on_an_open_document_is_a_no_op,
     project_file_changed_on_a_closed_document_reparses_it,
     project_file_deleted_clears_every_cache_for_that_file,
@@ -185,6 +187,48 @@ get_syntax_tree_lazily_parses_and_caches_on_first_call(Config) ->
     ?assertNotEqual(undefined, Tree1),
     ?assertEqual(Tree1, gen_lsp_doc_server:get_syntax_tree(File)).
 
+%% Regression test for "the quick fix applies but the problem stays in the
+%% Problems list": a textDocument/didChange updates the buffer and bumps
+%% document_version but does not itself reparse, so a cached tree from before
+%% the edit must be recognised as stale here - otherwise every tree consumer
+%% (the linter first of all) keeps answering from the pre-edit source and
+%% reports problems the edit already fixed. No parse_document/1 call in
+%% between: that is precisely what didChange does not do.
+get_syntax_tree_reparses_the_buffer_after_an_unsaved_change(Config) ->
+    File = ?config(file_a, Config),
+    Content = ?config(content_a, Config),
+    gen_lsp_doc_server:document_opened(File, Content),
+    gen_lsp_doc_server:parse_document(File),
+    TreeBefore = gen_lsp_doc_server:get_syntax_tree(File),
+    ?assertNotEqual(undefined, TreeBefore),
+
+    Fixed = <<"-module(docserver_a).\n-export([go/0]).\n\ngo() -> reparsed.\n">>,
+    gen_lsp_doc_server:document_changed(File, Fixed),
+    TreeAfter = gen_lsp_doc_server:get_syntax_tree(File),
+
+    ?assertNotEqual(TreeBefore, TreeAfter),
+    ?assert(lists:member(reparsed, atoms_in(TreeAfter))),
+    ?assertNot(lists:member(reparsed, atoms_in(TreeBefore))),
+    %% and the fresh tree is now the cached one, not reparsed on every call
+    ?assertEqual(TreeAfter, gen_lsp_doc_server:get_syntax_tree(File)).
+
+%% An open document's buffer can hold changes the file on disk does not, so
+%% a reparse triggered while it is open must read the buffer. Otherwise a
+%% background project parse or a file-watcher event lands a disk tree stamped
+%% with the buffer's version - stale contents passed off as current.
+get_syntax_tree_of_an_open_document_never_comes_from_disk(Config) ->
+    File = ?config(file_a, Config),
+    Buffer = <<"-module(docserver_a).\n-export([go/0]).\n\ngo() -> only_in_the_buffer.\n">>,
+    gen_lsp_doc_server:document_opened(File, Buffer),
+    %% no parse_document/1: the lazy path in get_syntax_tree/1 is what has to
+    %% pick the buffer over the file
+    Tree = gen_lsp_doc_server:get_syntax_tree(File),
+    ?assert(lists:member(only_in_the_buffer, atoms_in(Tree))),
+    %% a disk reparse while the document is open leaves the buffer's tree in place
+    gen_lsp_doc_server:project_file_changed(File),
+    sys:get_state(gen_lsp_doc_server),
+    ?assert(lists:member(only_in_the_buffer, atoms_in(gen_lsp_doc_server:get_syntax_tree(File)))).
+
 %% CHARACTERIZATION: handle_cast({project_file_changed, File}, State) skips
 %% reparsing entirely whenever the file already has an open buffer
 %% (?XETS:lookup(document_contents, File) succeeds) - on the theory that an
@@ -290,11 +334,23 @@ cache_mgmt_file_mode_uses_dets_in_a_pid_scoped_directory(_Config) ->
 %% helpers %%
 %%%%%%%%%%%%%
 
+%% Every atom literal in a syntax tree, so a test can assert on what the
+%% parsed source actually said without pinning the AST's exact shape.
+atoms_in(Term) when is_tuple(Term) ->
+    atoms_in(tuple_to_list(Term));
+atoms_in(Term) when is_list(Term) ->
+    lists:flatmap(fun atoms_in/1, Term);
+atoms_in(Term) when is_atom(Term) ->
+    [Term];
+atoms_in(_Term) ->
+    [].
+
 wait_for_syntax_tree(_File, 0) ->
     undefined;
 wait_for_syntax_tree(File, N) ->
     case ets:lookup(syntax_tree, File) of
-        [{File, Tree}] -> Tree;
+        %% cached trees carry the document_version they were parsed at
+        [{File, _Version, Tree}] -> Tree;
         [] ->
             timer:sleep(100),
             wait_for_syntax_tree(File, N - 1)

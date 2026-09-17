@@ -25,8 +25,9 @@
 %% the refresh nudge directly - they are unreachable through a handler.
 -export([maybe_send_diagnostics/4]).
 %% Exported for lsp_diagnostics, which debounces workspace/didChangeConfiguration
-%% notifications into a single call.
--export([request_configuration/2]).
+%% notifications into a single call, and textDocument/didChange edits into a
+%% single validation per file.
+-export([request_configuration/2, validate_file/2]).
 
 -include("lsp_log.hrl").
 
@@ -233,32 +234,34 @@ textDocument_didOpen(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
     ?LOG(<<"diag">>, "didOpen: ~p version=~p", [File, mapmapfind(textDocument, version, Params, fun () -> undefined end)]),
     gen_lsp_doc_server:document_opened(File, mapmapget(textDocument, text, Params)),
-    case gen_lsp_config_server:autosave() of
-        true ->
-            gen_lsp_doc_server:parse_document(File),
-            ?LOG(<<"diag">>, "didOpen: Parsing document for file ~p", [File]),
-            validate_file(Socket, File);
-        _ ->
-            ok
-    end.
+    %% Not gated on autosave() any more - see textDocument_didChange/2. With
+    %% autosave off, the gate left a freshly opened document with no
+    %% diagnostics at all until its first edit.
+    gen_lsp_doc_server:parse_document(File),
+    ?LOG(<<"diag">>, "didOpen: Parsing document for file ~p", [File]),
+    validate_file(Socket, File).
 
 textDocument_didClose(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
     ?LOG(<<"diag">>, "didClose: ~p", [File]),
+    %% Before the clear, so a debounced edit cannot republish just after it.
+    lsp_diagnostics:cancel_validation(File),
     send_diagnostics(Socket, File, []),
-    gen_lsp_doc_server:document_closed(File).
+    gen_lsp_doc_server:document_closed(File),
+    %% The file is the pull channel's again now (workspace_diagnostic_item/2
+    %% reports only *open* documents as empty), so release the workspace
+    %% pull's long poll instead of leaving the problems it holds hidden until
+    %% the poll times out.
+    lsp_diagnostics:notify_changed(),
+    request_diagnostic_refresh(Socket).
 
 textDocument_didSave(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
     ?LOG(<<"diag">>, "didSave: ~p", [File]),
-    case gen_lsp_config_server:autosave() of
-        true ->
-            gen_lsp_doc_server:parse_document(File),
-            ?LOG(<<"diag">>, "didsave: Parsing document for file ~p", [File]),
-            validate_file(Socket, File);
-        _ ->
-            ok
-    end.
+    %% Not gated on autosave() any more - see textDocument_didChange/2.
+    gen_lsp_doc_server:parse_document(File),
+    ?LOG(<<"diag">>, "didsave: Parsing document for file ~p", [File]),
+    validate_file(Socket, File).
 
 %% Content changes are applied in the order the client sent them - each
 %% one (range-based or, still legal even under Incremental sync, a full
@@ -270,14 +273,15 @@ textDocument_didChange(Socket, Params) ->
     ?LOG(<<"diag">>, "didChange: ~p version=~p changes=~p",
         [File, mapmapfind(textDocument, version, Params, fun () -> undefined end), length(ContentChanges)]),
     lists:foreach(fun (ContentChange) -> apply_content_change(File, ContentChange) end, ContentChanges),
-    case gen_lsp_config_server:autosave() of
-        true ->
-            ok;
-        _ ->
-            gen_lsp_doc_server:parse_document(File),
-            ?LOG(<<"diag">>, "didChange: Parsing document for file ~p", [File]),
-            validate_file(Socket, File)
-    end.
+    %% Not gated on autosave() any more: an open document's diagnostics come
+    %% from this push channel alone (workspace_diagnostic_item/2 reports open
+    %% documents as empty), so skipping revalidation here would leave a
+    %% problem listed until the next save - which is what made an applied
+    %% quick fix look like it had done nothing. No parse_document/1 call:
+    %% gen_lsp_doc_server:get_syntax_tree/1 now reparses the buffer by itself
+    %% when the cached tree predates this edit, so only the files a request
+    %% actually touches get reparsed.
+    lsp_diagnostics:schedule_validation(Socket, File).
 
 apply_content_change(File, #{range := #{start := #{line := SL, character := SC},
                                          'end' := #{line := EL, character := EC}},
@@ -991,15 +995,34 @@ workspace_diagnostic(_Socket, Params) ->
 %% Reports for every project file, plus whether any of them differs from what
 %% the client says it already has.
 workspace_diagnostic_items(Previous) ->
-    Items = [workspace_diagnostic_item(File, Previous) || File <- gen_lsp_doc_server:all_project_files()],
+    Opened = gen_lsp_doc_server:opened_documents(),
+    Items = [workspace_diagnostic_item(File, Previous, lists:member(File, Opened))
+             || File <- gen_lsp_doc_server:all_project_files()],
     case lists:any(fun (#{kind := Kind}) -> Kind =:= <<"full">> end, Items) of
         true -> {changed, Items};
         false -> {unchanged, Items}
     end.
 
-workspace_diagnostic_item(File, Previous) ->
+%% An open document is reported as having nothing, whatever it actually has:
+%% while it is open, its diagnostics belong to the push channel
+%% (textDocument/publishDiagnostics, see maybe_send_diagnostics/4). Reporting
+%% them here as well puts the same problem in two DiagnosticCollections at
+%% once - the client's pull collection and the push one - which is what
+%% showed every problem twice in the Problems list, twice on hover, and
+%% offered each quick fix twice (code_actions/3 emits one action per
+%% diagnostic in the request context).
+%%
+%% Reported as an empty `full` report rather than left out of the list: a URI
+%% simply missing keeps whatever the client last pulled for it, so dropping
+%% the file would freeze its stale pull entry on screen next to the live push
+%% one. textDocument_didClose/2 clears the push side, and the next pull sees
+%% the file as closed again and reports it for real.
+workspace_diagnostic_item(File, Previous, IsOpen) ->
     Uri = lsp_utils:file_uri_to_vscode_uri(lsp_utils:file_to_file_uri(File)),
-    Diagnostics = diagnostics_for(File),
+    Diagnostics = case IsOpen of
+        true -> [];
+        false -> diagnostics_for(File)
+    end,
     ResultId = result_id(File, Diagnostics),
     case maps:get(Uri, Previous, undefined) of
         ResultId ->

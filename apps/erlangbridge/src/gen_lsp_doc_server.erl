@@ -115,12 +115,17 @@ bump_document_version(File) ->
 parse_document(File) ->
     case filename:extension(File) of
         ".erl" ->
+            %% Version read *before* the contents, so an edit landing while
+            %% this parse runs leaves the stored tree marked older than the
+            %% document - get_syntax_tree/1 then reparses instead of handing
+            %% out a tree that predates that edit.
+            Version = get_document_version(File),
             case get_document_contents(File) of
                 undefined ->
                     lsp_log:error(<<"LSP">>, "Cannot find contents of document ~p~n", [File]);
                 Contents ->
                     ContentsFile = lsp_utils:make_temporary_file(Contents),
-                    parse_and_store(File, ContentsFile),
+                    parse_and_store(File, ContentsFile, Version),
                     file:delete(ContentsFile)
             end;
         _ ->
@@ -136,22 +141,35 @@ project_file_changed(File) ->
 project_file_deleted(File) ->
     gen_server:cast(?SERVER, {project_file_deleted, File}).
 
+%% @doc File's syntax tree, reparsed when what is cached predates the
+%% document's current contents.
+%%
+%% An unsaved edit (textDocument/didChange) bumps document_version and
+%% rewrites the buffer but does not itself reparse - so without the version
+%% check here every tree consumer (diagnostics, hover, navigation, inlay
+%% hints, completion) would keep answering from the pre-edit tree until the
+%% file was saved. That is what made a quick fix look like it had not been
+%% applied: the fix landed in the buffer, the next lint ran on the tree from
+%% before it, and the diagnostic came back.
 get_syntax_tree(File) ->
-    case get_tree(syntax_tree, File) of
-        undefined ->
-            parse_and_store(File, File),
-            get_tree(syntax_tree, File);
-        SyntaxTree ->
-            SyntaxTree
-    end.
+    get_fresh_tree(syntax_tree, File).
 
 get_dodged_syntax_tree(File) ->
-    case get_tree(dodged_syntax_tree, File) of
-        undefined ->
+    get_fresh_tree(dodged_syntax_tree, File).
+
+get_fresh_tree(TreeType, File) ->
+    DocumentVersion = get_document_version(File),
+    case get_tree(TreeType, File) of
+        {DocumentVersion, SyntaxTree} ->
+            SyntaxTree;
+        _Missing_Or_Stale ->
+            %% parse_and_store/2 picks the buffer over the file for an open
+            %% document by itself.
             parse_and_store(File, File),
-            get_tree(dodged_syntax_tree, File);
-        SyntaxTree ->
-            SyntaxTree
+            case get_tree(TreeType, File) of
+                {_, SyntaxTree} -> SyntaxTree;
+                undefined -> undefined
+            end
     end.
 
 get_references(Reference) ->
@@ -586,14 +604,28 @@ delete_cache_file(Name) ->
             file:delete(FileName)
     end.
 
+%% Parses File's on-disk contents - except for a document open in the editor,
+%% whose buffer can hold unsaved changes the file does not: parsing the file
+%% there would store a tree older than the buffer while stamping it with the
+%% buffer's version, i.e. pass it off as current. Project-wide background
+%% parsing (parse_next_file_in_background/1) and the file watcher both come
+%% through here, and either can land while a document is open and edited.
 parse_and_store(File, ContentsFile) ->
+    case {ContentsFile, filename:extension(File), get_document_contents(File)} of
+        {File, ".erl", Contents} when Contents =/= undefined ->
+            parse_document(File);
+        _ ->
+            parse_and_store(File, ContentsFile, get_document_version(File))
+    end.
+
+parse_and_store(File, ContentsFile, Version) ->
     ?XETS:delete(document_diagnostics, File),
     {SyntaxTree, DodgedSyntaxTree} = lsp_parse:parse_source_file(File, ContentsFile),
     case SyntaxTree of
         undefined ->
             ok;
         _ ->
-            ?XETS:insert(syntax_tree, {File, SyntaxTree}),
+            ?XETS:insert(syntax_tree, {File, Version, SyntaxTree}),
             ets:delete(references, File),
             ?XETS:delete(document_inlayhints, File),
             lsp_navigation:fold_references(fun (Reference, Line, Column, End, _) ->
@@ -603,13 +635,15 @@ parse_and_store(File, ContentsFile) ->
     end,
     case DodgedSyntaxTree of
         undefined -> ok;
-        _ -> ?XETS:insert(dodged_syntax_tree, {File, DodgedSyntaxTree})
+        _ -> ?XETS:insert(dodged_syntax_tree, {File, Version, DodgedSyntaxTree})
     end.
 
+%% `undefined` for never parsed, `{Version, Tree}` otherwise - Version being
+%% the document_version the contents were read at (see parse_document/1).
 get_tree(TreeType, File) ->
     case ?XETS:lookup(TreeType, File) of
-        [{File, SyntaxTree}] ->
-            SyntaxTree;
+        [{File, Version, SyntaxTree}] ->
+            {Version, SyntaxTree};
         _ ->
             undefined
     end.

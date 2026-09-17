@@ -40,7 +40,25 @@
 code_actions(File, Range, Context) ->
     Diagnostics = maps:get(diagnostics, Context, []),
     DiagnosticActions = lists:flatmap(fun (Diagnostic) -> actions_for_diagnostic(File, Diagnostic) end, Diagnostics),
-    DiagnosticActions ++ actions_for_behaviours(File, Diagnostics) ++ actions_for_cursor(File, Range).
+    dedupe(DiagnosticActions ++ actions_for_behaviours(File, Diagnostics) ++ actions_for_cursor(File, Range)).
+
+%% One action per diagnostic means two diagnostics describing the same problem
+%% offer the same fix twice. The diagnostics the request context carries come
+%% from whatever the client has collected, and that is more than this server's
+%% own push channel: RebarRunner (lib/RebarRunner.ts) keeps a collection of
+%% its own fed by rebar compile output, which can report the very same error.
+%% Dropping actions that would apply the identical edit under the identical
+%% title keeps the menu honest whatever the client sends. The first
+%% occurrence wins, so the order fixes are offered in is preserved.
+dedupe(Actions) ->
+    {Deduped, _} = lists:foldl(fun (Action, {Acc, Seen}) ->
+        Key = {maps:get(title, Action, undefined), maps:get(edit, Action, undefined)},
+        case sets:is_element(Key, Seen) of
+            true -> {Acc, Seen};
+            false -> {[Action | Acc], sets:add_element(Key, Seen)}
+        end
+    end, {[], sets:new()}, Actions),
+    lists:reverse(Deduped).
 
 %% @doc Identity: no fix defers any work to resolve/1 (see code_actions/3).
 -spec resolve(CodeAction :: map()) -> map().

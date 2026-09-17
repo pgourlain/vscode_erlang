@@ -51,6 +51,7 @@ all() -> [
     selecting_a_block_whose_non_result_binding_is_used_after_offers_no_extract,
     selecting_the_clauses_own_last_statement_offers_no_extract,
     missing_module_attribute_gets_one_added,
+    the_same_diagnostic_twice_still_offers_the_fix_once,
     cursor_on_unsorted_export_offers_sort_action,
     cursor_on_already_sorted_export_offers_no_action
 ].
@@ -356,6 +357,19 @@ missing_module_attribute_gets_one_added(Config) ->
     apply_and_assert(Config, "no_module.erl", Action,
         <<"-module(no_module).\n-export([f/0]).\n\nf() -> ok.\n">>).
 
+%% Regression test for the duplicated quick fix: one action is produced per
+%% diagnostic in the request context, so two diagnostics describing the same
+%% problem used to offer the same fix twice. The client's context is not this
+%% server's push channel alone (RebarRunner keeps a collection of its own,
+%% fed by rebar compile output, that can report the very same error), so
+%% identical actions are dropped whatever the client sends.
+the_same_diagnostic_twice_still_offers_the_fix_once(Config) ->
+    File = source_file(Config, "no_module.erl"),
+    [Diagnostic] = wire_diagnostics(File),
+    Context = #{diagnostics => [Diagnostic, Diagnostic], triggerKind => 1},
+    [Action] = lsp_codeaction:code_actions(File, undefined, Context),
+    ?assertEqual(<<"Add -module(no_module)">>, maps:get(title, Action)).
+
 %% unsorted_export.erl: -export([c/0, a/1, a/0, b/0]). - lists:sort/1's own
 %% term order on {Name, Arity} tuples is exactly the desired sort key
 %% (Name, then Arity), so no custom comparator is needed.
@@ -383,12 +397,14 @@ source_file(Config, FileName) ->
 %% code_actions/3 call, exactly like a live client would trigger this.
 actions_for(Config, FileName) ->
     File = source_file(Config, FileName),
+    Context = #{diagnostics => wire_diagnostics(File), triggerKind => 1},
+    lsp_codeaction:code_actions(File, undefined, Context).
+
+wire_diagnostics(File) ->
     %% A file with no diagnostics at all (e.g. every behaviour callback
     %% already implemented) parses to a map with no errors_warnings key.
     Warnings = maps:get(errors_warnings, lsp_syntax:validate_parsed_source_file(File), []),
-    Diagnostics = [round_trip(to_wire_diagnostic(W)) || W <- Warnings],
-    Context = #{diagnostics => Diagnostics, triggerKind => 1},
-    lsp_codeaction:code_actions(File, undefined, Context).
+    [round_trip(to_wire_diagnostic(W)) || W <- Warnings].
 
 to_wire_diagnostic(#{type := Type, info := Info, correlation_data := CorrelationData}) ->
     Severity = case Type of <<"error">> -> 1; _ -> 2 end,
