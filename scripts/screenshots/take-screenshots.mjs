@@ -151,7 +151,8 @@ const shots = {
     'test-coverage': async (page) => {
         await command(page, 'Test: Run All Tests with Coverage');
         await sleep(25000);
-        await openFile(page, 'demo_tests.erl', 1);
+        await openFile(page, 'demo.erl', 1);
+        await command(page, 'Unfold All');
         await command(page, 'Testing: Focus on Test Explorer View');
         await page.waitForSelector('.monaco-list-row:has-text("%")', { timeout: 15000 });
         await sleep(1500);

@@ -156,14 +156,19 @@ run_tests(Socket, Params) ->
     AddedPaths = add_project_ebin_paths(),
     Coverage andalso cover:start(),
     try
+        %% Task 6.7: instrument the code under test up front, not only the
+        %% test modules - run_eunit/run_ct then find those already
+        %% cover-compiled and leave them alone.
+        CoverModules = case Coverage of
+            true -> coverage_modules(Targets);
+            false -> []
+        end,
+        lists:foreach(fun (M) -> ensure_module_loaded(M, true) end, CoverModules),
         run_eunit(Socket, EunitTargets, Table, Coverage),
         run_ct(Socket, CtTargets, Table, Coverage),
         ets:delete(Table, '$socket'),
         Summary = summarize(ets:tab2list(Table)),
-        CoverageResult = case Coverage of
-            true -> collect_coverage([M || #{module := M} <- Targets]);
-            false -> []
-        end,
+        CoverageResult = collect_coverage(CoverModules),
         #{summary => Summary, coverage => CoverageResult}
     after
         ets:delete(Table),
@@ -356,18 +361,25 @@ ct_log_dir() ->
 %% loaded by an *earlier*, non-coverage run needs to be swapped out for
 %% its instrumented twin.
 ensure_module_loaded(Module, true) ->
-    case gen_lsp_doc_server:get_module_file(Module) of
-        undefined ->
+    case {cover:is_compiled(Module), gen_lsp_doc_server:get_module_file(Module)} of
+        {{file, _}, _} ->
+            %% already instrumented earlier in this same run (task 6.7)
             ok;
-        SourceFile ->
+        {false, undefined} ->
+            ok;
+        {false, SourceFile} ->
             %% Unlike compile:file/2 above, `binary`/`report_errors` aren't
             %% valid here - cover:compile_module/2 manages the actual
             %% compile+instrument+load pipeline itself and only wants the
             %% extra options (include paths/defines) layered on top of it.
             %% `{d,'TEST'}`: see the comment on the `false` clause below.
             Options = [{d, 'TEST'} | [{i, Path} || Path <- lsp_parse:get_include_path(SourceFile)]],
-            catch cover:compile_module(SourceFile, Options),
-            ok
+            %% A module that can't be instrumented (missing parse transform,
+            %% syntax error, ...) just gets no coverage - never fail the run.
+            case catch cover:compile_module(SourceFile, Options) of
+                {ok, _} -> ok;
+                Error -> ?LOG("lsp_testing: cover compile of ~p failed: ~p", [Module, Error])
+            end
     end;
 ensure_module_loaded(Module, false) ->
     case code:is_loaded(Module) of
@@ -403,6 +415,50 @@ ensure_module_loaded(Module, false) ->
 %% StatementCoverage accepts as a number and is strictly more informative.
 collect_coverage(Modules) ->
     lists:filtermap(fun module_coverage/1, lists:usort(Modules)).
+
+%% Task 6.7: every module whose coverage is worth reporting - the test
+%% modules themselves plus the project's own modules they exercise.
+%% Dependencies (anything under the build dir, `_checkouts/` or `deps/`)
+%% are left out: noise in the report, and slow to instrument.
+coverage_modules(Targets) ->
+    Root = filename:split(gen_lsp_config_server:root()),
+    BuildDir = case gen_lsp_doc_server:get_build_dir() of
+        undefined -> "_build";
+        Dir -> Dir
+    end,
+    Excluded = [BuildDir, "_checkouts", "deps"],
+    ProjectModules = [
+        M || Name <- gen_lsp_doc_server:project_modules(),
+             M <- [list_to_atom(Name)],
+             is_project_source(M, Root, Excluded),
+             is_safe_to_instrument(M)
+    ],
+    lists:usort([M || #{module := M} <- Targets] ++ ProjectModules).
+
+is_project_source(Module, Root, Excluded) ->
+    case gen_lsp_doc_server:get_module_file(Module) of
+        undefined ->
+            false;
+        File ->
+            Parts = filename:split(File),
+            lists:prefix(Root, Parts) andalso
+                not lists:any(fun (Part) -> lists:member(Part, Excluded) end,
+                              lists:nthtail(length(Root), Parts))
+    end.
+
+%% This node *is* the language server: cover-compiling a module that is
+%% already loaded here would hot-swap live code - with vscode_erlang itself
+%% open as the workspace, that is the bridge's own `lsp_*` modules, and the
+%% purge that follows kills whatever process still runs the old version.
+%% Project modules loaded by an earlier run are unloaded at its end
+%% (remove_project_ebin_paths/1), so they are not affected by this. A
+%% project module shadowing an OTP one is skipped too, for the same reason.
+is_safe_to_instrument(Module) ->
+    code:is_loaded(Module) =:= false andalso
+        case code:which(Module) of
+            Path when is_list(Path) -> not lists:prefix(code:root_dir(), Path);
+            _ -> true
+        end.
 
 module_coverage(Module) ->
     case gen_lsp_doc_server:get_module_file(Module) of

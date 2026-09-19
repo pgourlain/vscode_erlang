@@ -29,6 +29,7 @@ all() -> [
     run_tests_streams_progress_notifications_over_the_socket,
     run_tests_reports_pass_and_fail_for_requested_ct_testcases,
     run_tests_with_coverage_reports_per_line_call_counts,
+    run_tests_with_coverage_covers_code_under_test,
     run_tests_runs_ifdef_guarded_eunit_tests,
     run_tests_loads_dependency_modules_from_the_project_code_path
 ].
@@ -125,6 +126,28 @@ run_tests_with_coverage_reports_per_line_call_counts(Config) ->
     ?assert(maps:get(9, Statements) >= 1),
     ?assertEqual(0, maps:get(12, Statements)),
     ?assertEqual(0, maps:get(15, Statements)).
+
+%% Task 6.7: coverage must include the project modules a test exercises, not
+%% only the test module itself. `sample_lib` has no compiled .beam anywhere,
+%% so it is only reachable at all because the coverage run cover-compiles it
+%% from source: `double/1`'s body (line 5) runs, `triple/1`'s (line 8) never.
+run_tests_with_coverage_covers_code_under_test(Config) ->
+    AppDir = ?config(data_dir, Config),
+    File = filename:join(AppDir, "sample_lib.erl"),
+    {ServerSocket, ClientSocket} = open_socket_pair(),
+    Params = #{tests => [
+        #{module => <<"sample_lib_tests">>, function => <<"double_test">>}
+    ], coverage => true},
+    Result = lsp_testing:run_tests(ServerSocket, Params),
+    drain(ClientSocket),
+    gen_tcp:close(ServerSocket),
+    gen_tcp:close(ClientSocket),
+    ?assertMatch(#{summary := #{<<"passed">> := 1, <<"failed">> := 0}}, Result),
+    #{coverage := Coverage} = Result,
+    FileCoverage = module_named_by_uri(lsp_utils:file_uri_to_vscode_uri(lsp_utils:file_to_file_uri(File)), Coverage),
+    Statements = maps:from_list([{L, E} || #{line := L, executed := E} <- maps:get(statements, FileCoverage)]),
+    ?assert(maps:get(5, Statements) >= 1),
+    ?assertEqual(0, maps:get(8, Statements)).
 
 %% `add_test` in sample_ifdef.erl is only reachable at all because discovery
 %% reads the *dodged* tree (see that fixture's own comment) - but *running*
