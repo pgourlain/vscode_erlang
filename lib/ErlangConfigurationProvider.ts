@@ -15,6 +15,9 @@ export class ErlangDebugConfigurationProvider implements DebugConfigurationProvi
 
     resolveDebugConfiguration?(folder: WorkspaceFolder, debugConfiguration: DebugConfiguration, token?: CancellationToken): ProviderResult<DebugConfiguration> {
         let cfg = getElangConfigConfiguration();
+        if (!debugConfiguration.cwd && (folder || cfg.rootPath)) {
+            debugConfiguration.cwd = folder ? folder.uri.fsPath : cfg.rootPath;
+        }
         debugConfiguration.verbose = cfg.verbose;
         debugConfiguration.erlangPath = cfg.erlangPath;
         return debugConfiguration;

@@ -7,6 +7,22 @@
 
 This extension adds support for the Erlang language to Visual Studio Code, including editing, building and debugging.
 
+New to the extension? Open **Help > Welcome > Get started with Erlang**: a walkthrough that checks your Erlang/OTP and rebar3 installation, then builds, tests and debugs your project.
+
+## Features at a glance
+
+| Area | Features |
+|---|---|
+| Editing | Completion with snippets, hover docs, signature help, inlay hints, CodeLens, diagnostics while typing |
+| Highlighting | TextMate grammar + semantic highlighting from the syntax tree |
+| Navigation | Definition, declaration, type definition, implementations, references, document/workspace symbols, call & type hierarchy, highlight occurrences, links in `-include` |
+| Code actions | Quick fixes from compiler diagnostics, export/unexport, generate `-spec`, implement behaviour callbacks, extract function, inline variable, `if` ↔ `case`, sort `-export` |
+| Formatting | Document, selection and on-type formatting (erlfmt), folding, expand/shrink selection, rename |
+| Testing | EUnit and Common Test in the Testing view: run, debug, coverage |
+| Build | rebar3 commands, rebar3 tasks (compile, eunit, ct, dialyzer, release, shell, clean), Dialyzer warnings in Problems with PLT status in the status bar |
+| Debugger | Launch or attach to a running node; line, function, conditional, hit-count breakpoints, logpoints; variables, call stack, inline values |
+| Status | Language server state and OTP version in the status bar |
+
 
 ## Editing support
 
@@ -103,6 +119,26 @@ EUnit and Common Test tests are discovered by the language server and shown in t
 
 ![build](images/vscode-erlang-build-args.png)
 
+### rebar3 tasks
+
+For every workspace folder with a `rebar.config`, **Terminal > Run Task > rebar3** offers `compile` (the default build task), `eunit` and `ct` (test tasks), `dialyzer`, `shell`, `clean`, and `release` when `relx` is configured. Compiler errors and dialyzer warnings land in the Problems panel (`$rebar3` and `$rebar3-dialyzer` problem matchers).
+
+Customize them in `tasks.json`:
+
+```json
+{
+    "type": "rebar3",
+    "command": "ct",
+    "profile": "test",
+    "args": ["--suite", "apps/myapp/test/myapp_SUITE"],
+    "problemMatcher": ["$rebar3"]
+}
+```
+
+### Dialyzer
+
+`Erlang: rebar dialyzer` shows its warnings in the Problems panel. The status bar shows the state of the project PLT: `none` (the first run builds it, which is slow), `stale` (`rebar.lock` or `rebar.config` changed since it was built; rebar3 updates it incrementally on the next run) or `ready`. Click it to run dialyzer.
+
 ## Debugger
 
 - Variables List shows variables from the current scope
@@ -122,16 +158,27 @@ You can provide a specific command line to 'erl' in launch.json configuration fi
 
 ![debug1](images/vscode-erlang-debug-args.png)
 
-The modified code may be automatically build before debugger is started. To set automatic build up you need to:
+The modified code may be automatically build before debugger is started: add `"preLaunchTask": "rebar3: compile"` to the launch configuration. Then, before debugging is started, modified files will be recompiled automatically.
 
-1. Add to launch.json file the entry "preLaunchTask": "rebar3 compile"
-1. Select **Configure Task** in the alert, choose **Create tasks.json file from template** and then **Others: Example to run an arbitrary command**
-1. This will create tasks.json for you. Change both label and command to "rebar3 compile".
-1. Add entry "problemMatcher": "$erlang"
+`"erlpath": "${command:erlpath}"` uses the `erl` from `erlang.erlangPath` (or the `PATH`). **Add Configuration...** in launch.json offers ready-made snippets.
 
-![debug](images/vscode-erlang-build-task.png)
+### Attach to a running node
 
-Then, before debugging is started, modified files will be recompiled automatically.
+```json
+{
+    "name": "Attach to myapp",
+    "type": "erlang",
+    "request": "attach",
+    "node": "myapp@localhost",
+    "cwd": "${workspaceFolder}"
+}
+```
+
+The debugger starts a hidden helper node, connects to `node`, loads its bridge there and interprets the project's modules, so breakpoints work in the running system. Disconnecting removes every breakpoint, releases the processes stopped at one and stops interpreting; the node keeps running (use **Terminate** to stop it instead).
+
+- The node must run on the same machine, as a distributed node (`-sname`/`-name`), with the `debugger` and `inets` applications available (a release must include them).
+- Cookie: `~/.erlang.cookie` by default, or a `"cookie"` entry.
+- Project modules must be compiled with `debug_info` (rebar3 default).
 
 ## Using this extension in Erlang Docker instance
 
@@ -148,6 +195,14 @@ Support for Erlang tools, including rebar3, EUnit and Dialyzer
 ![commands](images/vscode-erlang-commands.png)
 
 - Dialyzer warnings displayed in Problems tab for easy navigation
+- `Erlang: Check Erlang/OTP and rebar3 installation` - which erl and rebar3 the extension uses
+- `Erlang: Show Language Server Output`, `Erlang: Restart Language Server`
+
+The status bar shows the language server state (starting, ready with the OTP version, failed). A start failure is reported with a notification; click the item to open the output.
+
+## Editor defaults
+
+For Erlang files the extension sets 4-space indentation (erlfmt's), enables semantic highlighting and keeps format-on-save off. Override them under `"[erlang]"` in your settings. Double-click selects whole Erlang words: `node@host` atoms, `'quoted atoms'`, `16#FF` numbers.
 
 ## Settings
 

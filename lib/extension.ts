@@ -12,6 +12,8 @@ import * as Eunit from './eunitRunner';
 import { ErlangDebugConfigurationProvider, configurationChanged, getElangConfigConfiguration } from './ErlangConfigurationProvider';
 import { ErlangDebugAdapterDescriptorFactory, InlineErlangDebugAdapterFactory, ErlangDebugAdapterExecutableFactory } from './ErlangAdapterDescriptorFactory';
 import * as erlangConnection from './erlangConnection';
+import { ErlangTaskProvider } from './erlangTaskProvider';
+import * as ErlangInstallation from './erlangInstallation';
 
 import * as LspClient from './lsp/lspclientextension';
 
@@ -40,6 +42,9 @@ export function activate(context: ExtensionContext) {
 
     var eunit = new Eunit.EunitRunner();
     eunit.activate(context);
+
+    disposables.push(ErlangTaskProvider.register(context));
+    ErlangInstallation.activate(context);
 
     disposables.push(debug.registerDebugConfigurationProvider("erlang", new ErlangDebugConfigurationProvider()));
     disposables.push(Workspace.onDidChangeConfiguration((e) => configurationChanged()));  

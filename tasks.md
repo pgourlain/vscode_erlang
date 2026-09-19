@@ -384,19 +384,47 @@ EUnit/CT results currently surface only as diagnostics. TS is a **thin shell** o
 - **6.5**: `TestRunProfile.Debug` builds a `DebugConfiguration` with `arguments` set to an extra `-eval` fragment (`eunit:test({M,F})` / `ct:run_test([{suite,M},{testcase,F}])`) appended after the existing breakpoints args-file - since that args file already `int:ni/1`'s every project file (test files included) before handing control to `arguments`, the test module is already interpreted and breakpoints in it already work with no further plumbing.
 - **6.6**: `erlang/runTests` takes an extra `coverage => true` param; when set, `lsp_testing.erl` recompiles every target module through `cover:compile_module/2` instead of the plain compile+load path (unconditionally, not gated by `code:is_loaded/1` - a module already loaded by an earlier non-coverage run needs to be swapped for its instrumented twin) and, once the run finishes, reads back `cover:analyse(Module, calls, line)` per module before `cover:stop/0` reverts everything back to plain object code. Line **call counts**, not just covered/not-covered booleans, are returned - VS Code's `StatementCoverage.executed` accepts a number, and "how many times" is strictly more informative than a boolean for free. `erlang/runTests`'s response always carries a `coverage` field now (an empty list when coverage wasn't requested), rather than making it optional, so the TS side has one shape to deserialize regardless of which profile ran.
 
+### 6.7 — Coverage must include the code under test (bug)
+
+- **Status**: done. Deviation from the plan below: step 2 only instruments project modules that are *not already loaded* in the bridge node (and don't shadow an OTP module) - see `is_safe_to_instrument/1`. Cover-compiling a loaded module hot-swaps live code, which with vscode_erlang itself as the workspace means the bridge's own `lsp_*` modules.
+- **Symptom**: "Run with Coverage" reports only the test modules themselves (`demo_tests.erl`, `demo_SUITE.erl` at 100%), never the modules they exercise (`demo.erl`) - so no gutter coverage on real source. Found while taking the README screenshots (`scripts/screenshots/`).
+- **Root cause** (`lsp_testing.erl`): `run_tests/2` only ever cover-compiles the *test targets* (`ensure_module_loaded(M, true)` from `run_eunit/4` / `run_ct/4`) and `collect_coverage/1` only analyses that same list `[M || #{module := M} <- Targets]`. Project modules are loaded as plain beams from `_build/**/ebin` via `add_project_ebin_paths/0`, so `cover` never sees them.
+- **Plan**:
+  1. **Red test first** - new fixture pair in `lsp_testing_SUITE_data/`: `sample_lib.erl` (two functions, only one called) + `sample_lib_tests.erl` calling it. New case `run_tests_with_coverage_covers_code_under_test`: coverage result contains `sample_lib.erl`'s URI, the called function's body line `>= 1`, the other one `0`. Must fail on today's code.
+  2. **Pick the modules to instrument** - new `coverage_modules(Targets)`: test target modules ∪ every project module from `gen_lsp_doc_server:project_modules/0` / `get_module_file/1`, **excluding** anything whose source lives under `_build/`, `_checkouts/` or `deps/` (dependencies are noise in a coverage report and slow to instrument).
+  3. **Instrument once, up front** - in `run_tests/2`, right after `cover:start()` and `add_project_ebin_paths/0`, call the existing `ensure_module_loaded(M, true)` for every module from step 2 (source-based compile, same `{d,'TEST'}` + include paths as today, so the instrumented code matches what the tests are compiled against). Make `run_eunit/4` / `run_ct/4` skip modules already instrumented (`cover:is_compiled/1`) instead of compiling them twice.
+  4. **Collect over the same list** - `collect_coverage(coverage_modules(Targets))`; `module_coverage/1` needs no change.
+  5. **Robustness** - a module that fails to cover-compile (parse transform not on the path, `-on_load` NIF, syntax error) is skipped and logged via `logger` with the module name, never fails the run. Keep the existing `after` ordering (`cover:stop/0` before `remove_project_ebin_paths/1`).
+  6. **No TS change expected** - `applyCoverage` in `lib/lsp/lsp-testcontroller.ts` already maps any file URI it receives.
+- **Open question**: scope in big umbrella projects - instrumenting every project module can cost seconds per run. Start with "all project modules minus deps"; if too slow, narrow to the OTP apps that contain the requested tests.
+- **Verify**:
+  - `./rebar3 ct --suite apps/erlangbridge/test/lsp_testing_SUITE` (new case green, `run_tests_with_coverage_reports_per_line_call_counts` still green)
+  - `./rebar3 ct` full
+  - `npm run screenshots -- test-coverage`, re-shot with `demo.erl` open: gutter shows hit/missed lines
+  - then restore the "line coverage shown in the editor gutter" wording in `README.md` and keep the CHANGELOG "Run with Coverage" line as is
+- **Files**: `apps/erlangbridge/src/lsp_testing.erl`, `apps/erlangbridge/test/lsp_testing_SUITE.erl` (+ `_data` fixtures), `scripts/screenshots/take-screenshots.mjs` (coverage shot opens `demo.erl` again), `README.md`
+
 # PHASE 7 — ecosystem & polish
 
 | id | goal | status |
 |---|---|---|
-| 7.1 | Task provider — `contributes.taskDefinitions` + `vscode.tasks.registerTaskProvider` for rebar3 targets (compile, ct, eunit, dialyzer, release, shell), auto-detected from `rebar.config`; complements the ad-hoc commands in `RebarRunner` | todo |
-| 7.2 | Dialyzer — keep the command, add incremental PLT status in the status bar | todo |
-| 7.3 | Status bar — persistent item showing LSP state (starting / ready / failed) + OTP version. Today a startup failure is silent unless `erlang.verbose` | todo |
-| 7.4 | Walkthrough — `contributes.walkthroughs` for first-run setup (find `erl`, pick rebar3, run a build). Good marketplace signal | todo |
-| 7.5 | `configurationDefaults` — sensible `[erlang]` editor defaults (tab size, format-on-save opt-in, word pattern) | todo |
-| 7.6 | Debug adapter — `attach` request (attach to a running node); only `launch` is declared today. Plus `configurationSnippets` and `variables` for `erlpath` | todo |
-| 7.7 | Docs — README settings list is stale (missing `debuggerRunMode`, `formattingLineLength`, `verboseExcludeFilter`); add a feature matrix; update `CHANGELOG.md` per phase | todo |
+| 7.1 | Task provider — `contributes.taskDefinitions` + `vscode.tasks.registerTaskProvider` for rebar3 targets (compile, ct, eunit, dialyzer, release, shell), auto-detected from `rebar.config`; complements the ad-hoc commands in `RebarRunner` | done |
+| 7.2 | Dialyzer — keep the command, add incremental PLT status in the status bar | done (see note) |
+| 7.3 | Status bar — persistent item showing LSP state (starting / ready / failed) + OTP version. Today a startup failure is silent unless `erlang.verbose` | done |
+| 7.4 | Walkthrough — `contributes.walkthroughs` for first-run setup (find `erl`, pick rebar3, run a build). Good marketplace signal | done |
+| 7.5 | `configurationDefaults` — sensible `[erlang]` editor defaults (tab size, format-on-save opt-in, word pattern) | done (word pattern in `erlang.configuration.json`, see note) |
+| 7.6 | Debug adapter — `attach` request (attach to a running node); only `launch` is declared today. Plus `configurationSnippets` and `variables` for `erlpath` | done (same-host only, see note) |
+| 7.7 | Docs — README settings list is stale (missing `debuggerRunMode`, `formattingLineLength`, `verboseExcludeFilter`); add a feature matrix; update `CHANGELOG.md` per phase | done |
 
-- **New file**: `lib/erlangTaskProvider.ts`
+- **New files**: `lib/erlangTaskProvider.ts`, `lib/dialyzerStatus.ts`, `lib/erlangInstallation.ts` (check-installation command + `erlang.getErlPath` behind `${command:erlpath}`), `lib/lsp/lsp-status.ts`, `walkthrough/install-erlang.md`, `apps/erlangbridge/test/vscode_connection_SUITE.erl` (+ `_data`), `test/test-suite/erlangTaskProvider.test.ts`. No new bridge module (the attach code lives in `vscode_connection.erl`, which is not an LSP module).
+- **Verify**: `./rebar3 ct` (210 green, incl. `vscode_connection_SUITE` and `lsp_protocol_SUITE`'s golden `serverInfo`); `npm test` (task detection); manual: `Launch Extension`, then status bar items, Run Task > rebar3, the walkthrough, an attach configuration against `erl -sname myapp`
+
+**Notes on scope trims (all deliberate, documented in-code):**
+- **7.1**: tasks run through `escript <rebar3>` like `RebarShell` (rebar3 found via `RebarShell.getRebarFullPath`, now public). New `$rebar3` matcher (handles the `file:line:col:` format the old `$erlang` one misparses) and multi-line `$rebar3-dialyzer`; `$erlang` is kept unchanged for existing `tasks.json` files. `release` only offered when `rebar.config` mentions `{relx,`. Activation on `workspaceContains:rebar.config` added so tasks and status items exist before an `.erl` file is opened.
+- **7.2**: rebar3 already updates the PLT incrementally; "PLT status" is read from disk: newest `_build/*/*_plt`, and *stale* when `rebar.lock`/`rebar.config` is newer (the PLT covers OTP + deps, not project modules). Global PLT under `~/.cache/rebar3` and custom `plt_location` are not looked at. Running state comes from the dialyzer command and from `rebar3: dialyzer` tasks.
+- **7.3**: OTP version comes from the server: `initialize` now returns `serverInfo => #{name => <<"vscode_erlang">>, version => <full OTP version>}` (golden result in `lsp_protocol_SUITE` updated deliberately). Startup failures (bridge compile failing with no previous build, `erl` exiting before the socket is reachable, socket never reachable) now reject the server-options promise instead of resolving with an undefined socket.
+- **7.5**: `wordPattern` is a language-configuration key, not a setting, so it went into `erlang.configuration.json`; `?MACRO`/`#record` prefixes are deliberately *not* part of a word (it would break completion filtering on `?`/`#` triggers), and a leading `-` is not part of a number (`X-1`).
+- **7.6**: the adapter starts a hidden helper node (`vscode_connection:attach/0`) that pushes `vscode_jsone`/`gen_connection`/`vscode_connection` into the target and calls `start_attached/2` there; disconnect sends `debugger_detach` (no breakpoints, releases processes at a break, `int:nn` everything, stops the connection processes) instead of `debugger_exit`, unless the client asks `terminateDebuggee`. Same-host only (target reads the sources by local path and posts to 127.0.0.1); target needs the `debugger` and `inets` applications (checked, clear error otherwise); node name and cookie validated before reaching the shell command line. Not exercised through a real VS Code debug session in automation - CT covers attach/detach/breakpoint release against a peer node, the helper's stdin-EOF shutdown was checked by hand.
 
 ---
 

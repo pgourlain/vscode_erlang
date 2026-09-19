@@ -163,6 +163,18 @@ export class ErlangDebugConnection extends ErlangConnection {
         }  
     }
 
+	/** Attach mode: leave the node running, without breakpoints or interpreted modules. */
+	public debuggerDetach(): Promise<any> {
+		return this.post("debugger_detach", "").catch(err => {
+			this.debug(`debugger_detach error : ${err}`);
+			return [];
+		});
+	}
+
+	public closeEventsReceiver(): void {
+		this.events_receiver?.close();
+	}
+
 	Quit() : void {
         this.debuggerExit().then(() => {
             this.events_receiver.close();

@@ -1,8 +1,10 @@
 
 import * as os from 'os';
+import * as fs from 'fs';
+import * as path from 'path';
 import {
 	workspace as Workspace, window as Window, ExtensionContext, TextDocument, OutputChannel,
-	LogOutputChannel, Uri, Disposable, CodeLens, FileSystemWatcher, workspace, languages
+	LogOutputChannel, Uri, Disposable, CodeLens, FileSystemWatcher, workspace, languages, commands
 } from 'vscode';
 
 import {
@@ -16,7 +18,8 @@ import {
 	LanguageClientOptions,
 	ServerOptions,
 	TransportKind,
-	StreamInfo
+	StreamInfo,
+	State
 } from 'vscode-languageclient/node';
 
 import { ErlangShellLSP } from './ErlangShellLSP';
@@ -27,6 +30,7 @@ import * as lspcodelens from './lspcodelens';
 
 import * as lspValue from './lsp-inlinevalues';
 import * as lspTest from './lsp-testcontroller';
+import { LspStatus, SHOW_OUTPUT_COMMAND, RESTART_COMMAND } from './lsp-status';
 
 
 // import { ErlangShellForDebugging } from '../ErlangShellDebugger';
@@ -188,12 +192,16 @@ function waitForSocket(options: any, callback: any, _tries: any) {
  * @param extensionPath - Path to the editor extension.
  * @returns Promise resolved or rejected when compilation is complete.
  */
-// TODO: convert to async function
-function compileErlangBridge(extensionPath: string): Thenable<string> {
-	return new RebarShell([getElangConfigConfiguration().rebarPath], extensionPath, ErlangOutputAdapter())
-		.compile(extensionPath, getElangConfigConfiguration().erlangPath)
-		.then(({ output }) => output);
-	// TODO: handle failure to compile erlangbridge
+async function compileErlangBridge(extensionPath: string): Promise<string> {
+	const { exitCode, output } = await new RebarShell([getElangConfigConfiguration().rebarPath], extensionPath, ErlangOutputAdapter())
+		.compile(extensionPath, getElangConfigConfiguration().erlangPath);
+	// vscode_lsp_entry recompiles the bridge sources in memory at startup, so a
+	// failed rebar3 compile only matters when no previous build exists.
+	if (exitCode !== 0 && !fs.existsSync(path.join(erlangBridgePath, 'ebin', 'vscode_lsp_entry.beam'))) {
+		const tail = output.trim().split('\n').slice(-5).join('\n');
+		throw new Error(`compiling the Erlang bridge with rebar3 failed (exit code ${exitCode})${tail ? ':\n' + tail : ''}`);
+	}
+	return output;
 }
 
 function getPort(callback) {
@@ -212,6 +220,23 @@ export function activate(context: ExtensionContext) {
 	let erlangCfg = getElangConfigConfiguration();
 	if (erlangCfg.verbose)
 		lspOutputChannel = Window.createOutputChannel('Erlang Language Server', { log: true });
+
+	const status = new LspStatus();
+	context.subscriptions.push(status);
+	context.subscriptions.push(commands.registerCommand(SHOW_OUTPUT_COMMAND, () => client?.outputChannel.show()));
+	context.subscriptions.push(commands.registerCommand(RESTART_COMMAND, () => startClient(client.restart())));
+	// Set by a failed start: the Stopped state that follows must not hide it.
+	let startFailure: string | undefined;
+	const startClient = (starting: Promise<void>) => {
+		startFailure = undefined;
+		status.starting();
+		starting.catch(error => {
+			startFailure = error instanceof Error ? error.message : String(error);
+			status.failed(startFailure);
+			Window.showErrorMessage(`Erlang language server failed to start: ${startFailure}`, 'Show Output')
+				.then(choice => { if (choice) { client.outputChannel.show(); } });
+		});
+	};
 
 	lspValue.activate(context, lspOutputChannel);
 
@@ -266,13 +291,29 @@ export function activate(context: ExtensionContext) {
 	let clientName = 'Erlang Language Server';
 	client = new ErlangLanguageClient(clientName, async () => {
 		return new Promise<StreamInfo>(async (resolve, reject) => {
-			await compileErlangBridge(context.extensionPath);
+			try {
+				await compileErlangBridge(context.extensionPath);
+			} catch (error) {
+				reject(error);
+				return;
+			}
 			let erlangLsp = new ErlangShellLSP(ErlangOutputAdapter(lspOutputChannel));
+			let connected = false;
+			erlangLsp.on('close', (exitCode) => {
+				if (!connected) {
+					reject(new Error(`erl exited with code ${exitCode} before the language server was reachable (is erl on the PATH? see erlang.erlangPath)`));
+				}
+			});
 
 			getPort(async function (port) {
 				erlangLsp.Start("", erlangBridgePath, port, "src", "");
 				let socket = await waitForSocket({ port: port }, 
-					function (error, socket) {						
+					function (error, socket) {
+						if (error) {
+							reject(new Error(`cannot connect to the language server on port ${port}`));
+							return;
+						}
+						connected = true;
 						resolve({ reader: socket, writer: socket });
 					}, 
 					undefined);
@@ -281,9 +322,24 @@ export function activate(context: ExtensionContext) {
 			});
 		});
 	}, clientOptions, lspOutputChannel, true);
+	context.subscriptions.push(client.onDidChangeState(e => {
+		switch (e.newState) {
+			case State.Starting:
+				status.starting();
+				break;
+			case State.Running:
+				status.ready(client.initializeResult?.serverInfo?.version);
+				break;
+			case State.Stopped:
+				if (!startFailure) {
+					status.stopped();
+				}
+				break;
+		}
+	}));
 	Configuration.initialize();
 	// Start the client. This will also launch the server
-	client.start();
+	startClient(client.start());
 	// `client` (imported by lsp-testcontroller as a live binding) must be
 	// assigned before this runs - it registers an onNotification handler
 	// eagerly, unlike lspValue.activate above which only dereferences

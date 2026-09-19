@@ -87,7 +87,21 @@ initialize(_Socket, Params) ->
         workspace => #{
             workspaceFolders => #{supported => true, changeNotifications => true}
         }
-    }}.
+    },
+    %% task 7.3: the client status bar shows which OTP the bridge runs on.
+    %% The bridge app's own vsn is a meaningless constant, so `version` is
+    %% the runtime's full OTP version instead.
+    serverInfo => #{name => <<"vscode_erlang">>, version => otp_version()}}.
+
+%% @doc Full OTP version ("26.2.5"), falling back to the major release
+%% ("26") when the OTP_VERSION file is missing (stripped releases).
+otp_version() ->
+    Release = erlang:system_info(otp_release),
+    File = filename:join([code:root_dir(), "releases", Release, "OTP_VERSION"]),
+    case file:read_file(File) of
+        {ok, Bin} -> string:trim(Bin);
+        {error, _} -> list_to_binary(Release)
+    end.
 
 %% @doc Resolve the initial workspace root, preferring the modern,
 %% possibly-multi-folder `workspaceFolders` field over the single-folder

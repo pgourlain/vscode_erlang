@@ -31,7 +31,8 @@
 		"onCommand:extension.rebarUpdateDeps",
 		"onCommand:extension.rebareunit",
 		"onCommand:extension.erleunit",
-		"onCommand:extension.dialyzer"
+		"onCommand:extension.dialyzer",
+		"workspaceContains:rebar.config"
 	],
 	"main": "./out/lib/extension.js",
 	"contributes": {
@@ -73,6 +74,32 @@
 								"default": true
 							}
 						}
+					},
+					"attach": {
+						"required": [
+							"node"
+						],
+						"properties": {
+							"node": {
+								"type": "string",
+								"description": "Full name of the running node to attach to, as given to -sname/-name (e.g. myapp@localhost). The node must run on this machine, with the debugger and inets OTP applications available.",
+								"pattern": "^[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+$"
+							},
+							"cookie": {
+								"type": "string",
+								"description": "Cookie of the node. Leave out to use ~/.erlang.cookie. Visible in the process list while attached."
+							},
+							"cwd": {
+								"type": "string",
+								"description": "Path of project: its .erl files are interpreted in the node",
+								"default": "${workspaceFolder}"
+							},
+							"erlpath": {
+								"type": "string",
+								"description": "Path to the erl executable used to start the helper node",
+								"default": "erl"
+							}
+						}
 					}
 				},
 				"initialConfigurations": [
@@ -82,7 +109,70 @@
 						"request": "launch",
 						"cwd": "${workspaceRoot}"
 					}
-				]
+				],
+				"configurationSnippets": [
+					{
+						"label": "Erlang: Launch",
+						"description": "Start erl on the project, with breakpoints in every project module",
+						"body": {
+							"name": "Launch erlang",
+							"type": "erlang",
+							"request": "launch",
+							"cwd": "^\"\\${workspaceFolder}\"",
+							"arguments": "-s ${1:myapp}"
+						}
+					},
+					{
+						"label": "Erlang: Attach to a running node",
+						"description": "Debug a node already running on this machine; disconnecting leaves it running",
+						"body": {
+							"name": "Attach to ${1:myapp}",
+							"type": "erlang",
+							"request": "attach",
+							"node": "${1:myapp}@${2:localhost}",
+							"cwd": "^\"\\${workspaceFolder}\""
+						}
+					},
+					{
+						"label": "Erlang: Launch with the configured erl",
+						"description": "Use the erl found in erlang.erlangPath (or on the PATH)",
+						"body": {
+							"name": "Launch erlang",
+							"type": "erlang",
+							"request": "launch",
+							"cwd": "^\"\\${workspaceFolder}\"",
+							"erlpath": "^\"\\${command:erlpath}\""
+						}
+					}
+				],
+				"variables": {
+					"erlpath": "erlang.getErlPath"
+				}
+			}
+		],
+		"taskDefinitions": [
+			{
+				"type": "rebar3",
+				"required": [
+					"command"
+				],
+				"properties": {
+					"command": {
+						"type": "string",
+						"description": "rebar3 command (compile, eunit, ct, dialyzer, release, shell, clean, ...)"
+					},
+					"args": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						},
+						"description": "Extra arguments appended after the command"
+					},
+					"profile": {
+						"type": "string",
+						"description": "Run the command with this profile (rebar3 as <profile> <command>)"
+					}
+				}
 			}
 		],
 		"languages": [
@@ -160,6 +250,94 @@
 			{
 				"command": "extension.dialyzer",
 				"title": "Erlang: rebar dialyzer"
+			},
+			{
+				"command": "erlang.checkInstallation",
+				"title": "Erlang: Check Erlang/OTP and rebar3 installation"
+			},
+			{
+				"command": "erlang.showLanguageServerOutput",
+				"title": "Erlang: Show Language Server Output"
+			},
+			{
+				"command": "erlang.restartLanguageServer",
+				"title": "Erlang: Restart Language Server"
+			},
+			{
+				"command": "erlang.getErlPath",
+				"title": "Erlang: Path of erl"
+			}
+		],
+		"walkthroughs": [
+			{
+				"id": "erlang.gettingStarted",
+				"title": "Get started with Erlang",
+				"description": "Set up Erlang/OTP and rebar3, then build, test and debug your first project.",
+				"steps": [
+					{
+						"id": "findErl",
+						"title": "Find Erlang/OTP",
+						"description": "The language server and the debugger run on your Erlang/OTP installation.\n[Check installation](command:erlang.checkInstallation)\nWhen erl is not on the PATH (kerl, asdf, custom build), point the extension to it: [Set erlang.erlangPath](command:workbench.action.openSettings?%5B%22erlang.erlangPath%22%5D)",
+						"media": {
+							"markdown": "walkthrough/install-erlang.md"
+						},
+						"completionEvents": [
+							"onCommand:erlang.checkInstallation",
+							"onSettingChanged:erlang.erlangPath"
+						]
+					},
+					{
+						"id": "pickRebar3",
+						"title": "Pick rebar3",
+						"description": "The extension looks for rebar3 in erlang.rebarPath, then in the project folder, then on the PATH, and falls back to the rebar3 bundled with the extension.\n[Set erlang.rebarPath](command:workbench.action.openSettings?%5B%22erlang.rebarPath%22%5D)",
+						"media": {
+							"image": "images/vscode-erlang-rebarpath-settings.png",
+							"altText": "The erlang.rebarPath setting in the Settings editor"
+						},
+						"completionEvents": [
+							"onSettingChanged:erlang.rebarPath",
+							"onCommand:erlang.checkInstallation"
+						]
+					},
+					{
+						"id": "build",
+						"title": "Build the project",
+						"description": "Compile with rebar3; errors and warnings land in the Problems panel. rebar3 compile, eunit, ct, dialyzer, release and shell are also available as tasks (Terminal > Run Task > rebar3).\n[Build with rebar3](command:extension.rebarBuild)",
+						"media": {
+							"image": "images/vscode-erlang-build.png",
+							"altText": "rebar3 compile output with errors listed in the Problems panel"
+						},
+						"completionEvents": [
+							"onCommand:extension.rebarBuild",
+							"onCommand:workbench.action.tasks.build"
+						]
+					},
+					{
+						"id": "test",
+						"title": "Run the tests",
+						"description": "EUnit and Common Test tests show up in the Testing view: run, debug or run them with coverage.\n[Open the Testing view](command:workbench.view.testing.focus)",
+						"media": {
+							"image": "images/vscode-erlang-test-explorer.png",
+							"altText": "EUnit and Common Test tests in the Testing view"
+						},
+						"completionEvents": [
+							"onView:workbench.view.testing"
+						]
+					},
+					{
+						"id": "debug",
+						"title": "Debug",
+						"description": "Set a breakpoint and launch the project under the debugger, or attach to a node that is already running.\n[Create a launch configuration](command:workbench.action.debug.configure)",
+						"media": {
+							"image": "images/vscode-erlang-debug.png",
+							"altText": "Debugger stopped at a breakpoint in an Erlang module"
+						},
+						"completionEvents": [
+							"onCommand:workbench.action.debug.configure",
+							"onCommand:workbench.action.debug.start"
+						]
+					}
+				]
 			}
 		],
 		"keybindings": [
@@ -177,6 +355,12 @@
 			}
 		],
 		"menus": {
+			"commandPalette": [
+				{
+					"command": "erlang.getErlPath",
+					"when": "false"
+				}
+			],
 			"explorer/context": [
 				{
 					"when": "resourceLangId == erlang",
@@ -329,8 +513,56 @@
 					"severity": 4,
 					"message": 5
 				}
+			},
+			{
+				"name": "rebar3",
+				"owner": "erlang",
+				"source": "rebar3",
+				"fileLocation": [
+					"autoDetect",
+					"${workspaceFolder}"
+				],
+				"pattern": {
+					"regexp": "^((?:[A-Za-z]:)?[^:\\s][^:]*\\.(?:erl|hrl|escript|app\\.src|config)):(\\d+):(?:(\\d+):)?\\s+((Warning): )?(.*)$",
+					"file": 1,
+					"line": 2,
+					"column": 3,
+					"severity": 5,
+					"message": 6
+				}
+			},
+			{
+				"name": "rebar3-dialyzer",
+				"owner": "erlang",
+				"source": "dialyzer",
+				"severity": "warning",
+				"fileLocation": [
+					"autoDetect",
+					"${workspaceFolder}"
+				],
+				"pattern": [
+					{
+						"regexp": "^(\\S.*\\.[eh]rl)\\s*$",
+						"file": 1
+					},
+					{
+						"regexp": "^\\s*Line (\\d+)(?: Column (\\d+))?: (.*)$",
+						"line": 1,
+						"column": 2,
+						"message": 3,
+						"loop": true
+					}
+				]
 			}
-		]
+		],
+		"configurationDefaults": {
+			"[erlang]": {
+				"editor.tabSize": 4,
+				"editor.insertSpaces": true,
+				"editor.formatOnSave": false,
+				"editor.semanticHighlighting.enabled": true
+			}
+		}
 	},
 	"repository": {
 		"type": "git",

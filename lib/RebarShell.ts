@@ -64,7 +64,7 @@ export default class RebarShell extends GenericShell {
      *
      * @returns Full path to rebar executable
      */
-    private async getRebarFullPath(): Promise<string> {
+    public async getRebarFullPath(): Promise<string> {
         const rebarSearchPaths = this.rebarSearchPaths.slice();
         const onSearchPaths = this.findBestFile(rebarSearchPaths, ['rebar3', 'rebar'], '');
         if (onSearchPaths !== '') {

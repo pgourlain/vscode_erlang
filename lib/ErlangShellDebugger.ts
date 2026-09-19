@@ -18,6 +18,30 @@ export interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArgum
     erlangPath : string; // path of erlang if specified in configuration
 }
 
+/** `attach` request: debug a node that is already running on this machine. */
+export interface AttachRequestArguments extends DebugProtocol.AttachRequestArguments {
+    node: string;       // e.g. myapp@localhost or myapp@127.0.0.1
+    cookie?: string;    // default: the helper node uses ~/.erlang.cookie
+    cwd: string;
+    erlpath: string;
+    verbose: boolean;
+    erlangPath : string;
+}
+
+// Values end up on a shell command line (GenericShell spawns with shell:true).
+const NODE_NAME = /^[A-Za-z0-9_\-.]+@[A-Za-z0-9_\-.]+$/;
+const COOKIE = /^[A-Za-z0-9_\-.@]+$/;
+
+export function validateAttachArguments(args: AttachRequestArguments): string | undefined {
+    if (!args.node || !NODE_NAME.test(args.node)) {
+        return `"node" must be a full node name such as myapp@localhost, got '${args.node ?? ''}'`;
+    }
+    if (args.cookie && !COOKIE.test(args.cookie)) {
+        return '"cookie" may only contain letters, digits and _-.@ - for other cookies, leave "cookie" out and use ~/.erlang.cookie';
+    }
+    return undefined;
+}
+
 export class FunctionBreakpoint implements DebugProtocol.Breakpoint {
     id: any;
     verified: boolean;
@@ -76,6 +100,39 @@ export class ErlangShellForDebugging extends GenericShell {
         this.started = true;
         var result = this.LaunchProcess(erlPath, startDir, processArgs, !launchArguments.verbose);
         return result;
+    }
+
+    /**
+     * Start a hidden helper node that attaches to `args.node` (see
+     * vscode_connection:attach/0): it loads the debugger bridge into that
+     * node, interprets the project modules there and sets the breakpoints.
+     */
+    public Attach(erlPath: string, startDir: string, listen_port: number, bridgePath: string, args: AttachRequestArguments): Promise<boolean> {
+        const randomSuffix = Math.floor(Math.random() * 10000000).toString();
+        this.argsPrecompiledFileName = this.formatPath(path.join(os.tmpdir(), 'bp_' + randomSuffix + ".erl"));
+        this.writeCompiledArgsFile(startDir, args.verbose);
+        const helperName = "vscode_dbg_" + listen_port.toString();
+        const longNames = args.node.split('@')[1].includes('.');
+        const processArgs = ["-noshell", "-hidden",
+            longNames ? "-name" : "-sname", longNames ? helperName + "@127.0.0.1" : helperName];
+        if (args.cookie) {
+            processArgs.push("-setcookie", args.cookie);
+        }
+        processArgs.push(
+            // loopback-only distribution listener, as for the LSP node
+            "-kernel", "inet_dist_use_interface", '"{127,0,0,1}"',
+            "-pa", `"${bridgePath}"`,
+            "-vscode_port", listen_port.toString(),
+            "-vscode_attach_node", args.node,
+            "-compiled_args_file", `"${this.argsPrecompiledFileName}"`,
+            "-s", "vscode_connection", "attach");
+        this.started = true;
+        return this.LaunchProcess(erlPath, startDir, processArgs, !args.verbose);
+    }
+
+    /** The helper node halts when its stdin closes; the attached node keeps running. */
+    public EndAttach() {
+        this.childProcess?.stdin?.end();
     }
 
     public CleanupAfterStart() {
@@ -154,40 +211,8 @@ export class ErlangShellForDebugging extends GenericShell {
         if (this.breakPoints) {
             var argsFileContents = "";
             if (!noDebug) {
-                let argsModuleName = path.basename(this.argsPrecompiledFileName, ".erl");
-                let argsCompiledContents = `-module(${argsModuleName}).\r\n-export([configure/0]).\r\n\r\n`;
-                argsCompiledContents += "configure() -> \r\n int:start()\r\n";
-
-                argsFileContents += "-eval 'int:start()";
-                var modulesWithoutBp: { [sourcePath: string]: boolean} = {};
-                this.findErlFiles(startDir).forEach(fileName => {
-                    modulesWithoutBp[fileName] = true;
-                });
-
-                //first interpret source
-                var bps = this.uniqueBy(this.breakPoints, bp => bp.source.path).filter(this.excludeUnwantedFiles);
-                bps.forEach(bp => {
-                    argsCompiledContents += ",int:ni(\"" + this.formatPath(bp.source.path) + "\")\r\n";
-                    delete modulesWithoutBp[bp.source.path];
-                });
-                for (var fileName in modulesWithoutBp) {
-                    argsCompiledContents += ",int:ni(\"" + this.formatPath(fileName) + "\")\r\n";
-                }
-                //then set break
-                this.breakPoints.filter(this.excludeUnwantedFiles).forEach(bp => {
-                    var moduleName = path.basename(bp.source.name, ".erl");
-                    argsCompiledContents += `,int:break(${moduleName}, ${bp.line})\r\n`;
-                });
-                this.functionBreakPoints.forEach(bp => {
-                    argsCompiledContents += `,vscode_connection:set_breakpoint(${bp.moduleName}, {function, ${bp.functionName}, ${bp.arity}})\r\n`;
-                });
-                argsFileContents += "'";
-                argsCompiledContents += ",ok.";
-                
-                if (verbose) {
-                    this.debug(`erl file '${this.argsPrecompiledFileName}' was generated with content : -->\n${argsCompiledContents}\n<--`);
-                }
-                fs.writeFileSync(this.argsPrecompiledFileName, argsCompiledContents);
+                argsFileContents += "-eval 'int:start()'";
+                this.writeCompiledArgsFile(startDir, verbose);
             }
             if (addEbinsToCodepath) {
                 this.findEbinDirs(path.join(startDir, "_build")).forEach(ebin => {
@@ -200,6 +225,45 @@ export class ErlangShellForDebugging extends GenericShell {
             result.push("\"" + this.argsFileName + "\"");
         }
         return result;
+    }
+
+    /**
+     * Write the module whose configure/0 interprets every project source and
+     * sets the initial breakpoints (compiled and run by vscode_connection).
+     */
+    private writeCompiledArgsFile(startDir: string, verbose: boolean): void {
+        let argsModuleName = path.basename(this.argsPrecompiledFileName, ".erl");
+        let argsCompiledContents = `-module(${argsModuleName}).\r\n-export([configure/0]).\r\n\r\n`;
+        argsCompiledContents += "configure() -> \r\n int:start()\r\n";
+
+        var modulesWithoutBp: { [sourcePath: string]: boolean} = {};
+        this.findErlFiles(startDir).forEach(fileName => {
+            modulesWithoutBp[fileName] = true;
+        });
+
+        //first interpret source
+        var bps = this.uniqueBy(this.breakPoints, bp => bp.source.path).filter(this.excludeUnwantedFiles);
+        bps.forEach(bp => {
+            argsCompiledContents += ",int:ni(\"" + this.formatPath(bp.source.path) + "\")\r\n";
+            delete modulesWithoutBp[bp.source.path];
+        });
+        for (var fileName in modulesWithoutBp) {
+            argsCompiledContents += ",int:ni(\"" + this.formatPath(fileName) + "\")\r\n";
+        }
+        //then set break
+        this.breakPoints.filter(this.excludeUnwantedFiles).forEach(bp => {
+            var moduleName = path.basename(bp.source.name, ".erl");
+            argsCompiledContents += `,int:break(${moduleName}, ${bp.line})\r\n`;
+        });
+        this.functionBreakPoints.forEach(bp => {
+            argsCompiledContents += `,vscode_connection:set_breakpoint(${bp.moduleName}, {function, ${bp.functionName}, ${bp.arity}})\r\n`;
+        });
+        argsCompiledContents += ",ok.";
+
+        if (verbose) {
+            this.debug(`erl file '${this.argsPrecompiledFileName}' was generated with content : -->\n${argsCompiledContents}\n<--`);
+        }
+        fs.writeFileSync(this.argsPrecompiledFileName, argsCompiledContents);
     }
 
     // old 

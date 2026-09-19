@@ -197,7 +197,15 @@ golden_initialize_result() ->
         workspace => #{
             workspaceFolders => #{supported => true, changeNotifications => true}
         }
-    }}.
+    },
+    serverInfo => #{name => <<"vscode_erlang">>, version => expected_otp_version()}}. %% task 7.3
+
+expected_otp_version() ->
+    Release = erlang:system_info(otp_release),
+    case file:read_file(filename:join([code:root_dir(), "releases", Release, "OTP_VERSION"])) of
+        {ok, Bin} -> string:trim(Bin);
+        {error, _} -> list_to_binary(Release)
+    end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% peer node / TCP helpers %%

@@ -38,6 +38,14 @@
 * Run, Debug (breakpoints in tests) and Run with Coverage profiles
 * Per-test results with failure message and location
 
+### Tooling & debugger
+* rebar3 task provider: `compile`, `eunit`, `ct`, `dialyzer`, `shell`, `clean` and `release` (when `relx` is configured) for every folder with a `rebar.config`; `$rebar3` and `$rebar3-dialyzer` problem matchers
+* Status bar: language server state with the OTP version, and dialyzer PLT state (none / stale / ready); a failed language server start is now reported instead of silent
+* New commands: check Erlang/OTP and rebar3 installation, show language server output, restart language server
+* "Get started with Erlang" walkthrough
+* Debugger: attach to a running node (`"request": "attach"`); disconnecting leaves the node running. Launch configuration snippets and `${command:erlpath}` variable
+* Erlang editor defaults: 4-space indentation, semantic highlighting on, Erlang-aware word selection
+
 ### Under the hood
 * Incremental document sync, multi-root workspace folders support
 * Upgraded to vscode-languageclient 10 / LSP 3.18
