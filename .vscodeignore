@@ -20,3 +20,10 @@ tsconfig.json
 webpack.config.js
 .vscode-test/**
 
+scripts/**
+.claude/**
+CLAUDE.md
+tasks.md
+.github/**
+grammar/.vscode/**
+grammar/.github/**

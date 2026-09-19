@@ -12,3 +12,4 @@ apps/erlangbridge/src/vscode_erlfmt_parse.erl
 dist
 .vscode-test
 
+scripts/screenshots/workspace/rebar.lock

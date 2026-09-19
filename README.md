@@ -29,6 +29,70 @@ InlayHints in function calls
 ![inlayHints](images/vscode-erlang-inlayhints.png)
 - showing parameter name when it doesn't match with caller var name
 
+### Semantic highlighting
+
+Modules, functions, macros, variables, parameters, types, records and record fields are colored from the real syntax tree, on top of the TextMate grammar. OTP modules are flagged as `defaultLibrary` and functions listed in `-deprecated` as `deprecated`.
+
+- disable with `erlang.semanticTokensEnabled`
+
+![semanticTokens](images/vscode-erlang-semantic-tokens.png)
+
+### Quick fixes and refactorings
+
+Press `Ctrl+.` / `Cmd+.` on a diagnostic or on a selection:
+
+- Quick fixes driven by compiler warnings/errors:
+  - Prefix unused variable with `_`
+  - Export an unused function
+  - Create a stub for an undefined function
+  - Add a missing field to a record definition
+  - Remove include of a missing file
+  - Add missing `-module(...)`
+- Export / unexport a function, generate `-spec` from the function clauses
+- Implement missing callbacks for a `-behaviour(...)`
+- Refactorings: extract function from selection, inline variable, convert `if` ↔ `case`
+- Source actions: sort the `-export` list
+
+![codeActions](images/vscode-erlang-codeactions.png)
+
+![behaviourCallbacks](images/vscode-erlang-implement-callbacks.png)
+
+### Navigation
+
+- Go to Symbol in Workspace (`Ctrl+T` / `Cmd+T`): functions, records, types, macros across the project
+- Go to Declaration, Go to Type Definition (from a `-spec`/type usage to its `-type`/`-opaque`)
+- Go to Implementations: from a `-callback` to every module implementing the behaviour
+- Call Hierarchy (incoming/outgoing calls) and Type Hierarchy (behaviour ↔ implementors)
+- Highlight all occurrences of the variable/function/record under the cursor
+- Clickable `-include` / `-include_lib` paths and URLs in comments
+
+![workspaceSymbol](images/vscode-erlang-workspace-symbol.png)
+
+![callHierarchy](images/vscode-erlang-call-hierarchy.png)
+
+### Formatting and folding
+
+- Format document, format selection and format on type (`.`, `;`, `,`, newline), powered by erlfmt
+  - disable with `erlang.formatterEnabled`, line length with `erlang.formattingLineLength`
+- Folding of functions, clauses, `case`/`receive`/`try`, `-export` lists, comment blocks and `%% region` / `%% endregion` markers
+- Expand/shrink selection (`Shift+Alt+→` / `Shift+Alt+←`)
+- Completion with snippets for function arguments, `?` for macros, `-` for attributes
+
+![folding](images/vscode-erlang-folding.png)
+
+## Testing
+
+EUnit and Common Test tests are discovered by the language server and shown in the VS Code **Testing** sidebar:
+
+- EUnit: `*_test/0`, `*_test_/0` functions (including inside `-ifdef(TEST)`)
+- Common Test: `*_SUITE.erl` modules and their test cases
+- Run, Debug (breakpoints in tests) and Run with Coverage profiles
+- Per-test results with failure message and location, line coverage in the Test Coverage view
+
+![testExplorer](images/vscode-erlang-test-explorer.png)
+
+![testCoverage](images/vscode-erlang-test-coverage.png)
+
 ## Build
 
 ![build](images/vscode-erlang-build.png)
@@ -97,7 +161,12 @@ Support for Erlang tools, including rebar3, EUnit and Dialyzer
 - `erlang.codeLensEnabled` - Enable/Disable CodeLens
 - `erlang.cacheManagement` - Specify where and how to store large cache tables
 - `erlang.inlayHintsEnabled` - Enable/Disable InlayHints
+- `erlang.semanticTokensEnabled` - Enable/Disable semantic highlighting
+- `erlang.formatterEnabled` - Enable/Disable the formatter (document, selection and on-type)
+- `erlang.formattingLineLength` - Maximum line length for formatting
 - `erlang.verbose` - Activate technical traces for use in the extension development
+- `erlang.verboseExcludeFilter` - LSP methods excluded from technical traces
+- `erlang.debuggerRunMode` - How the debug adapter is run (`external`, `server`, `inline`)
 
 ## Help
 

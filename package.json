@@ -344,7 +344,8 @@
 		"pretest": "npm run compile",
 		"test": "vscode-test",
 		"deploy": "vsce publish --no-yarn",
-		"compile": "tsc -p ./"
+		"compile": "tsc -p ./",
+		"screenshots": "node scripts/screenshots/take-screenshots.mjs"
 	},
 	"dependencies": {
 		"@vscode/debugadapter": "^1.68.0",
@@ -370,6 +371,7 @@
 		"glob": "^7.1.4",
 		"gulp": "^5.0.0",
 		"mocha": "^10.8.2",
+		"playwright": "^1.63.0",
 		"source-map-support": "^0.5.12",
 		"ts-loader": "^8.1.0",
 		"typescript": "^5.9.3",
