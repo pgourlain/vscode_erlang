@@ -1,8 +1,13 @@
 # Change log
 
-## Version 1.1.6 (September 20, 2026)
+## Version 1.2.0 (September 20, 2026)
 
 **Requires VS Code 1.136 or later.**
+
+### A note on how this release was made
+A large part of this release was developed with the help of an AI coding assistant ([Claude Code](https://claude.com/claude-code) by Anthropic). The assistant wrote code and tests under my direction. Every change was reviewed and tested by me before release, and the Common Test suites guard each LSP feature. If you find a bug, please [open an issue](https://github.com/pgourlain/vscode_erlang/issues).
+
+As a developer, I now consider AI assistance close to indispensable, and using it is a normal part of how this project is built. Contributions made with AI help are welcome too, as long as their authors understand and stand behind the changes they submit.
 
 ### Code actions & refactorings
 * Quick fixes for compiler warnings/errors: prefix unused variable with `_`, export unused function, create stub for undefined function, add missing record field, remove include of missing file, add missing `-module`
@@ -39,6 +44,9 @@
 * Per-test results with failure message and location
 
 ### Tooling & debugger
+
+This release also improves everyday tooling. rebar3 targets now run as regular VS Code tasks. The status bar shows whether the language server and the Dialyzer PLT are ready. A walkthrough guides first-time setup. The debugger can attach to a node that is already running.
+
 * rebar3 task provider: `compile`, `eunit`, `ct`, `dialyzer`, `shell`, `clean` and `release` (when `relx` is configured) for every folder with a `rebar.config`; `$rebar3` and `$rebar3-dialyzer` problem matchers
 * Status bar: language server state with the OTP version, and dialyzer PLT state (none / stale / ready); a failed language server start is now reported instead of silent
 * New commands: check Erlang/OTP and rebar3 installation, show language server output, restart language server
