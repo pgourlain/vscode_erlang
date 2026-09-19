@@ -87,7 +87,7 @@ EUnit and Common Test tests are discovered by the language server and shown in t
 - EUnit: `*_test/0`, `*_test_/0` functions (including inside `-ifdef(TEST)`)
 - Common Test: `*_SUITE.erl` modules and their test cases
 - Run, Debug (breakpoints in tests) and Run with Coverage profiles
-- Per-test results with failure message and location, line coverage in the Test Coverage view
+- Per-test results with failure message and location, line coverage of the code under test shown in the editor gutter
 
 ![testExplorer](images/vscode-erlang-test-explorer.png)
 

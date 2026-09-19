@@ -1,5 +1,51 @@
 # Change log
 
+## Version 1.1.6 (September 20, 2026)
+
+**Requires VS Code 1.136 or later.**
+
+### Code actions & refactorings
+* Quick fixes for compiler warnings/errors: prefix unused variable with `_`, export unused function, create stub for undefined function, add missing record field, remove include of missing file, add missing `-module`
+* Export / unexport a function, generate `-spec` from function clauses
+* Implement missing callbacks for a `-behaviour(...)`
+* Refactorings: extract function, inline variable, convert `if` ↔ `case`
+* Source action: sort the `-export` list
+
+### Semantic highlighting
+* Modules, functions, macros, variables, parameters, types, records and record fields colored from the syntax tree (full, range and delta)
+* OTP modules flagged as `defaultLibrary`, functions listed in `-deprecated` flagged as `deprecated`
+* New setting `erlang.semanticTokensEnabled` (default `true`)
+
+### Navigation
+* Go to Symbol in Workspace (functions, records, types, macros)
+* Go to Declaration, Go to Type Definition, Go to Implementations (`-callback` → implementing modules)
+* Call Hierarchy (incoming/outgoing calls) and Type Hierarchy (behaviour ↔ implementors)
+* Highlight all occurrences of the symbol under the cursor
+* Clickable `-include` / `-include_lib` paths and URLs in comments
+
+### Editing
+* Format selection and format on type (`.`, `;`, `,`, newline); formatting result now uses the real document range
+* New setting `erlang.formatterEnabled` (default `true`)
+* Folding ranges: functions, clauses, `case`/`receive`/`try`, `-export` lists, comment blocks, `%% region` / `%% endregion`
+* Expand/shrink selection
+* Faster completion (documentation resolved lazily), argument snippets, `?` and `-` trigger characters
+* Inlay hints: tooltips and padding
+* CodeLens computed lazily; an exported and referenced function now shows a single "exported, N references" lens
+* Pull diagnostics, including project-wide diagnostics for files that are not open
+
+### Test Explorer
+* EUnit and Common Test tests discovered by the language server and shown in the Testing sidebar
+* Run, Debug (breakpoints in tests) and Run with Coverage profiles
+* Per-test results with failure message and location
+
+### Under the hood
+* Incremental document sync, multi-root workspace folders support
+* Upgraded to vscode-languageclient 10 / LSP 3.18
+* Extension declared as not supported in untrusted and virtual workspaces
+* Logging moved from `error_logger` to `logger`
+* Common Test suites covering every LSP feature, CI matrix on several OTP versions
+
+---
 
 ## Version 1.1.5 (September 6, 2026)
 
