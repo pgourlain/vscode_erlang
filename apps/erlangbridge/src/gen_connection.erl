@@ -2,7 +2,7 @@
 
 -export([behaviour_info/1]).
 
--export([send_message_to_vscode/3, start/1]).
+-export([send_message_to_vscode/3, start/1, stop/1]).
 
 behaviour_info(callbacks) ->
     [{get_port, 0}, {decode_request, 1}, {init, 1}];
@@ -23,6 +23,17 @@ start(Module, Port) ->
     % send that debugger is ready
     start_command_server(VsCodePort, Module),
     ok.
+
+%% Stop the command server started by start/1 for Module. Connections being
+%% served are left to finish.
+stop(Module) ->
+    case whereis(command_server_name(Module)) of
+        undefined -> ok;
+        Pid -> exit(Pid, kill), ok
+    end.
+
+command_server_name(Module) ->
+    list_to_atom(atom_to_list(Module) ++ "_command_server").
 
 to_integer(Port) when is_atom(Port) ->
     erlang:list_to_integer(erlang:atom_to_list(Port));
@@ -45,6 +56,7 @@ send_message_to_vscode(Port, Verb, Data) ->
 
 start_command_server(VsCodePort, Module) ->
     spawn(fun () ->
+		  register(command_server_name(Module), self()),
 		  {ok, Sock} = gen_tcp:listen(0, ?TCP_OPTIONS),
 		  % get assigned port
 		  {ok, Port} = inet:port(Sock),
@@ -70,9 +82,9 @@ loop_handle_command(Socket, Module) ->
 	  gen_tcp:close(Socket),
 	  loop_handle_command(Socket, Module);
       {tcp_closed, Socket} ->
-      error_logger:info_msg("Socket ~p closed~n", [Socket]);
+      lsp_log:info(<<"LSP">>, "Socket ~p closed~n", [Socket]);
       {tcp_error, Socket, Reason} ->
-      error_logger:error_msg("Error on socket ~p reason: ~p~n",
+      lsp_log:error(<<"LSP">>, "Error on socket ~p reason: ~p~n",
 		    [Socket, Reason])
     end.
 

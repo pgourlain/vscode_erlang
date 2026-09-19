@@ -1,6 +1,6 @@
 -module(lsp_inlayhints).
 
--export([inlayhint_analyze/3, generate_inlayhints/3]).
+-export([inlayhint_analyze/3, generate_inlayhints/3, extract_function_args/1]).
 
 -include("lsp_log.hrl").
 

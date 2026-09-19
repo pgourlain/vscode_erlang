@@ -33,6 +33,37 @@ then
 - vsce package : 'vscode:prepublish' is executed
 
 
+## Deployment
+
+Publish new version to **both** marketplaces (VS Code Marketplace + Open VSX), else Open VSX users stay stuck on old version.
+
+Prereqs (one-time):
+
+```bash
+npm install -g vsce ovsx
+```
+
+Steps:
+
+1. Bump `version` in [package.json](package.json), commit, tag.
+2. Build package:
+   ```bash
+   ./rebar3 compile
+   vsce package
+   ```
+3. Publish to VS Code Marketplace (needs Azure DevOps PAT):
+   ```bash
+   vsce publish
+   ```
+4. Publish to Open VSX (needs token from open-vsx.org, linked via GitHub):
+   ```bash
+   ovsx publish -p <open-vsx-token>
+   ```
+   or, from already-built vsix:
+   ```bash
+   ovsx publish erlang-<version>.vsix -p <open-vsx-token>
+   ```
+
 ## Language syntax file
 
 See [syntaxes/README.md](syntaxes/README.md).

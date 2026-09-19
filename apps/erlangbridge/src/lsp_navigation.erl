@@ -1,9 +1,14 @@
 -module(lsp_navigation).
 
 -export([definition/3, hover_info/3, function_description/2, function_description/3, references/3, function_clauses/3]).
--export([codelens_info/1, symbol_info/1, record_fields/2, find_function_with_line/2, fold_references/4]).
+-export([codelens_positions/1, codelens_ref_count/3, symbol_info/1, record_fields/2, find_function_with_line/2, fold_references/4]).
 -export([inlayhints_info/3, full_inlayhints_info/3, functions/2]).
 -export([inlinevalues_info/2, local_function_references/3]).
+-export([find_at/3, find_definition/3]).
+-export([type_definition/3, document_highlights/3, implementation/3]).
+-export([behaviour_implementors/1, module_behaviours/1]).
+-export([document_links/1]).
+-export([selection_range/3]).
 -import(lsp_syntax,[fold_in_syntax_tree/4, find_in_syntax_tree/2, fold_in_syntax_tree/3]).
 
 -include("lsp_log.hrl").
@@ -47,7 +52,250 @@ references(File, Line, Column) ->
             []
     end.
 
-codelens_info(File) ->
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% task 4.3: textDocument/typeDefinition                  %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% CHARACTERIZATION: find_at/3 can never see a click inside a -spec/-type/
+%% -opaque attribute's own payload - erl_syntax_lib:fold (which
+%% fold_in_syntax_tree, and so find_at, is built on) does not descend into
+%% it at all (same discovery as lsp_semantic_tokens.erl's user_type
+%% handling). find_type_ref_at/3 below is a separate, self-contained walk
+%% for exactly that payload, reusing the same "recurse into any tuple or
+%% list" trick task 3.1 already used to find user_type references.
+-spec type_definition(File::file:filename(), Line::pos_integer(), Column::pos_integer()) -> [lsp_location()].
+type_definition(File, Line, Column) ->
+    case find_type_ref_at(File, Line, Column) of
+        {local, TypeName} ->
+            find_type_definition(TypeName, [File | gen_lsp_doc_server:all_project_files()]);
+        {remote, Module, TypeName} ->
+            find_type_definition(TypeName, gen_lsp_doc_server:get_module_files(Module));
+        undefined ->
+            []
+    end.
+
+find_type_ref_at(File, Line, Column) ->
+    Tree = gen_lsp_doc_server:get_syntax_tree(File),
+    case is_list(Tree) of
+        true ->
+            Refs = lists:flatmap(fun
+                ({attribute, _, spec, Payload}) -> find_type_refs_in_term(Payload);
+                ({attribute, _, Tag, Payload}) when Tag =:= type; Tag =:= opaque -> find_type_refs_in_term(Payload);
+                (_) -> []
+            end, Tree),
+            match_type_ref(Refs, Line, Column);
+        false ->
+            undefined
+    end.
+
+find_type_refs_in_term({user_type, Pos, Name, Args}) ->
+    [{local, Pos, Name} | find_type_refs_in_term(Args)];
+find_type_refs_in_term({remote_type, _Pos, [{atom, _ModPos, Module}, {atom, NamePos, Name}, Args]}) ->
+    [{remote, NamePos, Module, Name} | find_type_refs_in_term(Args)];
+find_type_refs_in_term(Term) when is_tuple(Term) ->
+    lists:flatmap(fun find_type_refs_in_term/1, tuple_to_list(Term));
+find_type_refs_in_term(Term) when is_list(Term) ->
+    lists:flatmap(fun find_type_refs_in_term/1, Term);
+find_type_refs_in_term(_Term) ->
+    [].
+
+match_type_ref([{local, {L, C}, Name} | Rest], Line, Column) ->
+    case L =:= Line andalso column_in_atom(Name, C, Column) of
+        true -> {local, Name};
+        false -> match_type_ref(Rest, Line, Column)
+    end;
+match_type_ref([{remote, {L, C}, Module, Name} | Rest], Line, Column) ->
+    case L =:= Line andalso column_in_atom(Name, C, Column) of
+        true -> {remote, Module, Name};
+        false -> match_type_ref(Rest, Line, Column)
+    end;
+match_type_ref([], _Line, _Column) ->
+    undefined.
+
+find_type_definition(_TypeName, []) ->
+    [];
+find_type_definition(TypeName, [File | Rest]) ->
+    Tree = gen_lsp_doc_server:get_syntax_tree(File),
+    Matches = case is_list(Tree) of
+        true -> [Pos || {attribute, Pos, Tag, {Name, _, _}} <- Tree,
+                         (Tag =:= type orelse Tag =:= opaque), Name =:= TypeName];
+        false -> []
+    end,
+    case Matches of
+        [{Line, _} | _] -> [{File, Line, 1, 1}];
+        [] -> find_type_definition(TypeName, Rest)
+    end.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% task 4.4: textDocument/implementation                  %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% CHARACTERIZATION: both cases below are matched by *line*, not exact
+%% column (find_at/3 has no clause for `-behaviour(...)`/`-callback(...)`
+%% at all, and neither attribute's own payload carries a usable position
+%% for the specific atom - only the attribute keyword's), so this is
+%% offered anywhere on the -behaviour(...)/-callback(...) line, not just
+%% squarely on the module/callback name.
+-spec implementation(File::file:filename(), Line::pos_integer(), Column::pos_integer()) -> [lsp_location()].
+implementation(File, Line, _Column) ->
+    Tree = gen_lsp_doc_server:get_syntax_tree(File),
+    case is_list(Tree) of
+        true ->
+            case [Module || {attribute, {L, _}, behaviour, Module} <- Tree, L =:= Line] of
+                [BehaviourModule | _] ->
+                    [{ModuleFile, 1, 1, 1} || ModuleFile <- gen_lsp_doc_server:get_module_files(BehaviourModule)];
+                [] ->
+                    case [{Name, Arity} || {attribute, {L, _}, callback, {{Name, Arity}, _}} <- Tree, L =:= Line] of
+                        [{Name, Arity} | _] ->
+                            FileModule = list_to_atom(filename:rootname(filename:basename(File))),
+                            Implementors = behaviour_implementors(FileModule),
+                            lists:flatmap(fun (ImplModule) ->
+                                find_definition('$lsp_none$', '$lsp_none$',
+                                                {{reference, {function, ImplModule, Name, Arity}}, []})
+                            end, Implementors);
+                        [] ->
+                            []
+                    end
+            end;
+        false ->
+            []
+    end.
+
+%% @doc Every project module whose own -behaviour(...) matches
+%% BehaviourModule (task 4.4's forward direction, and 4.6's subtypes).
+-spec behaviour_implementors(module()) -> [module()].
+behaviour_implementors(BehaviourModule) ->
+    lists:usort(lists:flatmap(fun (File) ->
+        Tree = gen_lsp_doc_server:get_syntax_tree(File),
+        HasBehaviour = is_list(Tree) andalso
+            lists:any(fun ({attribute, _, behaviour, B}) -> B =:= BehaviourModule; (_) -> false end, Tree),
+        case HasBehaviour of
+            true -> [list_to_atom(filename:rootname(filename:basename(File)))];
+            false -> []
+        end
+    end, gen_lsp_doc_server:all_project_files())).
+
+%% @doc Every behaviour Module itself declares via -behaviour(...) (task
+%% 4.6's supertypes).
+-spec module_behaviours(module()) -> [module()].
+module_behaviours(Module) ->
+    lists:usort(lists:flatmap(fun (File) ->
+        Tree = gen_lsp_doc_server:get_syntax_tree(File),
+        case is_list(Tree) of
+            true -> [B || {attribute, _, behaviour, B} <- Tree];
+            false -> []
+        end
+    end, gen_lsp_doc_server:get_module_files(Module))).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% task 4.7: textDocument/documentHighlight                %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% Returns {Kind, Line, StartColumn, EndColumn} - Kind is DocumentHighlightKind
+%% (1 Text, 2 Read, 3 Write). Only variable, function and record are
+%% handled (macro/field have no project-wide reference support elsewhere
+%% in this codebase either - references/3 above has the exact same
+%% boundary). A record's own -record(...) declaration line is not
+%% highlighted (unlike its usage sites, its name has no directly-usable
+%% AST position - see lsp_semantic_tokens.erl's own note on the same
+%% keyword-vs-name ambiguity - and scanning for it here would be one more
+%% moving part for a single line the user is already looking at).
+-spec document_highlights(File::file:filename(), Line::pos_integer(), Column::pos_integer()) ->
+    [{1..3, pos_integer(), pos_integer(), pos_integer()}].
+document_highlights(File, Line, Column) ->
+    case find_at(File, Line, Column) of
+        {{variable, {Variable, VLine, VCol}}, _} ->
+            variable_highlights(File, Variable, VLine, VCol);
+        {{_, {function, Module, Function, Arity}}, _} ->
+            function_highlights(File, Module, Function, Arity);
+        {{_, {record, Record}}, _} ->
+            record_highlights(File, Record);
+        _ ->
+            []
+    end.
+
+variable_highlights(File, Variable, VLine, VCol) ->
+    Tree = gen_lsp_doc_server:get_syntax_tree(File),
+    Positions = variable_references(File, Variable, VLine, VCol),
+    Length = length(atom_to_list(Variable)),
+    WriteSet = case enclosing_clause_with_var(Tree, Variable, VLine, VCol) of
+        undefined -> sets:new();
+        Clause -> write_positions(Clause)
+    end,
+    [{highlight_kind(sets:is_element({L, C}, WriteSet)), L, C, C + Length} || {L, C} <- Positions].
+
+highlight_kind(true) -> 3;
+highlight_kind(false) -> 2.
+
+enclosing_clause_with_var(Tree, Variable, Line, Column) ->
+    case find_function_with_line(Tree, Line) of
+        {function, _, _, _, Clauses} -> find_clause_containing_var(Clauses, Variable, Line, Column);
+        _ -> undefined
+    end.
+
+find_clause_containing_var([], _Variable, _Line, _Column) ->
+    undefined;
+find_clause_containing_var([Clause | Rest], Variable, Line, Column) ->
+    Positions = erl_syntax_lib:fold(fun
+        ({var, Pos, V}, Acc) when V =:= Variable -> [Pos | Acc];
+        (_, Acc) -> Acc
+    end, [], Clause),
+    case lists:member({Line, Column}, Positions) of
+        true -> Clause;
+        false -> find_clause_containing_var(Rest, Variable, Line, Column)
+    end.
+
+%% Every variable bound by this clause's own head patterns (always a
+%% "write" - each clause is its own fresh binding site) or by a top-level
+%% `Var = ...` match in its body (deliberately shallow - a binding
+%% introduced by a nested case/if/receive clause is not tracked, matching
+%% lsp_codeaction.erl's own extract-function characterization).
+write_positions({clause, _, Patterns, _, Body}) ->
+    PatternPositions = lists:flatmap(fun (Node) ->
+        erl_syntax_lib:fold(fun ({var, Pos, _}, Acc) -> [Pos | Acc]; (_, Acc) -> Acc end, [], Node)
+    end, Patterns),
+    MatchPositions = [Pos || {match, _, {var, Pos, _}, _} <- Body],
+    sets:from_list(PatternPositions ++ MatchPositions).
+
+function_highlights(File, Module, Function, Arity) ->
+    FileModule = list_to_atom(filename:rootname(filename:basename(File))),
+    case FileModule =:= Module of
+        true ->
+            NameLen = length(atom_to_list(Function)),
+            DefPositions = fold_in_syntax_tree(fun
+                ({function, _, FName, FArity, Clauses}, CurrentFile, Acc)
+                        when CurrentFile =:= File, FName =:= Function, FArity =:= Arity ->
+                    [{L, C} || {clause, {L, C}, _, _, _} <- Clauses] ++ Acc;
+                (_, _, Acc) ->
+                    Acc
+            end, [], File),
+            [{1, L, C, C + NameLen} || {L, C} <- DefPositions] ++
+            [{1, L, C, E} || {_, L, C, E} <- local_function_references(File, Function, Arity)];
+        false ->
+            []
+    end.
+
+record_highlights(File, Record) ->
+    RecordLen = length(atom_to_list(Record)),
+    fold_in_syntax_tree(fun
+        ({record, {L, C}, R, _Fields}, CurrentFile, Acc) when CurrentFile =:= File, R =:= Record ->
+            [{1, L, C + 1, C + 1 + RecordLen} | Acc];
+        ({record, {L, C}, _Expr, R, _Fields}, CurrentFile, Acc) when CurrentFile =:= File, R =:= Record ->
+            [{1, L, C + 1, C + 1 + RecordLen} | Acc];
+        ({record_field, {L, C}, _Expr, R, _FieldAtom}, CurrentFile, Acc) when CurrentFile =:= File, R =:= Record ->
+            [{1, L, C + 1, C + 1 + RecordLen} | Acc];
+        (_, _, Acc) ->
+            Acc
+    end, [], File).
+
+%% @doc task 5.10: codeLens/list's own cheap half - every function's
+%% position and exported-ness, but deliberately no reference count (that
+%% needs local_function_references/3 plus the project-wide references
+%% cache for every single function in the file, eagerly, before the
+%% editor can show anything at all) - see codelens_ref_count/3, moved to
+%% codeLens/resolve, computed only for whichever lens is actually about to
+%% become visible.
+codelens_positions(File) ->
     {Functions, Exports} = fold_in_syntax_tree(fun
         ({function, {L, Start}, Function, Arity, _}, CurrentFile, {FunAcc, ExportAcc}) when CurrentFile =:= File ->
             {[{Function, Arity, L, Start} | FunAcc], ExportAcc};
@@ -59,12 +307,12 @@ codelens_info(File) ->
         (_SyntaxTree, _CurrentFile, Acc) ->
             Acc
     end, {[], #{}}, File),
+    [{Function, Arity, maps:is_key({Function, Arity}, Exports), L, Start} || {Function, Arity, L, Start} <- Functions].
+
+codelens_ref_count(File, Function, Arity) ->
     FileModule = list_to_atom(filename:rootname(filename:basename(File))),
-    lists:map(fun ({Function, Arity, L, Start}) ->
-        RefCount = length(local_function_references(File, Function, Arity)) +
-            length(gen_lsp_doc_server:get_references({function, FileModule, Function, Arity})),
-        {Function, RefCount, maps:is_key({Function, Arity}, Exports), L, Start}
-    end, Functions).
+    length(local_function_references(File, Function, Arity)) +
+        length(gen_lsp_doc_server:get_references({function, FileModule, Function, Arity})).
 
 %
 % return { Position, Label} => {{0,0}, "sample"}
@@ -449,6 +697,199 @@ column_in_atom(_Atom, Start, Column) when Column < Start->
     false;
 column_in_atom(Atom, Start, Column) ->
     Column =< Start + length(atom_to_list(Atom)).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% task 5.7: textDocument/documentLink                    %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% @doc Every -include/-include_lib whose target resolves to a real file
+%% (reusing the exact same resolve_include_file_paths/find_libdir this
+%% module already uses for go-to-definition on the same attributes),
+%% plus any http(s):// URL found in a comment. Returns
+%% {Line, StartColumn, EndColumn, Target} (1-based) - Target is
+%% {file, Path} for an include, {url, Url} for a comment link.
+%%
+%% CHARACTERIZATION: Target is deliberately tagged rather than left for
+%% the caller to tell apart by Erlang term type (a list vs. a binary, the
+%% way find_include/find_at do it) - resolve_include_file_paths/2 (and
+%% filename:join/2, which it uses) return a *binary* path whenever the
+%% workspace root itself was configured as a binary, which real clients
+%% (and, it turns out, common_test's own data_dir) sometimes do - an
+%% include target is then indistinguishable from a URL by type alone.
+-spec document_links(File :: file:filename()) ->
+    [{pos_integer(), pos_integer(), pos_integer(), {file, file:filename()} | {url, binary()}}].
+document_links(File) ->
+    Content = read_whole_file(File),
+    Lines = binary:split(Content, <<"\n">>, [global]),
+    IndexedLines = lists:zip(lists:seq(1, length(Lines)), Lines),
+    lists:flatmap(fun ({LineNum, LineContent}) ->
+        include_links(File, LineNum, LineContent) ++ comment_url_links(LineNum, LineContent)
+    end, IndexedLines).
+
+include_links(File, LineNum, LineContent) ->
+    case re:run(LineContent, <<"-(include|include_lib)\\(\"([^\"]+)\"\\)">>, [global]) of
+        {match, Matches} ->
+            lists:filtermap(fun ([_Whole, AttributePL, {FStart, FLen} = FilenamePL]) ->
+                IncludeFileName = binary:part(LineContent, FilenamePL),
+                Target = case binary:part(LineContent, AttributePL) of
+                    <<"include">> ->
+                        case resolve_include_file_paths(File, IncludeFileName) of
+                            [Found | _] -> Found;
+                            [] -> undefined
+                        end;
+                    <<"include_lib">> ->
+                        find_libdir(IncludeFileName)
+                end,
+                case Target of
+                    undefined -> false;
+                    _ -> {true, {LineNum, FStart + 1, FStart + FLen + 1, {file, Target}}}
+                end
+            end, Matches);
+        nomatch ->
+            []
+    end.
+
+%% Non-greedy up to the first `%` so a trailing end-of-line comment (code
+%% then " % see http://...") still counts, without needing a real lexer to
+%% know where the comment actually starts.
+comment_url_links(LineNum, LineContent) ->
+    case re:run(LineContent, <<"%.*?(https?://[^\\s\"'>]+)">>, [global, {capture, [1], index}]) of
+        {match, Matches} ->
+            [{LineNum, Start + 1, Start + Len + 1, {url, binary:part(LineContent, Start, Len)}}
+             || [{Start, Len}] <- Matches];
+        nomatch ->
+            []
+    end.
+
+read_whole_file(File) ->
+    case gen_lsp_doc_server:get_document_contents(File) of
+        undefined ->
+            {ok, Bin} = file:read_file(File),
+            Bin;
+        Bin ->
+            Bin
+    end.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% task 5.2: textDocument/selectionRange                  %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% @doc A chain of {StartLine, EndLine} (1-based, both inclusive),
+%% innermost first: the cursor's own enclosing top-level statement, then
+%% its clause, then its function (only when that differs from the clause -
+%% a single-clause function has nothing more to add there), then the
+%% whole document. Deliberately line-granular, not column-precise sub-
+%% expression nesting: getting a real column-accurate *end* position for
+%% an arbitrary erl_parse node requires either per-node-shape handling
+%% (there is no generic "end position" the AST carries) or a token scan -
+%% line-level chunks are still a genuinely useful expand-selection chain
+%% (whole statement, whole clause, whole function, whole file) with only
+%% one token scan, not one per nesting level.
+%%
+%% CHARACTERIZATION: a clause's or statement's own real last line is found
+%% via a token scan (scan_to_separator/3 below - the same depth-tracked
+%% "is this end/,/;/. mine, or a nested block's" idea lsp_folding.erl's
+%% clause_end_line/2 uses), not by walking the AST and taking the largest
+%% line any node happens to carry - the latter would miss a `case`/`if`/
+%% `receive`/`try`/`begin`/`fun` block whose own closing `end` sits alone
+%% on the line after the last real expression, a common Erlang formatting
+%% style.
+-spec selection_range(File :: file:filename(), Line :: pos_integer(), Column :: pos_integer()) ->
+    [{pos_integer(), pos_integer()}].
+selection_range(File, Line, _Column) ->
+    Tree = gen_lsp_doc_server:get_syntax_tree(File),
+    DocRange = {1, document_line_count(File)},
+    case is_list(Tree) andalso find_function_with_line(Tree, Line) of
+        {function, {FStart, _}, _Name, _Arity, Clauses} ->
+            Tokens = file_tokens(File),
+            ClauseEnds = [{CLine, CCol, clause_end_line(Tokens, {CLine, CCol})}
+                          || {clause, {CLine, CCol}, _, _, _} <- Clauses],
+            FEnd = lists:max([EL || {_, _, EL} <- ClauseEnds]),
+            case find_enclosing_clause(Clauses, Line) of
+                {clause, {CStart, CCol}, _, _, Body} ->
+                    {CStart, CCol, CEnd} = lists:keyfind(CStart, 1, ClauseEnds),
+                    StatementRange = case find_enclosing_statement(Tokens, Body, Line) of
+                        {SStart, SEnd} -> [{SStart, SEnd}];
+                        undefined -> []
+                    end,
+                    dedup_ranges(StatementRange ++ [{CStart, CEnd}, {FStart, FEnd}, DocRange]);
+                undefined ->
+                    dedup_ranges([{FStart, FEnd}, DocRange])
+            end;
+        _ ->
+            [DocRange]
+    end.
+
+find_enclosing_clause(Clauses, Line) ->
+    case [C || {clause, {CLine, _}, _, _, _} = C <- Clauses, CLine =< Line] of
+        [] -> undefined;
+        Candidates -> lists:last(Candidates)
+    end.
+
+find_enclosing_statement(Tokens, Body, Line) ->
+    case [S || S <- Body, node_start_line(S) =< Line] of
+        [] ->
+            undefined;
+        Candidates ->
+            Stmt = lists:last(Candidates),
+            StmtPos = {node_start_line(Stmt), node_start_col(Stmt)},
+            {node_start_line(Stmt), scan_to_separator(Tokens, StmtPos, [',', ';', dot])}
+    end.
+
+node_start_line(Node) -> element(1, element(2, Node)).
+node_start_col(Node) -> element(2, element(2, Node)).
+
+%% A clause's own last line is the line of the `;` before the next clause,
+%% or the form's own terminating `.` - never a `,` (those only separate
+%% statements *within* the clause's own body).
+clause_end_line(Tokens, StartPos) ->
+    scan_to_separator(Tokens, StartPos, [';', dot]).
+
+%% Scans forward from StartPos, depth-tracking every construct that closes
+%% with a bare `end` (if/case/receive/begin/try/fun - see
+%% lsp_codeaction:find_matching_end/2 for the original version of this
+%% idea), and returns the line of the first token in StopSeps seen at
+%% depth 0 - or the last token's own line, if the scan runs out first.
+scan_to_separator(Tokens, StartPos, StopSeps) ->
+    Relevant = lists:dropwhile(fun (T) -> token_pos(T) < StartPos end, Tokens),
+    {StartLine, _} = StartPos,
+    scan_to_sep(Relevant, 0, StartLine, StopSeps).
+
+scan_to_sep([{Kind, {L, _}} | Rest], Depth, _Last, Stops)
+        when Kind =:= 'if'; Kind =:= 'case'; Kind =:= 'receive'; Kind =:= 'begin'; Kind =:= 'try'; Kind =:= 'fun' ->
+    scan_to_sep(Rest, Depth + 1, L, Stops);
+scan_to_sep([{'end', {L, _}} | Rest], Depth, _Last, Stops) when Depth > 0 ->
+    scan_to_sep(Rest, Depth - 1, L, Stops);
+scan_to_sep([{Sep, {L, _}} | Rest], 0, _Last, Stops) ->
+    case lists:member(Sep, Stops) of
+        true -> L;
+        false -> scan_to_sep(Rest, 0, L, Stops)
+    end;
+scan_to_sep([Tok | Rest], Depth, _Last, Stops) ->
+    scan_to_sep(Rest, Depth, token_line(Tok), Stops);
+scan_to_sep([], _Depth, Last, _Stops) ->
+    Last.
+
+token_line({_Type, {L, _C}}) -> L;
+token_line({_Type, {L, _C}, _Value}) -> L.
+
+token_pos({_Type, Pos}) -> Pos;
+token_pos({_Type, Pos, _Value}) -> Pos.
+
+file_tokens(File) ->
+    {ok, Tokens, _} = erl_scan:string(binary_to_list(read_whole_file(File)), {1, 1}),
+    Tokens.
+
+dedup_ranges(Ranges) ->
+    dedup_ranges(Ranges, undefined).
+
+dedup_ranges([], _Prev) -> [];
+dedup_ranges([R | Rest], R) -> dedup_ranges(Rest, R);
+dedup_ranges([R | Rest], _Prev) -> [R | dedup_ranges(Rest, R)].
+
+document_line_count(File) ->
+    Content = read_whole_file(File),
+    length(binary:split(Content, <<"\n">>, [global])).
 
 resolve_include_file_paths(File, IncludeFileName) ->
     IncludePaths = lsp_parse:get_include_path(File),

@@ -1,0 +1,6 @@
+{application, demo, [
+    {description, "Demo project for README screenshots"},
+    {vsn, "0.1.0"},
+    {applications, [kernel, stdlib]},
+    {modules, []}
+]}.

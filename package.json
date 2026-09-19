@@ -1,11 +1,21 @@
 {
 	"name": "erlang",
 	"description": "Erlang language extension for Visual Studio Code",
-	"version": "1.1.5",
+	"version": "1.2.0",
 	"icon": "images/icon.png",
 	"publisher": "pgourlain",
 	"engines": {
-		"vscode": "^1.52.0"
+		"vscode": "^1.136.0"
+	},
+	"capabilities": {
+		"untrustedWorkspaces": {
+			"supported": false,
+			"description": "This extension spawns erl/rebar3 processes and runs their output, so it cannot be used safely in untrusted workspaces."
+		},
+		"virtualWorkspaces": {
+			"supported": false,
+			"description": "This extension needs a real filesystem to spawn erl/rebar3 against, so it does not support virtual workspaces."
+		}
 	},
 	"categories": [
 		"Programming Languages",
@@ -19,8 +29,10 @@
 		"onCommand:extension.rebarBuild",
 		"onCommand:extension.rebarGetDeps",
 		"onCommand:extension.rebarUpdateDeps",
+		"onCommand:extension.rebareunit",
 		"onCommand:extension.erleunit",
-		"onCommand:extension.dialyzer"
+		"onCommand:extension.dialyzer",
+		"workspaceContains:rebar.config"
 	],
 	"main": "./out/lib/extension.js",
 	"contributes": {
@@ -62,6 +74,32 @@
 								"default": true
 							}
 						}
+					},
+					"attach": {
+						"required": [
+							"node"
+						],
+						"properties": {
+							"node": {
+								"type": "string",
+								"description": "Full name of the running node to attach to, as given to -sname/-name (e.g. myapp@localhost). The node must run on this machine, with the debugger and inets OTP applications available.",
+								"pattern": "^[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+$"
+							},
+							"cookie": {
+								"type": "string",
+								"description": "Cookie of the node. Leave out to use ~/.erlang.cookie. Visible in the process list while attached."
+							},
+							"cwd": {
+								"type": "string",
+								"description": "Path of project: its .erl files are interpreted in the node",
+								"default": "${workspaceFolder}"
+							},
+							"erlpath": {
+								"type": "string",
+								"description": "Path to the erl executable used to start the helper node",
+								"default": "erl"
+							}
+						}
 					}
 				},
 				"initialConfigurations": [
@@ -71,7 +109,70 @@
 						"request": "launch",
 						"cwd": "${workspaceRoot}"
 					}
-				]
+				],
+				"configurationSnippets": [
+					{
+						"label": "Erlang: Launch",
+						"description": "Start erl on the project, with breakpoints in every project module",
+						"body": {
+							"name": "Launch erlang",
+							"type": "erlang",
+							"request": "launch",
+							"cwd": "^\"\\${workspaceFolder}\"",
+							"arguments": "-s ${1:myapp}"
+						}
+					},
+					{
+						"label": "Erlang: Attach to a running node",
+						"description": "Debug a node already running on this machine; disconnecting leaves it running",
+						"body": {
+							"name": "Attach to ${1:myapp}",
+							"type": "erlang",
+							"request": "attach",
+							"node": "${1:myapp}@${2:localhost}",
+							"cwd": "^\"\\${workspaceFolder}\""
+						}
+					},
+					{
+						"label": "Erlang: Launch with the configured erl",
+						"description": "Use the erl found in erlang.erlangPath (or on the PATH)",
+						"body": {
+							"name": "Launch erlang",
+							"type": "erlang",
+							"request": "launch",
+							"cwd": "^\"\\${workspaceFolder}\"",
+							"erlpath": "^\"\\${command:erlpath}\""
+						}
+					}
+				],
+				"variables": {
+					"erlpath": "erlang.getErlPath"
+				}
+			}
+		],
+		"taskDefinitions": [
+			{
+				"type": "rebar3",
+				"required": [
+					"command"
+				],
+				"properties": {
+					"command": {
+						"type": "string",
+						"description": "rebar3 command (compile, eunit, ct, dialyzer, release, shell, clean, ...)"
+					},
+					"args": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						},
+						"description": "Extra arguments appended after the command"
+					},
+					"profile": {
+						"type": "string",
+						"description": "Run the command with this profile (rebar3 as <profile> <command>)"
+					}
+				}
 			}
 		],
 		"languages": [
@@ -105,6 +206,26 @@
 				"path": "./grammar/Erlang.plist"
 			}
 		],
+		"semanticTokenScopes": [
+			{
+				"language": "erlang",
+				"scopes": {
+					"namespace": ["entity.name.type.class.module.erlang"],
+					"namespace.defaultLibrary": ["support.class.builtin", "entity.name.type.class.module.erlang"],
+					"function": ["entity.name.function.erlang"],
+					"function.definition": ["entity.name.function.definition.erlang"],
+					"function.deprecated": ["invalid.deprecated", "entity.name.function.erlang"],
+					"macro": ["entity.name.function.macro.erlang"],
+					"macro.definition": ["entity.name.function.macro.definition.erlang"],
+					"variable": ["variable.other.erlang"],
+					"parameter": ["variable.parameter.erlang"],
+					"type": ["entity.name.type.erlang"],
+					"struct": ["entity.name.type.class.record.erlang"],
+					"struct.definition": ["entity.name.type.class.record.definition.erlang"],
+					"property": ["variable.other.field.erlang"]
+				}
+			}
+		],
 		"commands": [
 			{
 				"command": "extension.rebarBuild",
@@ -129,6 +250,94 @@
 			{
 				"command": "extension.dialyzer",
 				"title": "Erlang: rebar dialyzer"
+			},
+			{
+				"command": "erlang.checkInstallation",
+				"title": "Erlang: Check Erlang/OTP and rebar3 installation"
+			},
+			{
+				"command": "erlang.showLanguageServerOutput",
+				"title": "Erlang: Show Language Server Output"
+			},
+			{
+				"command": "erlang.restartLanguageServer",
+				"title": "Erlang: Restart Language Server"
+			},
+			{
+				"command": "erlang.getErlPath",
+				"title": "Erlang: Path of erl"
+			}
+		],
+		"walkthroughs": [
+			{
+				"id": "erlang.gettingStarted",
+				"title": "Get started with Erlang",
+				"description": "Set up Erlang/OTP and rebar3, then build, test and debug your first project.",
+				"steps": [
+					{
+						"id": "findErl",
+						"title": "Find Erlang/OTP",
+						"description": "The language server and the debugger run on your Erlang/OTP installation.\n[Check installation](command:erlang.checkInstallation)\nWhen erl is not on the PATH (kerl, asdf, custom build), point the extension to it: [Set erlang.erlangPath](command:workbench.action.openSettings?%5B%22erlang.erlangPath%22%5D)",
+						"media": {
+							"markdown": "walkthrough/install-erlang.md"
+						},
+						"completionEvents": [
+							"onCommand:erlang.checkInstallation",
+							"onSettingChanged:erlang.erlangPath"
+						]
+					},
+					{
+						"id": "pickRebar3",
+						"title": "Pick rebar3",
+						"description": "The extension looks for rebar3 in erlang.rebarPath, then in the project folder, then on the PATH, and falls back to the rebar3 bundled with the extension.\n[Set erlang.rebarPath](command:workbench.action.openSettings?%5B%22erlang.rebarPath%22%5D)",
+						"media": {
+							"image": "images/vscode-erlang-rebarpath-settings.png",
+							"altText": "The erlang.rebarPath setting in the Settings editor"
+						},
+						"completionEvents": [
+							"onSettingChanged:erlang.rebarPath",
+							"onCommand:erlang.checkInstallation"
+						]
+					},
+					{
+						"id": "build",
+						"title": "Build the project",
+						"description": "Compile with rebar3; errors and warnings land in the Problems panel. rebar3 compile, eunit, ct, dialyzer, release and shell are also available as tasks (Terminal > Run Task > rebar3).\n[Build with rebar3](command:extension.rebarBuild)",
+						"media": {
+							"image": "images/vscode-erlang-build.png",
+							"altText": "rebar3 compile output with errors listed in the Problems panel"
+						},
+						"completionEvents": [
+							"onCommand:extension.rebarBuild",
+							"onCommand:workbench.action.tasks.build"
+						]
+					},
+					{
+						"id": "test",
+						"title": "Run the tests",
+						"description": "EUnit and Common Test tests show up in the Testing view: run, debug or run them with coverage.\n[Open the Testing view](command:workbench.view.testing.focus)",
+						"media": {
+							"image": "images/vscode-erlang-test-explorer.png",
+							"altText": "EUnit and Common Test tests in the Testing view"
+						},
+						"completionEvents": [
+							"onView:workbench.view.testing"
+						]
+					},
+					{
+						"id": "debug",
+						"title": "Debug",
+						"description": "Set a breakpoint and launch the project under the debugger, or attach to a node that is already running.\n[Create a launch configuration](command:workbench.action.debug.configure)",
+						"media": {
+							"image": "images/vscode-erlang-debug.png",
+							"altText": "Debugger stopped at a breakpoint in an Erlang module"
+						},
+						"completionEvents": [
+							"onCommand:workbench.action.debug.configure",
+							"onCommand:workbench.action.debug.start"
+						]
+					}
+				]
 			}
 		],
 		"keybindings": [
@@ -146,6 +355,12 @@
 			}
 		],
 		"menus": {
+			"commandPalette": [
+				{
+					"command": "erlang.getErlPath",
+					"when": "false"
+				}
+			],
 			"explorer/context": [
 				{
 					"when": "resourceLangId == erlang",
@@ -241,6 +456,16 @@
 					"default": false,
 					"description": "Enable/disable references InlayHints on functions."
 				},
+				"erlang.semanticTokensEnabled": {
+					"type": "boolean",
+					"default": true,
+					"description": "Enable/disable semantic highlighting (module/function/macro/variable/type/record coloring computed from the real syntax tree, on top of the base TextMate grammar)."
+				},
+				"erlang.formatterEnabled": {
+					"type": "boolean",
+					"default": true,
+					"description": "Enable/disable the Erlang formatter (whole-document, selection and on-type formatting)."
+				},
 				"erlang.verbose": {
 					"type": "boolean",
 					"description": "Enable/disable technical traces for use in the extension development.",
@@ -288,8 +513,56 @@
 					"severity": 4,
 					"message": 5
 				}
+			},
+			{
+				"name": "rebar3",
+				"owner": "erlang",
+				"source": "rebar3",
+				"fileLocation": [
+					"autoDetect",
+					"${workspaceFolder}"
+				],
+				"pattern": {
+					"regexp": "^((?:[A-Za-z]:)?[^:\\s][^:]*\\.(?:erl|hrl|escript|app\\.src|config)):(\\d+):(?:(\\d+):)?\\s+((Warning): )?(.*)$",
+					"file": 1,
+					"line": 2,
+					"column": 3,
+					"severity": 5,
+					"message": 6
+				}
+			},
+			{
+				"name": "rebar3-dialyzer",
+				"owner": "erlang",
+				"source": "dialyzer",
+				"severity": "warning",
+				"fileLocation": [
+					"autoDetect",
+					"${workspaceFolder}"
+				],
+				"pattern": [
+					{
+						"regexp": "^(\\S.*\\.[eh]rl)\\s*$",
+						"file": 1
+					},
+					{
+						"regexp": "^\\s*Line (\\d+)(?: Column (\\d+))?: (.*)$",
+						"line": 1,
+						"column": 2,
+						"message": 3,
+						"loop": true
+					}
+				]
 			}
-		]
+		],
+		"configurationDefaults": {
+			"[erlang]": {
+				"editor.tabSize": 4,
+				"editor.insertSpaces": true,
+				"editor.formatOnSave": false,
+				"editor.semanticHighlighting.enabled": true
+			}
+		}
 	},
 	"repository": {
 		"type": "git",
@@ -303,22 +576,24 @@
 		"pretest": "npm run compile",
 		"test": "vscode-test",
 		"deploy": "vsce publish --no-yarn",
-		"compile": "tsc -p ./"
+		"compile": "tsc -p ./",
+		"screenshots": "node scripts/screenshots/take-screenshots.mjs"
 	},
 	"dependencies": {
-		"fs-extra": "^8.1.0",
 		"@vscode/debugadapter": "^1.68.0",
 		"@vscode/debugprotocol": "^1.68.0",
-		"vscode-languageclient": "^9.0.1",
-		"vscode-languageserver": "^9.0.1",
+		"fs-extra": "^8.1.0",
+		"vscode-languageclient": "^10.1.1",
+		"vscode-languageserver": "^10.1.1",
+		"vscode-languageserver-protocol": "3.18.3",
 		"vscode-uri": "^1.0.3"
 	},
 	"devDependencies": {
 		"@types/fs-extra": "^8.0.0",
 		"@types/glob": "^7.1.1",
-		"@types/mocha": "^5.2.6",
-		"@types/node": "^16.11.7",
-		"@types/vscode": "^1.52.0",
+		"@types/mocha": "^10.0.10",
+		"@types/node": "^22.20.1",
+		"@types/vscode": "^1.136.0",
 		"@typescript-eslint/eslint-plugin": "^5.42.0",
 		"@typescript-eslint/parser": "^5.42.0",
 		"@vscode/test-cli": "^0.0.9",
@@ -328,10 +603,10 @@
 		"glob": "^7.1.4",
 		"gulp": "^5.0.0",
 		"mocha": "^10.8.2",
+		"playwright": "^1.63.0",
 		"source-map-support": "^0.5.12",
 		"ts-loader": "^8.1.0",
-		"typescript": "^5.0.2",
-		"vscode-test": "^1.3.0",
+		"typescript": "^5.9.3",
 		"webpack": "^5.110.3",
 		"webpack-cli": "^5.0.1"
 	}

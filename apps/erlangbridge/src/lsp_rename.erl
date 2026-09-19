@@ -1,6 +1,6 @@
 -module(lsp_rename).
 
--export([prepareRename/3, rename/5]).
+-export([prepareRename/3, rename/5, build_workspace_edit/1]).
 -import(lsp_syntax, [fold_in_syntax_tree/4, find_in_syntax_tree/2]).
 
 -include("lsp_log.hrl").
@@ -97,22 +97,38 @@ rename(_Uri, File, Line, Column, NewName) ->
             _ ->
                 []
         end,
+    build_workspace_edit([{LocFile, LocL, Start, End, NewName} || {LocFile, LocL, Start, End} <- Locations]).
+
+%% @doc Build a WorkspaceEdit from a list of independent edits, each either
+%% {File, Line, StartColumn, EndColumn, NewText} (single-line, the original
+%% rename/5 shape) or {File, StartLine, StartColumn, EndLine, EndColumn,
+%% NewText} (spanning several lines - e.g. deleting a whole line including
+%% its trailing newline). Reused by lsp_codeaction.erl (task 2.1/2.2) so
+%% quick fixes don't have to hand-roll this shape themselves.
+%%
+%% CHARACTERIZATION (preserved from the original rename/5 - see task 0.10):
+%% one documentChanges entry per edit, never merged by file, even when
+%% several edits land in the same file.
+-spec build_workspace_edit([
+    {file:filename(), pos_integer(), pos_integer(), pos_integer(), iodata()} |
+    {file:filename(), pos_integer(), pos_integer(), pos_integer(), pos_integer(), iodata()}
+]) -> #{documentChanges := [map()]}.
+build_workspace_edit(Edits) ->
+    #{documentChanges => [document_change(Edit) || Edit <- Edits]}.
+
+document_change({File, Line, Start, End, NewText}) ->
+    document_change({File, Line, Start, Line, End, NewText});
+document_change({File, StartLine, StartCol, EndLine, EndCol, NewText}) ->
     #{
-        %changes => [Changes]
-        documentChanges => [
+        textDocument => #{
+            uri => lsp_utils:file_uri_to_vscode_uri(lsp_utils:file_to_file_uri(File)),
+            version => 1
+        },
+        edits => [
             #{
-                textDocument => #{
-                    uri => lsp_utils:file_uri_to_vscode_uri(lsp_utils:file_to_file_uri(LocFile)),
-                    version => 1
-                },
-                edits => [
-                    #{
-                        range => lsp_utils:client_range(LocL, Start, End),
-                        newText => lsp_utils:to_binary(NewName)
-                    }
-                ]
+                range => lsp_utils:client_range(StartLine, StartCol, EndLine, EndCol),
+                newText => lsp_utils:to_binary(NewText)
             }
-         || {LocFile, LocL, Start, End} <- Locations
         ]
     }.
 

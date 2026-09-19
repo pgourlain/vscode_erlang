@@ -1,6 +1,7 @@
 -module(lsp_completion).
 
--export([disable_completion/0, module_function/2, record/2, field/3, variable/3, atom/2, attribute/1]).
+-export([disable_completion/0, module_function/2, record/2, field/3, variable/3, atom/2, attribute/1, macro/2]).
+-export([resolve_item/1]).
 
 disable_completion() ->
     [#{
@@ -8,12 +9,21 @@ disable_completion() ->
     }].
 
 module_function(Module, Prefix) ->
-    File = gen_lsp_doc_server:get_module_file(Module),
-    ExportsResult = case gen_lsp_doc_server:get_syntax_tree(File) of
+    %% get_module_file/1 returns `undefined` for a module the project can't
+    %% resolve at all (e.g. a typo, or an atom that isn't actually a
+    %% module) - passing that straight to get_syntax_tree/1 would try to
+    %% parse the atom `undefined` itself as a file path and crash inside
+    %% epp:parse_file/2.
+    ExportsResult = case gen_lsp_doc_server:get_module_file(Module) of
         undefined ->
             standard_module_exports(Module);
-        SyntaxTree ->
-            syntax_tree_exports(SyntaxTree)
+        File ->
+            case gen_lsp_doc_server:get_syntax_tree(File) of
+                undefined ->
+                    standard_module_exports(Module);
+                SyntaxTree ->
+                    syntax_tree_exports(SyntaxTree)
+            end
     end,
     case ExportsResult of
         {ok, Exports} ->
@@ -21,7 +31,7 @@ module_function(Module, Prefix) ->
             Unique = sets:to_list(sets:from_list(NamesOnly)),
             lists:filtermap(fun (Name) ->
                 case lists:prefix(Prefix, Name) of
-                    true -> {true, module_function_item(Module, Name)};
+                    true -> {true, module_function_item(Module, Name, first_arity_for(Name, Exports))};
                     _ -> false
                 end
             end, Unique);
@@ -29,24 +39,67 @@ module_function(Module, Prefix) ->
             []
     end.
 
-module_function_item(Module, Name) ->
-    Description = lsp_navigation:function_description(Module, list_to_atom(Name)),
-    case Description of
-        <<>> ->
-            #{
-                label => list_to_binary(Name),
-                kind => 3 % Function
-            };
-        _ ->
-            #{
-                label => list_to_binary(Name),
-                kind => 3, % Function
-                documentation => #{
-                    value => Description,
-                    kind => <<"markdown">>
-                }
-            }
+first_arity_for(Name, Exports) ->
+    NameAtom = list_to_atom(Name),
+    case lists:keyfind(NameAtom, 1, Exports) of
+        {NameAtom, Arity} -> Arity;
+        false -> undefined
     end.
+
+%% @doc task 5.6: doc lookup (lsp_navigation:function_description/2,
+%% which for a stdlib/OTP module can mean an EEP-48 doc render) used to
+%% happen here, eagerly, for every single candidate on every keystroke -
+%% now deferred to completionItem/resolve (see resolve_item/1), and only
+%% for whichever one item the user has actually highlighted. `data`
+%% carries what resolve needs to redo the lookup later; it round-trips
+%% through the client verbatim, same as everywhere else in this codebase
+%% that stashes atoms in an item's own `data` field (they come back as
+%% binaries).
+%%
+%% Also adds snippet support (insertTextFormat => 2): a real arity - only
+%% available here, not for the BIF/local-atom paths below, which never
+%% learn one - becomes a placeholder argument list the editor can tab
+%% through, e.g. `foo(${1:Arg1}, ${2:Arg2})$0`.
+module_function_item(Module, Name, undefined) ->
+    #{
+        label => list_to_binary(Name),
+        kind => 3, % Function
+        data => #{module => Module, function => list_to_atom(Name)}
+    };
+module_function_item(Module, Name, Arity) ->
+    #{
+        label => list_to_binary(Name),
+        kind => 3, % Function
+        insertText => snippet_text(Name, Arity),
+        insertTextFormat => 2, % Snippet
+        data => #{module => Module, function => list_to_atom(Name)}
+    }.
+
+snippet_text(Name, 0) ->
+    iolist_to_binary(io_lib:format("~s()$0", [Name]));
+snippet_text(Name, Arity) ->
+    Placeholders = [iolist_to_binary(io_lib:format("${~p:Arg~p}", [N, N])) || N <- lists:seq(1, Arity)],
+    iolist_to_binary(io_lib:format("~s(~s)$0", [Name, lists:join(<<", ">>, Placeholders)])).
+
+%% @doc `completionItem/resolve`. Only an item this module itself gave a
+%% `module`/`function` `data` (a function completion, see
+%% module_function_item/3 above and the function branch of local_atoms/1
+%% below) has anything to fill in - every other kind (record/field/
+%% variable/attribute/macro) already carries everything it needs.
+resolve_item(#{data := #{module := ModuleData, function := FunctionData}} = Item) ->
+    Module = to_atom(ModuleData),
+    Function = to_atom(FunctionData),
+    case lsp_navigation:function_description(Module, Function) of
+        <<>> ->
+            maps:remove(data, Item);
+        Description ->
+            (maps:remove(data, Item))#{documentation => #{value => Description, kind => <<"markdown">>}}
+    end;
+resolve_item(Item) ->
+    Item.
+
+to_atom(Value) when is_atom(Value) -> Value;
+to_atom(Value) when is_binary(Value) -> binary_to_atom(Value, utf8).
 
 standard_module_exports(Module) ->
     case code:ensure_loaded(Module) of
@@ -138,7 +191,7 @@ atom(File, Prefix) ->
     end, gen_lsp_doc_server:project_modules()),
     BIFs = lists:filtermap(fun (Function) ->
         case lists:prefix(Prefix, Function) of
-            true -> {true, module_function_item(erlang, Function)};
+            true -> {true, module_function_item(erlang, Function, undefined)};
             _ -> false
         end
     end, gen_lsp_config_server:bifs()),
@@ -165,14 +218,41 @@ local_atoms(File) ->
     maps:fold(fun
         ({_, _Name}, 0, Acc) ->
             Acc;
-        ({_, Name}, 3, Acc) -> 
+        ({_, Name}, 3, Acc) ->
             Module = list_to_atom(filename:rootname(filename:basename(File))),
-            [#{label => Name, kind => 3, documentation =>
-                #{value => lsp_navigation:function_description(Module, Name),  kind => <<"markdown">> }
-            } | Acc];
+            [#{label => Name, kind => 3, data => #{module => Module, function => Name}} | Acc];
         ({_, Name}, Type, Acc) ->
             [#{label => Name, kind => Type} | Acc]
     end, [], AtomTypes).
+
+%% @doc task 5.6: `?` as a trigger character. -define is expanded away by
+%% epp before the AST is built (same discovery as lsp_semantic_tokens.erl
+%% and lsp_workspace_symbol.erl), so macro names are found the same way:
+%% a plain per-line regex over the file's own text, not the AST.
+macro(File, Prefix) ->
+    Content = read_content(File),
+    Lines = binary:split(Content, <<"\n">>, [global]),
+    PrefixBin = list_to_binary(Prefix),
+    lists:filtermap(fun (Line) ->
+        case re:run(Line, <<"-define\\(\\s*([A-Za-z_][A-Za-z0-9_]*)">>, [{capture, [1], binary}]) of
+            {match, [Name]} ->
+                case binary:longest_common_prefix([Name, PrefixBin]) =:= byte_size(PrefixBin) of
+                    true -> {true, #{label => Name, kind => 14}}; % Constant
+                    false -> false
+                end;
+            nomatch ->
+                false
+        end
+    end, Lines).
+
+read_content(File) ->
+    case gen_lsp_doc_server:get_document_contents(File) of
+        undefined ->
+            {ok, Bin} = file:read_file(File),
+            Bin;
+        Bin ->
+            Bin
+    end.
 
 attribute(Prefix) ->
     Attributes = ["module", "export", "include", "include_lib", "record", "behaviour", "import",

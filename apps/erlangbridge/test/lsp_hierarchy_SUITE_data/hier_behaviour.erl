@@ -1,0 +1,2 @@
+-module(hier_behaviour).
+-callback do_it() -> ok.

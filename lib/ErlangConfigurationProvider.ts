@@ -15,6 +15,9 @@ export class ErlangDebugConfigurationProvider implements DebugConfigurationProvi
 
     resolveDebugConfiguration?(folder: WorkspaceFolder, debugConfiguration: DebugConfiguration, token?: CancellationToken): ProviderResult<DebugConfiguration> {
         let cfg = getElangConfigConfiguration();
+        if (!debugConfiguration.cwd && (folder || cfg.rootPath)) {
+            debugConfiguration.cwd = folder ? folder.uri.fsPath : cfg.rootPath;
+        }
         debugConfiguration.verbose = cfg.verbose;
         debugConfiguration.erlangPath = cfg.erlangPath;
         return debugConfiguration;
@@ -33,6 +36,7 @@ export function configurationChanged(): void {
         codeLensEnabled: erlangConf.get<boolean>('codeLensEnabled', false),
         cacheManagement: erlangConf.get("cacheManagement", "memory"),
         inlayHintsEnabled: erlangConf.get<boolean>('inlayHintsEnabled', false),
+        semanticTokensEnabled: erlangConf.get<boolean>('semanticTokensEnabled', true),
         debuggerRunMode: erlangConf.get<string>("debuggerRunMode", "Server"),
         includePaths: erlangConf.get("includePaths", []),
         linting: erlangConf.get<boolean>('linting', false),

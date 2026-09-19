@@ -10,12 +10,16 @@ export class ErlangDebugAdapterDescriptorFactory implements DebugAdapterDescript
     private server?: Server;
     createDebugAdapterDescriptor(session: DebugSession, executable: DebugAdapterExecutable): ProviderResult<DebugAdapterDescriptor> {
         if (!this.server) {
-			// start listening on a random port
-			this.server = createServer(socket => {
-				const session = new ErlangDebugSession(true);
-				session.setRunAsServer(true);
-				session.start(<NodeJS.ReadableStream>socket, socket);
-			}).listen(0, '127.0.0.1');
+			// start listening on a random port; address() is null until 'listening' fires
+			return new Promise<DebugAdapterDescriptor>(resolve => {
+				this.server = createServer(socket => {
+					const session = new ErlangDebugSession(true);
+					session.setRunAsServer(true);
+					session.start(<NodeJS.ReadableStream>socket, socket);
+				}).listen(0, '127.0.0.1', () => {
+					resolve(new DebugAdapterServer((<AddressInfo>this.server.address()).port));
+				});
+			});
 		}
 
 		// make VS Code connect to debug server

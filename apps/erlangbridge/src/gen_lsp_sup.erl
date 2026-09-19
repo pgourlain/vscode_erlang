@@ -15,7 +15,7 @@ start_link(Port) ->
             supervisor:start_child(Pid, []),
             {ok, Pid};
         _ ->
-            error_logger:error_msg("~p:start_link failed",[?MODULE]),
+            lsp_log:error(<<"LSP">>, "~p:start_link failed",[?MODULE]),
             {error, not_started}
     end.
 

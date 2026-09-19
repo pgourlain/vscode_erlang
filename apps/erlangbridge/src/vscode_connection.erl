@@ -2,6 +2,10 @@
 -behaviour(gen_connection).
 
 -export([start/0, set_breakpoint/2]).
+%% attach to a running node (task 7.6)
+-export([attach/0, start_attached/2]).
+%% exported for vscode_connection_SUITE, which plays the helper node itself
+-export([attach/3]).
 
 % export for gen_connection behaviour
 -export([get_port/0, init/1, decode_request/1]).
@@ -9,12 +13,18 @@
 
 %%called with "erl -s vscode_connection -vscode_port 1234"
 start() ->
-    compile_argumentsfile(),
+    configure(compile_argumentsfile()),
     gen_connection:start(?MODULE).
 
+%% In attach mode the port lives in the target node's application env (set
+%% by start_attached/2): the target was not started with -vscode_port.
 get_port() ->
-    {ok, [[P]]}=init:get_argument(vscode_port),
-    P.
+    case application:get_env(vscode_debugger, port) of
+        {ok, P} -> P;
+        undefined ->
+            {ok, [[P]]}=init:get_argument(vscode_port),
+            P
+    end.
 
 %% before 0.6.2, int:ni(...) were put in -eval command line, but erlang crash in erl_scan and I don't known why...
 compile_argumentsfile() ->
@@ -25,12 +35,7 @@ compile_argumentsfile() ->
          case compile:file(FileName, [binary]) of
             {ok, ModuleName, Binary} -> 
                 io:format("Compile result: success ~n", []),
-                case code:load_binary(ModuleName, lists:flatten(io_lib:format("~p.beam", [ModuleName])), Binary) of
-                    {module, _} -> 
-                       io:format("Module ~p loaded~n", [ModuleName]),
-                        ModuleName:configure(), ok;
-                    _ -> no_compiled_args_file
-                end;
+                {ModuleName, Binary};
             Error -> 
                 io:format("Compile result: failed ~p~n", [Error]),
                 no_compiled_args_file
@@ -38,6 +43,134 @@ compile_argumentsfile() ->
     _ ->
         no_compiled_args_file
     end.
+
+%% Load the compiled arguments module and run its configure/0: int:ni/1 the
+%% project sources and set the initial breakpoints. Without one, still start
+%% the interpreter so breakpoints sent later can be set.
+configure({ModuleName, Binary}) ->
+    case code:load_binary(ModuleName, lists:flatten(io_lib:format("~p.beam", [ModuleName])), Binary) of
+        {module, _} ->
+            io:format("Module ~p loaded~n", [ModuleName]),
+            ModuleName:configure(),
+            ok;
+        _ ->
+            no_compiled_args_file
+    end;
+configure(no_compiled_args_file) ->
+    int:start(),
+    no_compiled_args_file.
+
+%%------------------------------------------------------------------------------
+%% Attach to a running node (task 7.6)
+%%
+%% The debug adapter starts a hidden helper node:
+%%   erl -hidden -sname vscode_dbg_<port> -vscode_port <port>
+%%       -vscode_attach_node <target> [-compiled_args_file <f>] -s vscode_connection attach
+%% attach/0 (on the helper) connects to the target, loads this module and its
+%% dependencies there, and calls start_attached/2 on the target, which does
+%% what start/0 does in launch mode. The helper then lives as long as the
+%% debug session: it halts when the target goes down (the adapter then ends
+%% the session) or when the adapter closes its stdin.
+%%
+%% Same-host only: the target reads the project sources by the paths the
+%% adapter sees, and posts its events to the adapter on 127.0.0.1.
+%%------------------------------------------------------------------------------
+
+-define(ATTACH_MODULES, [vscode_jsone, gen_connection, vscode_connection]).
+
+attach() ->
+    {ok, [[NodeString]]} = init:get_argument(vscode_attach_node),
+    Node = list_to_atom(NodeString),
+    case attach(Node, get_port(), compile_argumentsfile()) of
+        ok ->
+            io:format("Attached to node ~s~n", [Node]),
+            spawn(fun() -> halt_on_nodedown(Node) end),
+            spawn(fun halt_on_stdin_eof/0),
+            ok;
+        {error, Reason} ->
+            io:format("Cannot attach to node ~s: ~ts~n", [Node, Reason]),
+            halt(1)
+    end.
+
+attach(Node, Port, ArgsModule) ->
+    case net_kernel:connect_node(Node) of
+        true ->
+            case missing_apps(Node) of
+                [] ->
+                    lists:foreach(fun(M) -> push_module(Node, M) end, ?ATTACH_MODULES),
+                    case rpc:call(Node, ?MODULE, start_attached, [Port, ArgsModule], infinity) of
+                        ok -> ok;
+                        Other -> {error, io_lib:format("~p", [Other])}
+                    end;
+                Missing ->
+                    {error, io_lib:format("the node cannot load ~p: add the corresponding OTP "
+                                          "applications (debugger, inets) to its code path or release", [Missing])}
+            end;
+        _ ->
+            {error, "connection refused: check the node name (-sname/-name), that the node "
+                    "is running on this machine, and the cookie"}
+    end.
+
+%% int (debugger app) runs the interpreter, httpc (inets app) posts the events.
+missing_apps(Node) ->
+    [M || M <- [int, httpc], rpc:call(Node, code, which, [M]) =:= non_existing].
+
+push_module(Node, Module) ->
+    {Module, Binary, File} = code:get_object_code(Module),
+    _ = rpc:call(Node, code, purge, [Module]),
+    {module, Module} = rpc:call(Node, code, load_binary, [Module, File, Binary]).
+
+halt_on_nodedown(Node) ->
+    erlang:monitor_node(Node, true),
+    receive
+        {nodedown, Node} ->
+            io:format("Node ~s is down~n", [Node]),
+            halt(0)
+    end.
+
+halt_on_stdin_eof() ->
+    case io:get_line("") of
+        eof -> halt(0);
+        {error, _} -> halt(0);
+        _ -> halt_on_stdin_eof()
+    end.
+
+%% Runs on the target node, in an rpc process whose group leader is the
+%% helper's: switch to the target's own `user` first so the long-lived
+%% processes spawned here keep a valid group leader after the helper halts.
+start_attached(Port, ArgsModule) ->
+    group_leader(whereis(user), self()),
+    stop_attached(),
+    application:set_env(vscode_debugger, port, Port),
+    case configure(ArgsModule) of
+        ok ->
+            {ModuleName, _} = ArgsModule,
+            code:delete(ModuleName),
+            code:purge(ModuleName);
+        _ ->
+            ok
+    end,
+    gen_connection:start(?MODULE).
+
+%% Leave the target node as it was before the attach: no breakpoint, no
+%% interpreted module, no process left waiting at a break, no connection
+%% process. The node itself keeps running.
+detach() ->
+    int:no_break(),
+    [int:continue(Pid) || {Pid, _, break, _} <- int:snapshot()],
+    [int:nn(M) || M <- int:interpreted()],
+    int:clear(),
+    stop_attached(),
+    application:unset_env(vscode_debugger, port),
+    ok.
+
+%% Also cleans up after a previous session that ended without a detach.
+stop_attached() ->
+    case whereis(?MODULE) of
+        undefined -> ok;
+        Pid -> exit(Pid, kill)
+    end,
+    gen_connection:stop(?MODULE).
 
 init(Port) ->
     init_subscribe(Port).
@@ -124,6 +257,10 @@ decode_request(Data) ->
         end;
     {debugger_exit, _Body} ->
         init:stop(0);
+    {debugger_detach, _Body} ->
+        % answer first: detach/0 kills the command server
+        spawn(fun() -> timer:sleep(100), detach() end),
+        #{};
     _ ->
         unknown_command
     end.

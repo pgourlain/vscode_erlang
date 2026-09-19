@@ -90,7 +90,7 @@ get_text(Name, Es) ->
     [#xmlElement{name=p, content= Es1}|_OtherXmlText] ->
         lists:flatten([T || T <- get_text_value(Es1 ++ _OtherXmlText)]);
     _Other ->
-        error_logger:warning_msg("~p:get_text unknown xml content : ~p~n  ", [?MODULE, _Other]), 
+        lsp_log:warning(<<"lsp/hover">>, "~p:get_text unknown xml content : ~p~n  ", [?MODULE, _Other]), 
         ""
     end.
 

@@ -4,10 +4,13 @@
 %% API
 -export([start_link/0]).
 
--export([document_opened/2, document_changed/2, document_closed/1, opened_documents/0, get_document_contents/1, parse_document/1]).
+-export([document_opened/2, document_changed/2, document_range_changed/4, document_closed/1, opened_documents/0, get_document_contents/1, get_document_version/1, parse_document/1]).
 -export([project_file_added/1, project_file_changed/1, project_file_deleted/1]).
 -export([get_syntax_tree/1, get_dodged_syntax_tree/1, get_references/1, get_inlayhints/1]).
+-export([get_semantic_tokens_cache/1, store_semantic_tokens_cache/3]).
+-export([get_diagnostics_cache/1, store_diagnostics_cache/2]).
 -export([root_available/0, config_change/0, project_modules/0, get_module_file/1, get_module_files/1, get_build_dir/0, find_source_file/1]).
+-export([all_project_files/0]).
 
 %% Cache management
 -export([delete_unused_caches/2,
@@ -29,13 +32,49 @@
         }).
 
 document_opened(File, Contents) ->
-    ?XETS:insert(document_contents, {File, Contents}).
+    ?XETS:insert(document_contents, {File, Contents}),
+    bump_document_version(File).
 
 document_changed(File, Contents) ->
-    ?XETS:insert(document_contents, {File, Contents}).
+    ?XETS:insert(document_contents, {File, Contents}),
+    bump_document_version(File).
+
+%% @doc Apply one incremental (range + replacement text) content change
+%% against the currently cached buffer for File, for `textDocumentSync`
+%% mode 2 (Incremental). Start/end positions are 0-based {Line, Character}
+%% pairs, exactly as the LSP wire protocol sends them (before any of the
+%% +1 conversions lsp_navigation-facing code does).
+%%
+%% CHARACTERIZATION / known limitation: Character is treated as a raw byte
+%% offset within the line, like the rest of this codebase already does
+%% (see e.g. lsp_handlers:text_before_character/3) - not a UTF-16 code
+%% unit count per the LSP spec, so a line containing multi-byte UTF-8
+%% characters before the edit position can splice at the wrong byte.
+document_range_changed(File, {StartLine, StartChar}, {EndLine, EndChar}, NewText) ->
+    Contents = get_document_contents(File),
+    Updated = splice_range(Contents, StartLine, StartChar, EndLine, EndChar, NewText),
+    document_changed(File, Updated).
+
+splice_range(Contents, StartLine, StartChar, EndLine, EndChar, NewText) ->
+    Lines = binary:split(Contents, <<"\n">>, [global]),
+    StartOffset = line_char_to_offset(Lines, StartLine, StartChar),
+    EndOffset = line_char_to_offset(Lines, EndLine, EndChar),
+    Before = binary:part(Contents, 0, StartOffset),
+    After = binary:part(Contents, EndOffset, byte_size(Contents) - EndOffset),
+    <<Before/binary, NewText/binary, After/binary>>.
+
+%% Byte offset of {Line, Character} within the full contents, given
+%% Contents already split on "\n" (one byte re-added per split for the
+%% separator itself).
+line_char_to_offset(Lines, Line, Character) ->
+    {Before, Target} = lists:split(min(Line, length(Lines) - 1), Lines),
+    LineStart = lists:foldl(fun (L, Acc) -> Acc + byte_size(L) + 1 end, 0, Before),
+    TargetLine = hd(Target),
+    LineStart + min(Character, byte_size(TargetLine)).
 
 document_closed(File) ->
-    ?XETS:delete(document_contents, File).
+    ?XETS:delete(document_contents, File),
+    ?XETS:delete(document_version, File).
 
 opened_documents() ->
     do_opened_documents(?XETS).
@@ -54,15 +93,39 @@ get_document_contents(File) ->
         _ -> undefined
     end.
 
+%% @doc Internal, monotonically increasing per-file version counter -
+%% bumped on every document_opened/2 or document_changed/2 (i.e. on every
+%% textDocument/didOpen and every applied textDocument/didChange content
+%% change), independent of the client-supplied LSP `version` field (which
+%% textDocument/didSave is not guaranteed to carry per the LSP spec).
+%% Used by lsp_handlers to detect and drop a validate_file/2 call that
+%% finishes after a newer edit has already landed, so it can't clobber a
+%% fresher publishDiagnostics with stale results.
+get_document_version(File) ->
+    case ?XETS:lookup(document_version, File) of
+        [{File, Version}] -> Version;
+        _ -> 0
+    end.
+
+bump_document_version(File) ->
+    NewVersion = get_document_version(File) + 1,
+    ?XETS:insert(document_version, {File, NewVersion}),
+    NewVersion.
+
 parse_document(File) ->
     case filename:extension(File) of
         ".erl" ->
+            %% Version read *before* the contents, so an edit landing while
+            %% this parse runs leaves the stored tree marked older than the
+            %% document - get_syntax_tree/1 then reparses instead of handing
+            %% out a tree that predates that edit.
+            Version = get_document_version(File),
             case get_document_contents(File) of
                 undefined ->
-                    error_logger:error_msg("Cannot find contents of document ~p~n", [File]);
+                    lsp_log:error(<<"LSP">>, "Cannot find contents of document ~p~n", [File]);
                 Contents ->
                     ContentsFile = lsp_utils:make_temporary_file(Contents),
-                    parse_and_store(File, ContentsFile),
+                    parse_and_store(File, ContentsFile, Version),
                     file:delete(ContentsFile)
             end;
         _ ->
@@ -78,22 +141,35 @@ project_file_changed(File) ->
 project_file_deleted(File) ->
     gen_server:cast(?SERVER, {project_file_deleted, File}).
 
+%% @doc File's syntax tree, reparsed when what is cached predates the
+%% document's current contents.
+%%
+%% An unsaved edit (textDocument/didChange) bumps document_version and
+%% rewrites the buffer but does not itself reparse - so without the version
+%% check here every tree consumer (diagnostics, hover, navigation, inlay
+%% hints, completion) would keep answering from the pre-edit tree until the
+%% file was saved. That is what made a quick fix look like it had not been
+%% applied: the fix landed in the buffer, the next lint ran on the tree from
+%% before it, and the diagnostic came back.
 get_syntax_tree(File) ->
-    case get_tree(syntax_tree, File) of
-        undefined ->
-            parse_and_store(File, File),
-            get_tree(syntax_tree, File);
-        SyntaxTree ->
-            SyntaxTree
-    end.
+    get_fresh_tree(syntax_tree, File).
 
 get_dodged_syntax_tree(File) ->
-    case get_tree(dodged_syntax_tree, File) of
-        undefined ->
+    get_fresh_tree(dodged_syntax_tree, File).
+
+get_fresh_tree(TreeType, File) ->
+    DocumentVersion = get_document_version(File),
+    case get_tree(TreeType, File) of
+        {DocumentVersion, SyntaxTree} ->
+            SyntaxTree;
+        _Missing_Or_Stale ->
+            %% parse_and_store/2 picks the buffer over the file for an open
+            %% document by itself.
             parse_and_store(File, File),
-            get_tree(dodged_syntax_tree, File);
-        SyntaxTree ->
-            SyntaxTree
+            case get_tree(TreeType, File) of
+                {_, SyntaxTree} -> SyntaxTree;
+                undefined -> undefined
+            end
     end.
 
 get_references(Reference) ->
@@ -104,6 +180,38 @@ get_inlayhints(File) ->
         [{File, Inlays}] -> Inlays;
         _ -> []
     end.
+
+%% CHARACTERIZATION: unlike every other cache in this module, this one is
+%% not eagerly recomputed by parse_and_store/2 on every reparse - it only
+%% exists to let semanticTokens/full/delta diff against whatever the
+%% client actually still has, so it is only ever written when a
+%% full/delta request is served (see lsp_semantic_tokens:full_tokens/1 and
+%% full_tokens_delta/2), not on every document change.
+get_semantic_tokens_cache(File) ->
+    case ?XETS:lookup(document_semantic_tokens, File) of
+        [{File, ResultId, Tokens}] -> {ResultId, Tokens};
+        _ -> undefined
+    end.
+
+store_semantic_tokens_cache(File, ResultId, Tokens) ->
+    ?XETS:insert(document_semantic_tokens, {File, ResultId, Tokens}).
+
+%% @doc Diagnostics as last computed for File, or undefined when never
+%% computed or computed against an older revision of the document.
+%%
+%% The LSP 3.17 pull endpoints (lsp_handlers:textDocument_diagnostic/2 and
+%% workspace_diagnostic/2) would otherwise re-lint every project file on every
+%% pull. Keyed by the same document_version counter the push path uses, and
+%% dropped outright by parse_and_store/2, so a reparse always recomputes.
+get_diagnostics_cache(File) ->
+    Version = get_document_version(File),
+    case ?XETS:lookup(document_diagnostics, File) of
+        [{File, Version, Diagnostics}] -> Diagnostics;
+        _ -> undefined
+    end.
+
+store_diagnostics_cache(File, Diagnostics) ->
+    ?XETS:insert(document_diagnostics, {File, get_document_version(File), Diagnostics}).
 
 root_available() ->
     gen_server:cast(?SERVER, root_available).
@@ -119,6 +227,19 @@ get_module_file(Module) ->
 
 get_module_files(Module) ->
     gen_server:call(?SERVER, {get_module_files, Module}).
+
+%% @doc Every source file known to the project scan (task 4.1/4.4's shared
+%% enumeration point) - every module's own file list, flattened and
+%% deduplicated (a module can legitimately have more than one file, e.g.
+%% a build-target-specific alternative).
+%%
+%% project_modules/0 returns its keys as *strings* (its own internal map
+%% is keyed that way - see do_add_project_file/3), unlike get_module_file/
+%% get_module_files, which have only ever been called with atoms
+%% (a module name straight from the AST) - this is the first caller to
+%% chain the two together, so the mismatch needs bridging right here.
+all_project_files() ->
+    lists:usort(lists:flatmap(fun (Module) -> get_module_files(list_to_atom(Module)) end, project_modules())).
 
 get_build_dir() ->
     ConfigFilename = filename:join([gen_lsp_config_server:root(), "rebar.config"]),
@@ -153,10 +274,13 @@ as_string(Text) ->
 start_link() ->
     ExtraCreateOpts = persistent_term:get(large_cache_create_opts, []),
     safe_new_table(document_contents, ?XETS, set, ExtraCreateOpts),
+    safe_new_table(document_version, ?XETS, set, ExtraCreateOpts),
     safe_new_table(syntax_tree, ?XETS, set, ExtraCreateOpts),
     safe_new_table(dodged_syntax_tree, ?XETS, set, ExtraCreateOpts),
     safe_new_table(references, ets, bag, []),
     safe_new_table(document_inlayhints, ?XETS, set, ExtraCreateOpts),
+    safe_new_table(document_semantic_tokens, ?XETS, set, ExtraCreateOpts),
+    safe_new_table(document_diagnostics, ?XETS, set, ExtraCreateOpts),
     gen_server:start_link({local, ?SERVER}, ?MODULE, [],[]).
 
 init(_Args) ->
@@ -218,9 +342,12 @@ handle_info(_Info, State) ->
 
 terminate(_Reason, _State) ->
     delete_cache_file(document_contents),
+    delete_cache_file(document_version),
     delete_cache_file(syntax_tree),
     delete_cache_file(dodged_syntax_tree),
     delete_cache_file(document_inlayhints),
+    delete_cache_file(document_semantic_tokens),
+    delete_cache_file(document_diagnostics),
     ok.
 
 code_change(_OldVersion, State, _Extra) ->
@@ -419,10 +546,12 @@ delete_project_files([], State) ->
     State;
 delete_project_files([File | Files], State) ->
     ?XETS:delete(document_contents, File),
+    ?XETS:delete(document_version, File),
     ?XETS:delete(syntax_tree, File),
     ?XETS:delete(dodged_syntax_tree, File),
     ets:delete(references, File),
     ?XETS:delete(document_inlayhints, File),
+    ?XETS:delete(document_semantic_tokens, File),
     Module = filename:rootname(filename:basename(File)),
     UpdatedFiles = lists:delete(File, maps:get(Module, State#state.project_modules, [])),
     UpdatedProjectModules = case UpdatedFiles of
@@ -475,13 +604,28 @@ delete_cache_file(Name) ->
             file:delete(FileName)
     end.
 
+%% Parses File's on-disk contents - except for a document open in the editor,
+%% whose buffer can hold unsaved changes the file does not: parsing the file
+%% there would store a tree older than the buffer while stamping it with the
+%% buffer's version, i.e. pass it off as current. Project-wide background
+%% parsing (parse_next_file_in_background/1) and the file watcher both come
+%% through here, and either can land while a document is open and edited.
 parse_and_store(File, ContentsFile) ->
+    case {ContentsFile, filename:extension(File), get_document_contents(File)} of
+        {File, ".erl", Contents} when Contents =/= undefined ->
+            parse_document(File);
+        _ ->
+            parse_and_store(File, ContentsFile, get_document_version(File))
+    end.
+
+parse_and_store(File, ContentsFile, Version) ->
+    ?XETS:delete(document_diagnostics, File),
     {SyntaxTree, DodgedSyntaxTree} = lsp_parse:parse_source_file(File, ContentsFile),
     case SyntaxTree of
         undefined ->
             ok;
         _ ->
-            ?XETS:insert(syntax_tree, {File, SyntaxTree}),
+            ?XETS:insert(syntax_tree, {File, Version, SyntaxTree}),
             ets:delete(references, File),
             ?XETS:delete(document_inlayhints, File),
             lsp_navigation:fold_references(fun (Reference, Line, Column, End, _) ->
@@ -491,13 +635,15 @@ parse_and_store(File, ContentsFile) ->
     end,
     case DodgedSyntaxTree of
         undefined -> ok;
-        _ -> ?XETS:insert(dodged_syntax_tree, {File, DodgedSyntaxTree})
+        _ -> ?XETS:insert(dodged_syntax_tree, {File, Version, DodgedSyntaxTree})
     end.
 
+%% `undefined` for never parsed, `{Version, Tree}` otherwise - Version being
+%% the document_version the contents were read at (see parse_document/1).
 get_tree(TreeType, File) ->
     case ?XETS:lookup(TreeType, File) of
-        [{File, SyntaxTree}] ->
-            SyntaxTree;
+        [{File, Version, SyntaxTree}] ->
+            {Version, SyntaxTree};
         _ ->
             undefined
     end.

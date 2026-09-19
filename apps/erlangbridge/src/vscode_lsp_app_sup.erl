@@ -15,7 +15,8 @@ init(VsCodePort) ->
     DocSpec = doc_spec(),
     ConfigSpec = config_spec(),
     HelpSpec = help_spec(),
-    StartSpecs = {{one_for_one, 60, 3600}, [ConfigSpec, DocSpec, SocketSpec, HelpSpec]},
+    DiagnosticsSpec = diagnostics_spec(),
+    StartSpecs = {{one_for_one, 60, 3600}, [ConfigSpec, DocSpec, DiagnosticsSpec, SocketSpec, HelpSpec]},
     {ok, StartSpecs}.
 
 socket_spec(VsCodePort) ->
@@ -39,6 +40,13 @@ config_spec() ->
     modules => [gen_lsp_config_sup],
     type => supervisor}.
 
+diagnostics_spec() ->
+    #{id => lsp_diagnostics,
+    start => {lsp_diagnostics, start_link, []},
+    restart => permanent,
+    modules => [lsp_diagnostics],
+    type => worker}.
+
 help_spec() ->
     #{id => gen_lsp_help_sup,
     start => {gen_lsp_help_sup, start_link, []},
@@ -59,5 +67,5 @@ start_sup_help() ->
     supervisor:start_child(?MODULE, help_spec()).
 
 start_child(Arg) ->
-    error_logger:error_msg([{vscode_lsp_app_sup, start_child}, {arg, Arg}]),
+    logger:error([{vscode_lsp_app_sup, start_child}, {arg, Arg}]),
     error.

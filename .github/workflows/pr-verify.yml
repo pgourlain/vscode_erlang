@@ -10,33 +10,36 @@ on:
   
 jobs:
   pr-verify-job:
-    name: Node ${{ matrix.node }} on ${{ matrix.os }}
+    name: Node ${{ matrix.node }} / OTP ${{ matrix.otp }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
-      fail-fast: true
+      # Run every leg to completion instead of cancelling the rest on the
+      # first failure - with an OTP matrix we want to see whether a
+      # failure is version-specific, not just that "something" broke. The
+      # overall workflow is still reported as failed if any leg fails.
+      fail-fast: false
       matrix:
         os: [ubuntu-latest]
         node:
           - 20
+        # apps/erlangbridge branches on OTP_RELEASE (e.g. lsp_handlers.erl
+        # picks vscode_erlfmt on OTP >= 21, erl_tidy otherwise), so pin
+        # exact releases via erlef/setup-beam rather than "whatever apt/
+        # brew currently ships" - the previous ad-hoc install had no
+        # version guarantee at all.
+        otp:
+          - '25.3'
+          - '26.2'
     steps:
-      - run: |
-          sudo apt-get update
-          sudo apt-get install erlang  
-        if: runner.os == 'Linux'   
-      - run: |
-          brew install erlang@26
-        if: runner.os =='macOS' 
-      - run: |
-          VERSION=$(ls /opt/homebrew/Cellar/erlang/)
-          export PATH=$PATH:/opt/homebrew/Cellar/erlang/$VERSION/bin
-          erl -version
-        name: setup path
-        if: runner.os =='macOS' 
       - name: Checkout Source
         uses: actions/checkout@v4
         with:
           submodules: true
+      - name: Install Erlang/OTP ${{ matrix.otp }}
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ matrix.otp }}
       - name: Install Node ${{ matrix.node }}
         uses: actions/setup-node@v4
         with:
@@ -47,6 +50,6 @@ jobs:
         if: runner.os == 'Linux'
       - run: npm test
         if: runner.os != 'Linux'
-      - run: |
-          ./rebar3 ct
-                
+      - name: Erlang Common Test suites
+        run: ./rebar3 ct
+

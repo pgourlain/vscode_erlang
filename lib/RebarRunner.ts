@@ -6,6 +6,7 @@ import RebarShell from './RebarShell';
 import * as utils from './utils'
 import { ErlangOutputAdapter } from './vscodeAdapter';
 import { getElangConfigConfiguration } from './ErlangConfigurationProvider';
+import { DialyzerStatus } from './dialyzerStatus';
 
 var rebarOutputChannel: vscode.OutputChannel;
 
@@ -25,6 +26,7 @@ export class RebarRunner implements vscode.Disposable {
 	private updateDepsCommand: vscode.Disposable;
 	private eunitCommand: vscode.Disposable;
 	private dialyzerCommand: vscode.Disposable;
+	private dialyzerStatus: DialyzerStatus;
 
 	public activate(context: vscode.ExtensionContext) {
 		const subscriptions = context.subscriptions;
@@ -38,6 +40,7 @@ export class RebarRunner implements vscode.Disposable {
 		vscode.workspace.onDidCloseTextDocument(this.onCloseDocument.bind(this), null, subscriptions);
 		vscode.workspace.onDidOpenTextDocument(this.onOpenDocument.bind(this), null, subscriptions);
 		this.diagnosticCollection = vscode.languages.createDiagnosticCollection("erlang");
+		this.dialyzerStatus = new DialyzerStatus();
 		subscriptions.push(this);
 	}
 
@@ -49,6 +52,7 @@ export class RebarRunner implements vscode.Disposable {
 		this.updateDepsCommand.dispose();
 		this.eunitCommand.dispose();
 		this.dialyzerCommand.dispose();
+		this.dialyzerStatus.dispose();
 	}
 
 	private runRebarCompile() {
@@ -147,7 +151,11 @@ export class RebarRunner implements vscode.Disposable {
     private runDialyzer(): void {
 		try {
 			const statusBarMessage = vscode.window.setStatusBarMessage('$(loading~spin) Running Dialyzer');
-			this.runScript(["dialyzer"]).then(data => {
+			this.dialyzerStatus.setRunning(true);
+			this.runScript(["dialyzer"]).finally(() => {
+				statusBarMessage.dispose();
+				this.dialyzerStatus.setRunning(false);
+			}).then(data => {
                 this.diagnosticCollection.clear();
                 var lines = data.split("\n");
                 var currentFile = null;
@@ -180,7 +188,6 @@ export class RebarRunner implements vscode.Disposable {
                     vscode.commands.executeCommand("workbench.action.problems.focus");
 				else
 					vscode.window.showInformationMessage('Dialyzer did not find any problems');
-				statusBarMessage.dispose();
             }, reject => {});
 		} catch (e) {
 			vscode.window.showErrorMessage('Couldn\'t execute Dialyzer.\n' + e);

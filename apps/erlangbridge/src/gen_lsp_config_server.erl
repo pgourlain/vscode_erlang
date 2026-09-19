@@ -6,7 +6,8 @@
 -export([standard_modules/0, bifs/0]).
 -export([update_config/2, root/0, tmpdir/0, username/0, codeLensEnabled/0, includePaths/0, linting/0,
          verbose/0, autosave/0, proxy/0, search_files_exclude/0, search_exclude/0,
-         formatting_line_length/0, inlayHintsEnabled/0, verbose_is_include/1]).
+         formatting_line_length/0, inlayHintsEnabled/0, semanticTokensEnabled/0, formatterEnabled/0, verbose_is_include/1,
+         get_section/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -34,7 +35,7 @@ compute_erlang_section(Key) ->
     if 
         Key =:= erlang ->
             Excludes = get_config_entry(erlang, verboseExcludeFilter, ""),
-            Splitted = lists:map(fun(X) -> {lsp_utils:to_binary(X), false} end, lists:flatmap( fun(X) -> string:split(X, ",") end, string:split(Excludes, ";"))),
+            Splitted = lists:map(fun(X) -> {lsp_utils:to_binary(X), false} end, lists:flatmap( fun(X) -> string:split(X, ",",all) end, string:split(Excludes, ";",all))),
             gen_server:call(?SERVER, {update_config, erlang_computed, #{ verboseExcludeFilter => maps:from_list(Splitted)}});
         true -> ok
     end.
@@ -42,6 +43,12 @@ compute_erlang_section(Key) ->
 
 get_config() ->
     gen_server:call(?SERVER, get_config).
+
+%% @doc The whole stored section (undefined when never pushed by the client).
+%% lsp_handlers:configuration/2 uses it to tell a genuine settings change from
+%% a duplicate push of the same settings.
+get_section(Key) ->
+    maps:get(Key, get_config(), undefined).
 
 get_config_entry(Section, Entry, Default) ->
     SectionMap = maps:get(Section, get_config(), #{}),
@@ -55,6 +62,12 @@ codeLensEnabled() ->
 
 inlayHintsEnabled() ->
     get_config_entry(erlang, inlayHintsEnabled, false).
+
+semanticTokensEnabled() ->
+    get_config_entry(erlang, semanticTokensEnabled, true).
+
+formatterEnabled() ->
+    get_config_entry(erlang, formatterEnabled, true).
 
 includePaths() ->
     get_config_entry(erlang, includePaths, []).

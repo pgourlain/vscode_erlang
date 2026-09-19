@@ -4,7 +4,7 @@ import {
 	, Breakpoint, ModuleEvent, Module, ContinuedEvent, Variable, BreakpointEvent
 } from '@vscode/debugadapter';
 import { DebugProtocol } from '@vscode/debugprotocol';
-import { ErlangShellForDebugging, LaunchRequestArguments, FunctionBreakpoint } from './ErlangShellDebugger';
+import { ErlangShellForDebugging, LaunchRequestArguments, AttachRequestArguments, FunctionBreakpoint, validateAttachArguments } from './ErlangShellDebugger';
 import { ILogOutput } from './GenericShell';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -47,6 +47,8 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 	private _conditionalBreakPoints: Map<string, Map<number, ConditionalBreakpoint>> = new Map();
 	private _variableHandles: Handles<DebugVariable>;
 	private _LaunchArguments: LaunchRequestArguments;
+	// set by an attach request: the debuggee is a running node we must not stop
+	private _AttachArguments: AttachRequestArguments;
 	private _port: number;
 
 	public constructor(verbose: boolean) {
@@ -123,6 +125,7 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 		response.body.supportsEvaluateForHovers = true;
 		response.body.supportsSetVariable = false;
 		response.body.supportsStepBack = false;
+		response.body.supportTerminateDebuggee = true;
 		response.body.exceptionBreakpointFilters = [];
 		/*
 		*/
@@ -161,7 +164,41 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 		});
 	}
 
+	protected attachRequest(response: DebugProtocol.AttachResponse, args: AttachRequestArguments): void {
+		if (!args.erlpath) {
+			args.erlpath = "erl";
+		} else if (!fs.existsSync(args.erlpath)) {
+			this.sendErrorResponse(response, 3000, `The specified erlPath is invalid : check your launch configuration.`);
+			return;
+		}
+		const invalid = validateAttachArguments(args);
+		if (invalid) {
+			this.sendErrorResponse(response, 3000, `Invalid attach configuration: ${invalid}`);
+			return;
+		}
+		this._AttachArguments = args;
+		// cwd, verbose and erlangPath are read through _LaunchArguments everywhere else
+		this._LaunchArguments = <LaunchRequestArguments><unknown>{
+			cwd: args.cwd, erlpath: args.erlpath, verbose: args.verbose, erlangPath: args.erlangPath,
+			arguments: "", addEbinsToCodepath: false, noDebug: false
+		};
+		if (args.verbose) {
+			this.log(`debugger attachRequest arguments : ${JSON.stringify(args)}`);
+		}
+		this.erlangConnection.Start(args.verbose, args.erlangPath).then(port => {
+			this._port = port;
+			this.sendEvent(new InitializedEvent());
+			this.sendResponse(response);
+		}).catch(reason => {
+			this.sendErrorResponse(response, 3000, `Attaching debugger throw an error : ${reason}`);
+		});
+	}
+
 	protected configurationDoneRequest(response: DebugProtocol.ConfigurationDoneResponse, argsConf: DebugProtocol.ConfigurationDoneArguments): void {
+		if (this._AttachArguments) {
+			this.attachAfterConfiguration(response);
+			return;
+		}
 		var args = this._LaunchArguments;
 		if (args.verbose) {
 			this.debug("Starting erlang");
@@ -179,8 +216,32 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 	}
 
 
+	private attachAfterConfiguration(response: DebugProtocol.ConfigurationDoneResponse): void {
+		const args = this._AttachArguments;
+		this.log(`Attaching to node ${args.node}`);
+		this.erlDebugger.erlangPath = args.erlangPath;
+		var bridgeBinPath = path.normalize(path.join(erlangBridgePath, "..", "ebin"))
+		this.erlDebugger.Attach(args.erlpath, args.cwd, this._port, bridgeBinPath, args).then(r => {
+			this.sendResponse(response);
+		}).catch(reason => {
+			this.sendErrorResponse(response, 3000, `Attaching to ${args.node} throw an error : ${reason}`);
+		});
+	}
+
 	protected disconnectRequest(response: DebugProtocol.DisconnectResponse, args: DebugProtocol.DisconnectArguments): void {
 		//this.debug("disconnectRequest");
+		if (this._AttachArguments) {
+			// Detach unless asked to stop the node: stopping a node someone
+			// else started must be an explicit choice.
+			if (this.erlangConnection?.isConnected) {
+				(args?.terminateDebuggee ? this.erlangConnection.debuggerExit() : this.erlangConnection.debuggerDetach())
+					.finally(() => this.erlangConnection.closeEventsReceiver());
+			}
+			this.sendResponse(response);
+			this.erlDebugger.EndAttach();
+			this.erlDebugger.CleanupAfterStart();
+			return;
+		}
 		if (this.erlangConnection) {
 			this.erlangConnection.Quit();
 		}
