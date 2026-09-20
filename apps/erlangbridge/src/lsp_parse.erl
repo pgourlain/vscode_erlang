@@ -1,5 +1,6 @@
 -module(lsp_parse).
 -export([parse_source_file/2, parse_config_file/2, get_include_path/1, get_include_path_no_build/1, scan_source_file/2]).
+-export([get_parse_transforms_from_rebar_config/1]).
 -compile(nowarn_deprecated_catch).
 
 %% @doc
@@ -174,6 +175,25 @@ get_define_from_rebar_config(File) ->
 			   end,
 	  DefaultDefines = [],
 	  ErlOptsDefines ++ DefaultDefines
+    end.
+
+%% @doc `-compile({parse_transform, M})` in the source file itself is picked
+%% up by lsp_syntax:parse_transforms/1 straight from the syntax tree. This
+%% covers the other common way to declare one - `{parse_transform, M}` inside
+%% `erl_opts` in rebar.config, with no attribute in the module at all (#216).
+get_parse_transforms_from_rebar_config(File) ->
+    RebarConfig = find_rebar_config(filename:dirname(File)),
+    case RebarConfig of
+        undefined ->
+            [];
+        _ ->
+            case file:consult(RebarConfig) of
+                {ok, Terms} ->
+                    ErlOpts = proplists:get_value(erl_opts, Terms, []),
+                    proplists:get_all_values(parse_transform, ErlOpts);
+                _ ->
+                    []
+            end
     end.
 
 find_rebar_config(Dir) ->

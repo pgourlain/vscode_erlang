@@ -103,17 +103,30 @@ export class GenericShell extends EventEmitter {
                     childEnv.PATH = this.erlangPath + separator + childEnv.PATH;
                 }
 
+                // A spawn that never starts (missing binary, missing cwd like a
+                // never-built `_build`, no /bin/sh, ...) only fires 'error', never
+                // 'exit' reliably. Before this flag, that error was logged and
+                // dropped: every caller here waits on the 'close' event (see
+                // RunProcess above and ErlangShellLSP.Start's caller), so it hung
+                // until an unrelated layer surfaced an opaque failure later
+                // (#326, #239) instead of the real spawn error.
+                let launchFailed = false;
                 this.childProcess = spawn(processName, args, { cwd: startDir, shell: true, stdio: 'pipe', env : childEnv });
                 this.childProcess.on('error', error => {
+                    launchFailed = true;
                     this.log("stderr", error.message);
                     if (process.platform == 'win32') {
                         this.log("stderr", "ensure '" + processName + "' is in your path.");
                     }
+                    this.emit('close', null, error);
                 });
                 this.childProcess.stdout.on('data', this.stdout.bind(this));
                 this.childProcess.stderr.on('data', this.stderr.bind(this));
 
                 this.childProcess.on('exit', (exitCode: number, signal: string) => {
+                    if (launchFailed) {
+                        return;
+                    }
                     this.log("log", processName + ' exit code:' + exitCode);
                     this.emit('close', exitCode);
                 });

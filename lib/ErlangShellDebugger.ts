@@ -173,6 +173,12 @@ export class ErlangShellForDebugging extends GenericShell {
     }
 
     private findEbinDirs(dir: string, dirList: string[] = []) {
+        // dir is typically "<project>/_build", which does not exist until the
+        // project has been compiled at least once (#172, #173) - readdirSync
+        // on a missing directory throws ENOENT and aborts the whole launch.
+        if (!fs.existsSync(dir)) {
+            return dirList;
+        }
         fs.readdirSync(dir).forEach(name => {
             const fullpath = path.join(dir, name)
             if (fs.existsSync(fullpath) && fs.statSync(fullpath).isDirectory()) {
@@ -186,6 +192,9 @@ export class ErlangShellForDebugging extends GenericShell {
     }
 
     private findErlFiles(dir: string, fileList: string[] = []) {
+        if (!fs.existsSync(dir)) {
+            return fileList;
+        }
         fs.readdirSync(dir).forEach(file => {
             if (file == '_build')
                 return;
@@ -199,11 +208,10 @@ export class ErlangShellForDebugging extends GenericShell {
     }
 
     private excludeUnwantedFiles(bp: DebugProtocol.Breakpoint) : boolean {
-        //exclude files with specific extensions
-        if (path.extname(bp.source.path)==".src") {
-            return false;
-        }
-        return true;
+        // allowlist: only breakpoints in real Erlang source can be shipped to
+        // int:ni/1 - anything else (.app.src, rebar.config, .config, ...)
+        // fails erl_parse and kills the debuggee (#140)
+        return path.extname(bp.source.path) === ".erl";
     }
 
     private createArgsFilev1(startDir: string, noDebug: boolean, addEbinsToCodepath: boolean, verbose: boolean): string[] {

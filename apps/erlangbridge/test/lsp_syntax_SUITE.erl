@@ -22,6 +22,8 @@ all() -> [
     unused_function_is_reported,
     missing_include_is_reported,
     bad_record_field_is_reported,
+    parse_transform_from_rebar_config_is_applied,
+    eunit_generator_is_not_reported_as_unused,
     valid_app_src_parses_cleanly,
     invalid_app_src_reports_the_parse_error,
     valid_rebar_config_parses_cleanly,
@@ -85,6 +87,26 @@ bad_record_field_is_reported(Config) ->
     #{info := Info} = Item,
     ?assertEqual(6, maps:get(line, Info)),
     assert_message_contains(Info, "rec").
+
+%% #216: a parse transform declared as `{parse_transform, M}` in rebar.config's
+%% erl_opts - not via a -compile(...) attribute in the module - must still run
+%% before linting. consumer.erl calls a helper/0 that only exists once
+%% inject_helper:parse_transform/2 injects it (see the fixture files under
+%% lsp_syntax_SUITE_data/parse_transform/).
+parse_transform_from_rebar_config_is_applied(Config) ->
+    AppDir = ?config(data_dir, Config),
+    SubDir = filename:join(AppDir, "parse_transform"),
+    gen_lsp_config_server:update_config(root, SubDir),
+    File = filename:join(SubDir, "consumer.erl"),
+    ?assertEqual(#{parse_result => true}, lsp_syntax:validate_parsed_source_file(File)).
+
+%% #89: eunit exports every 0-arity function whose name ends in "_test" or
+%% "_test_" (generators). Both must be filtered out of unused_function
+%% warnings, not just the plain "_test" case.
+eunit_generator_is_not_reported_as_unused(Config) ->
+    AppDir = ?config(data_dir, Config),
+    File = filename:join(AppDir, "eunit_generator.erl"),
+    ?assertEqual(#{parse_result => true}, lsp_syntax:validate_parsed_source_file(File)).
 
 %% Since task 2.1, every errors_warnings item also carries a generic,
 %% JSON-safe `correlation_data` (module + the raw erl_lint/erl_parse

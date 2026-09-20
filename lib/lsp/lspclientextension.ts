@@ -299,9 +299,13 @@ export function activate(context: ExtensionContext) {
 			}
 			let erlangLsp = new ErlangShellLSP(ErlangOutputAdapter(lspOutputChannel));
 			let connected = false;
-			erlangLsp.on('close', (exitCode) => {
+			// spawnError is set when erl itself never started (GenericShell's
+			// 'error' event, e.g. ENOENT on a missing cwd or missing binary);
+			// exitCode alone doesn't say why the server never came up.
+			erlangLsp.on('close', (exitCode, spawnError?: Error) => {
 				if (!connected) {
-					reject(new Error(`erl exited with code ${exitCode} before the language server was reachable (is erl on the PATH? see erlang.erlangPath)`));
+					const reason = spawnError ? spawnError.message : `erl exited with code ${exitCode}`;
+					reject(new Error(`${reason} before the language server was reachable (is erl on the PATH? see erlang.erlangPath)`));
 				}
 			});
 

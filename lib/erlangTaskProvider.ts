@@ -20,7 +20,7 @@ interface DetectedTask {
 }
 
 /**
- * Provides rebar3 tasks (compile, eunit, ct, dialyzer, release, shell, clean)
+ * Provides rebar3 tasks (compile, eunit, ct, dialyzer, release, escriptize, shell, clean)
  * for every workspace folder holding a rebar.config. Complements the ad-hoc
  * commands of RebarRunner: tasks can be bound to keys, chained with
  * `dependsOn`, and customized in tasks.json.
@@ -93,7 +93,8 @@ function taskLabel(definition: Rebar3TaskDefinition): string {
 
 /**
  * Tasks worth offering for the project described by `rebarConfigPath`.
- * `release` is only offered when rebar.config configures relx.
+ * `release` is only offered when rebar.config configures relx; `escriptize`
+ * only when it configures escript_main_app/escript_name/escript_*.
  */
 export function detectTasks(rebarConfigPath: string): DetectedTask[] {
     let contents = '';
@@ -110,6 +111,11 @@ export function detectTasks(rebarConfigPath: string): DetectedTask[] {
     ];
     if (/\{\s*relx\s*,/.test(stripComments(contents))) {
         tasks.push({ command: 'release', group: vscode.TaskGroup.Build, problemMatchers: ['$rebar3'] });
+    }
+    // escript_main_app / escript_name / escript_* options configure `rebar3
+    // escriptize` (#19); offer the task only for projects that use them.
+    if (/\{\s*escript_(main_app|name|[a-z_]+)\s*,/.test(stripComments(contents))) {
+        tasks.push({ command: 'escriptize', group: vscode.TaskGroup.Build, problemMatchers: ['$rebar3'] });
     }
     tasks.push({ command: 'shell', problemMatchers: [] });
     tasks.push({ command: 'clean', group: vscode.TaskGroup.Clean, problemMatchers: [] });
