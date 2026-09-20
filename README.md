@@ -1,7 +1,7 @@
 # Erlang for Visual Studio Code
 
-[![Visual Studio Marketplace](https://img.shields.io/visual-studio-marketplace/v/pgourlain.erlang?style=for-the-badge&label=VS%20Marketplace&logo=visual-studio-code)](https://marketplace.visualstudio.com/items?itemName=pgourlain.erlang)
-[![Installs](https://img.shields.io/visual-studio-marketplace/i/pgourlain.erlang?style=for-the-badge)](https://marketplace.visualstudio.com/items?itemName=pgourlain.erlang)
+[![Visual Studio Marketplace](https://vsmarketplacebadges.dev/version/pgourlain.erlang.svg)](https://marketplace.visualstudio.com/items?itemName=pgourlain.erlang)
+[![Installs](https://vsmarketplacebadges.dev/installs/pgourlain.erlang.svg)](https://marketplace.visualstudio.com/items?itemName=pgourlain.erlang)
 [![Build Status](https://img.shields.io/github/actions/workflow/status/pgourlain/vscode_erlang/pr-verify.yml?branch=master&style=for-the-badge&logo=github)](https://github.com/pgourlain/vscode_erlang/actions?query=workflow:pr-verify)
 [![License](https://img.shields.io/github/license/pgourlain/vscode_erlang?style=for-the-badge&logo=erlang)](https://github.com/pgourlain/vscode_erlang/blob/master/LICENSE)
 
