@@ -14,6 +14,11 @@
   - Remove the `onDebugInitialConfigurations` activation event: it is not tied to any language, so it activated the extension in non-Erlang workspaces
   - Detect Erlang projects anywhere in the workspace (`rebar.config`, `erlang.mk`, `*.app.src`, `*.erl`, `*.hrl`), not only a `rebar.config` at the root
 
+* OTP 27/28 compatibility
+  - Update the bundled rebar3 from 3.18.0 to 3.24.0: the old escript was built with OTP 24 and fails to load on OTP 28 (`op bs_append ... please re-compile this module`), so the language server never started
+  - Hover and signature help show `-spec`s for OTP functions again on OTP 27+, whose doc chunks no longer carry them
+  - Running Common Test suites from the Testing view no longer aborts with `make_failed` on OTP 28
+
 ---
 
 ## Version 1.2.0 (September 20, 2026)

@@ -88,13 +88,49 @@ safe_get_help(Module, Function, Callback) ->
         {error, eep48_not_supported}.
 -endif.
 
-eep48_layout_doc(_Module, Function, #docs_v1{ docs = Docs } = _D, Callback) ->
+eep48_layout_doc(Module, Function, #docs_v1{ docs = Docs } = _D, Callback) ->
     FnDoc = lists:filter(fun({{function, F, _},_Anno,_Sig,_Doc,_Meta}) ->
                              F =:= Function;
                         (_) ->
                              false
                      end, Docs),
-    Callback(_Module, Function, FnDoc, Docs).
+    Callback(Module, Function, add_missing_signatures(Module, FnDoc), Docs).
+
+%% Up to OTP 26 the doc chunk carries each function's -spec as the
+%% `signature` metadata. From OTP 27 on it doesn't anymore (shell_docs
+%% reads the specs from the beam instead), so fill it in the same way:
+%% hover and signature help both rely on it.
+add_missing_signatures(Module, FnDocs) ->
+    case lists:all(fun({_,_,_,_,Meta}) -> maps:is_key(signature, Meta) end, FnDocs) of
+        true ->
+            FnDocs;
+        false ->
+            Specs = module_specs(Module),
+            lists:map(
+              fun({{_,F,A},_,_,_,Meta} = FnDoc) when not is_map_key(signature, Meta) ->
+                      case maps:find({F,A}, Specs) of
+                          {ok, Spec} -> setelement(5, FnDoc, Meta#{signature => [Spec]});
+                          error -> FnDoc
+                      end;
+                 (FnDoc) ->
+                      FnDoc
+              end, FnDocs)
+    end.
+
+module_specs(Module) ->
+    Path = case code:which(Module) of
+               preloaded -> filename:join([code:lib_dir(erts), "ebin", atom_to_list(Module) ++ ".beam"]);
+               Other -> Other
+           end,
+    case is_list(Path) andalso beam_lib:chunks(Path, [abstract_code]) of
+        {ok, {_, [{abstract_code, {raw_abstract_v1, Forms}}]}} ->
+            maps:from_list(
+              [{{F,A}, {attribute, Anno, spec, {{F,A}, Clauses}}}
+               || {attribute, Anno, spec, {Key, Clauses}} <- Forms,
+                  {F,A} <- [case Key of {_M,F0,A0} -> {F0,A0}; FA -> FA end]]);
+        _ ->
+            #{}
+    end.
 
 eep48_render_fun_doc(_Module, _Function, FnDoc, Docs) ->
     list_to_binary(lists:flatten(render_function(FnDoc, Docs))).
