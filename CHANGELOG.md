@@ -1,6 +1,6 @@
 # Change log
 
-## Version 1.2.1 (September XX, 2026)
+## Version 1.2.1 (September 21, 2026)
 
 ### Bug fixes (backlog triage)
 * [172](https://github.com/pgourlain/vscode_erlang/issues/172), [173](https://github.com/pgourlain/vscode_erlang/issues/173) : Launching the debugger on a project that has never been `rebar3 compile` no longer crashes with `ENOENT ... scandir '.../_build'`
@@ -9,6 +9,10 @@
 * [89](https://github.com/pgourlain/vscode_erlang/issues/89) : EUnit test generators (`foo_test_/0`) no longer report a false "unused function" warning after `-include_lib("eunit/include/eunit.hrl")`
 * [19](https://github.com/pgourlain/vscode_erlang/issues/19) : `rebar3 escriptize` is now offered as a task for projects that configure `escript_main_app`/`escript_name`
 * A spawn failure that prevents `erl` or `rebar3` from ever starting (missing `_build`, missing binary, ...) is now reported with its real reason instead of an opaque downstream error
+
+* Review when the extension is activated in a workspace
+  - Remove the `onDebugInitialConfigurations` activation event: it is not tied to any language, so it activated the extension in non-Erlang workspaces
+  - Detect Erlang projects anywhere in the workspace (`rebar.config`, `erlang.mk`, `*.app.src`, `*.erl`, `*.hrl`), not only a `rebar.config` at the root
 
 ---
 

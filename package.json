@@ -1,7 +1,7 @@
 {
 	"name": "erlang",
 	"description": "Erlang language extension for Visual Studio Code",
-	"version": "1.2.0",
+	"version": "1.2.1",
 	"icon": "images/icon.png",
 	"publisher": "pgourlain",
 	"engines": {
@@ -24,7 +24,6 @@
 	],
 	"activationEvents": [
 		"onLanguage:erlang",
-		"onDebugInitialConfigurations",
 		"onDebugResolve:erlang",
 		"onCommand:extension.rebarBuild",
 		"onCommand:extension.rebarGetDeps",
@@ -32,7 +31,11 @@
 		"onCommand:extension.rebareunit",
 		"onCommand:extension.erleunit",
 		"onCommand:extension.dialyzer",
-		"workspaceContains:rebar.config"
+		"workspaceContains:**/rebar.config",
+		"workspaceContains:**/erlang.mk",
+		"workspaceContains:**/*.app.src",
+		"workspaceContains:**/*.erl",
+		"workspaceContains:**/*.hrl"
 	],
 	"main": "./out/lib/extension.js",
 	"contributes": {
