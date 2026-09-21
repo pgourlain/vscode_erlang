@@ -342,6 +342,11 @@ run_ct(Socket, Targets, Table, Coverage) ->
         Opts = [
             {suite, Suite},
             {logdir, LogDir},
+            %% The suite is already compiled and loaded by
+            %% ensure_module_loaded/2. Without this, and with no `dir`,
+            %% CT (OTP 28+) tries to `make` it in the cwd and aborts with
+            %% {make_failed, ...} before running any case.
+            {auto_compile, false},
             {ct_hooks, [{lsp_testing_ct_hook, [{result_table, Table}]}]}
         ] ++ case Fns of
             [] -> [];
