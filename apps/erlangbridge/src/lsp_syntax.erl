@@ -9,7 +9,7 @@
 validate_parsed_source_file(File) ->
     FileSyntaxTree = gen_lsp_doc_server:get_syntax_tree(File),
     BehaviourModulea = behaviour_modules(FileSyntaxTree),
-    ParseTranformModules = parse_transforms(FileSyntaxTree),
+    ParseTranformModules = parse_transforms(FileSyntaxTree, File),
     ModulesToDelete = load_not_loaded_modules(BehaviourModulea ++ ParseTranformModules),
     NewFileSyntaxTree = parse_transform(FileSyntaxTree, ParseTranformModules),
     Result = lint(NewFileSyntaxTree, File),
@@ -26,11 +26,19 @@ behaviour_modules(FileSyntaxTree) ->
 		(_) -> false
 	end, FileSyntaxTree).
 
-parse_transforms(undefined) ->
+%% @doc Modules to run as parse transforms before linting: the
+%% `-compile({parse_transform, M})` attribute in the file itself, unioned
+%% with `{parse_transform, M}` declared in `erl_opts` in rebar.config, which
+%% carries no attribute in the module at all (#216).
+parse_transforms(FileSyntaxTree, File) ->
+    lists:usort(parse_transforms_attribute(FileSyntaxTree) ++
+        lsp_parse:get_parse_transforms_from_rebar_config(File)).
+
+parse_transforms_attribute(undefined) ->
     [];
-parse_transforms(FileSyntaxTree) ->
-    lists:filtermap(fun 
-        ({attribute, _, compile, {parse_transform, Module}}) -> {true, Module}; 
+parse_transforms_attribute(FileSyntaxTree) ->
+    lists:filtermap(fun
+        ({attribute, _, compile, {parse_transform, Module}}) -> {true, Module};
         (_) -> false
     end, FileSyntaxTree).
 
@@ -43,7 +51,7 @@ load_not_loaded_modules(Modules) ->
                         gen_lsp_server:lsp_log("cannot find module '~p'", [Module]),
                         Acc;
                     SourceFile ->
-                        Options = [binary, report_errors, report_warningsk | [{i, Path} || Path <- lsp_parse:get_include_path(SourceFile)]],
+                        Options = [binary, report_errors, report_warnings | [{i, Path} || Path <- lsp_parse:get_include_path(SourceFile)]],
                         case compile:file(SourceFile, Options) of
                             {ok, ModuleName, Binary} -> 
                                 case code:load_binary(ModuleName, lists:flatten(io_lib:format("~p.beam", [ModuleName])), Binary) of
@@ -272,23 +280,24 @@ lint(FileSyntaxTree, File) ->
 filter_unused_functions({_, []}) ->
     [];
 filter_unused_functions({File, Warnings}) ->
-    %Filter unused function that ends with "_test", to avoid unwanted warnings in unit tests modules
+    %% Filter unused-function warnings for names EUnit exports on our
+    %% behalf: plain tests ("foo_test"), generators ("foo_test_", #89), and
+    %% the generated "_assert*" helpers from assert macros.
     %%TODO: if more than one filter to exclude, it should be configurable
     Result = {
-        File, 
+        File,
         lists:filter(fun (X) ->
                 case X of
-                    {_, _, {unused_function, {FuncName,_}}} -> 
+                    {_, _, {unused_function, {FuncName,_}}} ->
                         FuncNameStr = atom_to_list(FuncName),
-                        FuncNameStrLen = length(FuncNameStr),
-                        FindResult = FuncNameStrLen =< 4 orelse string:substr(FuncNameStr, FuncNameStrLen-4) =/= "_test",
-                        %gen_lsp_server:lsp_log("FuncName:~p, ~p",[FuncName, FindResult]),
-                        FindResult;
-                    _ -> true 
-                end 
+                        not (lists:suffix("_test", FuncNameStr) orelse
+                             lists:suffix("_test_", FuncNameStr) orelse
+                             lists:prefix("_assert", FuncNameStr));
+                    _ -> true
+                end
             end,
             Warnings)
-    }, 
+    },
     Result.
 
 extract_error_or_warning(_Type, {_, []}) ->

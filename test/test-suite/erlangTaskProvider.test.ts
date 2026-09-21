@@ -34,6 +34,17 @@ suite('rebar3 task provider', () => {
 		});
 	});
 
+	// #19: `rebar3 escriptize` was unreachable from the task provider even
+	// though it needs nothing beyond what release/relx detection already does.
+	test('offers escriptize only when the project builds one', () => {
+		withRebarConfig('{escript_main_app, myapp}.\n', file => {
+			assert.ok(commands(file).includes('escriptize'));
+		});
+		withRebarConfig('{erl_opts, [debug_info]}.\n', file => {
+			assert.ok(!commands(file).includes('escriptize'));
+		});
+	});
+
 	test('compile is the build task, eunit and ct are test tasks', () => {
 		withRebarConfig('', file => {
 			const tasks = detectTasks(file);
