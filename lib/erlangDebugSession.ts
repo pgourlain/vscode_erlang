@@ -206,6 +206,7 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 			this.debug(`	arguments : ${args.arguments}`);
 		}
 		this.erlDebugger.erlangPath = args.erlangPath;
+		this.erlDebugger.useShell = args.useShell ?? (process.platform === 'win32');
 		//path of erl_connection.beam not compiled with lsp, because we don't that the target access to lsp_xx.beam
 		var bridgeBinPath = path.normalize(path.join(erlangBridgePath, "..", "ebin"))
 		this.erlDebugger.Start(args.erlpath, args.cwd, this._port, bridgeBinPath, args).then(r => {
@@ -220,6 +221,7 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 		const args = this._AttachArguments;
 		this.log(`Attaching to node ${args.node}`);
 		this.erlDebugger.erlangPath = args.erlangPath;
+		this.erlDebugger.useShell = args.useShell ?? (process.platform === 'win32');
 		var bridgeBinPath = path.normalize(path.join(erlangBridgePath, "..", "ebin"))
 		this.erlDebugger.Attach(args.erlpath, args.cwd, this._port, bridgeBinPath, args).then(r => {
 			this.sendResponse(response);

@@ -1,5 +1,13 @@
 # Change log
 
+## Unreleased
+
+* [351](https://github.com/pgourlain/vscode_erlang/issues/351) : `erl`/`escript`/`erlc` no longer always spawn through a shell
+  - A sandboxed or minimal environment (e.g. Kiro) can deny or lack a shell entirely while still allowing the binary itself to run; spawning everything through `/bin/sh -c ...` there failed with `spawn /bin/sh ENOENT` regardless of whether `erl` or the working directory were actually fine
+  - New setting `erlang.useShell` (`auto`/`always`/`never`, default `auto`): `auto` uses a shell on Windows only (`cmd.exe` is still needed there for `.bat`/`.cmd` dispatch and quoting) and spawns the binary directly elsewhere; `always` restores the previous behavior everywhere, for setups whose `erlangArgs`/`erlangPath`/`rebarPath` rely on shell expansion
+
+---
+
 ## Version 1.2.2 (September 22, 2026)
 
 * [350](https://github.com/pgourlain/vscode_erlang/issues/350) : Semantic tokens in files that include a header
@@ -9,7 +17,6 @@
 
 Thanks to
 * [Alex Sasnouski](https://github.com/alesasnouski)
-
 
 ---
 

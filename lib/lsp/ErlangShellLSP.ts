@@ -14,13 +14,14 @@ export class ErlangShellLSP extends GenericShell {
         // -name <node>@127.0.0.1 so local remsh still connects over loopback (a short name
         // resolves to the LAN address, which the loopback-bound listener refuses), and
         // confine both the distribution listener (inet_dist_use_interface) and epmd
-        // (ERL_EPMD_ADDRESS) to 127.0.0.1. The {127,0,0,1} tuple is double-quoted so the
-        // shell (GenericShell spawns with shell:true) passes it as a single argument.
+        // (ERL_EPMD_ADDRESS) to 127.0.0.1. this.shellQuote double-quotes the
+        // {127,0,0,1} tuple when this shell is spawned through one (see
+        // erlang.useShell) so it re-parses as one argument.
         if (this.erlangDistributedNode) {
             debugStartArgs.push(
                 "-name", "vscode_" + listen_port.toString() + "@127.0.0.1",
                 "-setcookie", "vscode_" + listen_port.toString(),
-                "-kernel", "inet_dist_use_interface", '"{127,0,0,1}"',
+                "-kernel", "inet_dist_use_interface", this.shellQuote("{127,0,0,1}"),
                 "-env", "ERL_EPMD_ADDRESS", "127.0.0.1");
         }
         // Set management mode for large caches
