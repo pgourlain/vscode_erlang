@@ -222,10 +222,11 @@ For Erlang files the extension sets 4-space indentation (erlfmt's), enables sema
 - `erlang.verbose` - Activate technical traces for use in the extension development
 - `erlang.verboseExcludeFilter` - LSP methods excluded from technical traces
 - `erlang.debuggerRunMode` - How the debug adapter is run (`external`, `server`, `inline`)
+- `erlang.useShell` - Whether erl/escript/erlc are spawned through a shell (`auto`: Windows only, `always`, `never`)
 
 ## Help
 
-[Some configuration tricks](./HELP.MD)
+Something not working? [Help & Troubleshooting](./HELP.MD) lists the usual symptoms - `erl` not found, the language server not starting, false include errors, breakpoints never hit, memory usage on large projects - with their fixes.
 
 ## Credits
 
