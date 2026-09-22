@@ -18,6 +18,14 @@
 -define(MOD_DEPRECATED, 8).
 -define(MOD_DEFAULT_LIBRARY, 16).
 
+%% One token before encode/1 delta-encodes it: 1-based position, the length
+%% of the name, a tokenTypes index and an or'ed set of tokenModifiers bits.
+-type token() :: {pos_integer(), pos_integer(), non_neg_integer(),
+                  non_neg_integer(), non_neg_integer()}.
+-type form() :: tuple().
+%% Every AST position in this repo is a 1-based {Line, Column}.
+-type position() :: {pos_integer(), pos_integer()}.
+
 %% @doc Task 3.1's legend. Deliberately semantic-only, per this task's own
 %% "must not fight the TextMate grammar" bar: string, number, comment,
 %% keyword and operator are declared here (a legend must list every type a
@@ -158,18 +166,36 @@ common_suffix(L1, L2) ->
     {N, RevRest1, RevRest2} = common_prefix(lists:reverse(L1), lists:reverse(L2), 0),
     {N, lists:reverse(RevRest1), lists:reverse(RevRest2)}.
 
+-spec collect_tokens(file:filename(), [form()]) -> [token()].
 collect_tokens(File, Tree) ->
     Content = read_content(File),
-    Deprecated = deprecated_set(Tree),
-    module_tokens(Content, Tree) ++
-    record_definition_tokens(Content, Tree) ++
-    type_definition_tokens(Content, Tree) ++
-    spec_name_tokens(Content, Tree) ++
-    function_definition_tokens(Tree, Deprecated) ++
-    variable_tokens(Tree) ++
-    user_type_tokens(Tree) ++
+    OwnForms = forms_of_this_file(Tree),
+    Deprecated = deprecated_set(OwnForms),
+    module_tokens(Content, OwnForms) ++
+    record_definition_tokens(Content, OwnForms) ++
+    type_definition_tokens(Content, OwnForms) ++
+    spec_name_tokens(Content, OwnForms) ++
+    function_definition_tokens(OwnForms, Deprecated) ++
+    variable_tokens(OwnForms) ++
+    user_type_tokens(OwnForms) ++
     whole_file_tokens(File, Deprecated) ++
     macro_tokens(Content).
+
+%% Drops the forms epp spliced in from headers: they carry their own file's
+%% positions. File tracked as in lsp_syntax:fold_in_syntax_tree/4.
+-spec forms_of_this_file([form()]) -> [form()].
+forms_of_this_file(Tree) ->
+    {Forms, _, _} = lists:foldl(fun
+        ({attribute, _, file, {FormFile, _}}, {Acc, _Own, undefined}) ->
+            {Acc, true, FormFile};
+        ({attribute, _, file, {FormFile, _}}, {Acc, _Own, ThisFile}) ->
+            {Acc, FormFile =:= ThisFile, ThisFile};
+        (Form, {Acc, true, ThisFile}) ->
+            {[Form | Acc], true, ThisFile};
+        (_Form, {Acc, false, ThisFile}) ->
+            {Acc, false, ThisFile}
+    end, {[], true, undefined}, Tree),
+    lists:reverse(Forms).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% encoding: our own {Line, Col, Length, Type, Modifiers}   %%
@@ -210,8 +236,7 @@ encode_deltas([{Line, Col, Length, Type, Mods} | Rest], {PrevLine, PrevCol}) ->
 module_tokens(Content, Tree) ->
     case [Pos || {attribute, Pos, module, _Name} <- Tree] of
         [Pos | _] ->
-            {Line, Col, Length} = first_atom_after(Content, Pos),
-            [{Line, Col, Length, ?NAMESPACE, ?MOD_DEFINITION}];
+            scanned_token(Content, Pos, ?NAMESPACE, ?MOD_DEFINITION);
         [] ->
             []
     end.
@@ -219,19 +244,18 @@ module_tokens(Content, Tree) ->
 record_definition_tokens(Content, Tree) ->
     lists:flatmap(fun
         ({attribute, Pos, record, {_Name, Fields}}) ->
-            {Line, Col, Length} = first_atom_after(Content, Pos),
-            [{Line, Col, Length, ?STRUCT, ?MOD_DEFINITION} | record_field_tokens(Fields, ?MOD_DEFINITION)];
+            scanned_token(Content, Pos, ?STRUCT, ?MOD_DEFINITION) ++
+                record_field_tokens(Fields, ?MOD_DEFINITION);
         (_) ->
             []
     end, Tree).
 
 type_definition_tokens(Content, Tree) ->
-    lists:filtermap(fun
+    lists:flatmap(fun
         ({attribute, Pos, Tag, {_Name, _TypeDef, _Args}}) when Tag =:= type; Tag =:= opaque ->
-            {Line, Col, Length} = first_atom_after(Content, Pos),
-            {true, {Line, Col, Length, ?TYPE, ?MOD_DEFINITION}};
+            scanned_token(Content, Pos, ?TYPE, ?MOD_DEFINITION);
         (_) ->
-            false
+            []
     end, Tree).
 
 %% Only the common local-function spec shape (`-spec name(...) -> ...`) is
@@ -239,25 +263,45 @@ type_definition_tokens(Content, Tree) ->
 %% have this scan land on the module name instead, which is a known,
 %% accepted limitation for this minimal a pass.
 spec_name_tokens(Content, Tree) ->
-    lists:filtermap(fun
+    lists:flatmap(fun
         ({attribute, Pos, spec, _}) ->
-            {Line, Col, Length} = first_atom_after(Content, Pos),
-            {true, {Line, Col, Length, ?FUNCTION, ?MOD_DECLARATION}};
+            scanned_token(Content, Pos, ?FUNCTION, ?MOD_DECLARATION);
         (_) ->
-            false
+            []
     end, Tree).
+
+%% Zero or one token, so an unplaceable name contributes nothing.
+-spec scanned_token(binary(), position(), non_neg_integer(), non_neg_integer()) ->
+    [token()].
+scanned_token(Content, Pos, Type, Mods) ->
+    case first_atom_after(Content, Pos) of
+        undefined -> [];
+        {Line, Col, Length} -> [{Line, Col, Length, Type, Mods}]
+    end.
 
 %% Pos is the attribute keyword's own position (e.g. `module` in
 %% `-module(sample)`) - which is itself an ordinary atom token, not a
 %% reserved word, so it would otherwise be found as its own "first atom
 %% after Pos". Tokens at-or-before Pos are dropped so the scan starts
 %% strictly after the keyword, landing on the real name that follows it.
+%% `undefined`, not a crash, when the name can't be placed: erl_scan fails
+%% outright on a document mid-edit.
+-spec first_atom_after(binary(), position()) ->
+    {pos_integer(), pos_integer(), non_neg_integer()} | undefined.
 first_atom_after(Content, {StartLine, StartCol}) ->
-    {ok, Tokens, _} = erl_scan:string(binary_to_list(Content), {1, 1}),
-    RelevantTokens = lists:dropwhile(fun (T) -> token_pos(T) =< {StartLine, StartCol} end, Tokens),
-    FormTokens = lists:takewhile(fun (T) -> element(1, T) =/= dot end, RelevantTokens),
-    [{atom, {Line, Col}, Name} | _] = [T || T <- FormTokens, element(1, T) =:= atom],
-    {Line, Col, length(atom_to_list(Name))}.
+    case erl_scan:string(binary_to_list(Content), {1, 1}) of
+        {ok, Tokens, _} ->
+            RelevantTokens = lists:dropwhile(fun (T) -> token_pos(T) =< {StartLine, StartCol} end, Tokens),
+            FormTokens = lists:takewhile(fun (T) -> element(1, T) =/= dot end, RelevantTokens),
+            case [T || T <- FormTokens, element(1, T) =:= atom] of
+                [{atom, {Line, Col}, Name} | _] -> {Line, Col, length(atom_to_list(Name))};
+                _ -> undefined
+            end;
+        {error, _ErrorInfo, _EndLocation} ->
+            undefined
+    end;
+first_atom_after(_Content, _Pos) ->
+    undefined.
 
 token_pos({_Type, Pos}) -> Pos;
 token_pos({_Type, Pos, _Value}) -> Pos.
@@ -394,6 +438,9 @@ find_user_types(_Term) ->
 
 whole_file_tokens(File, Deprecated) ->
     lsp_syntax:fold_in_syntax_tree(fun
+        %% Header forms carry their own positions - see forms_of_this_file/1.
+        (_, CurFile, Acc) when CurFile =/= File ->
+            Acc;
         %% #rec{...} construction
         ({record, Pos, RecName, Fields}, _CurFile, Acc) ->
             [hash_offset_token(Pos, RecName) | record_field_tokens(Fields, 0)] ++ Acc;

@@ -35,7 +35,9 @@ all() -> [
     delta_after_an_edit_returns_a_single_edit_for_the_changed_region,
     delta_with_a_stale_previous_result_id_falls_back_to_full_data,
     range_tokens_only_includes_the_requested_lines,
-    disabling_the_setting_returns_no_tokens_at_all
+    disabling_the_setting_returns_no_tokens_at_all,
+    included_header_declarations_are_not_tokenized,
+    including_file_still_tokenizes_its_own_names_and_header_record_usage
 ].
 
 init_per_suite(Config) ->
@@ -228,18 +230,41 @@ disabling_the_setting_returns_no_tokens_at_all(Config) ->
     ?assertEqual(#{data => []}, lsp_semantic_tokens:range_tokens(File, {1, 100})),
     gen_lsp_config_server:update_config(erlang, #{verbose => false}).
 
+%% The header's -record is on its line 2, colliding with include_source.erl's
+%% own -include there (no atom token: used to crash), and its -type on line 3,
+%% colliding with a blank line (the scan ran on and mislabelled f/1 as a type).
+included_header_declarations_are_not_tokenized(Config) ->
+    Tokens = tokens_of(Config, "include_source.erl"),
+    ?assertEqual([], [T || {2, _, _, _, _} = T <- Tokens]),
+    ?assertEqual({4, 1, 1, function, [definition]}, find_token(Tokens, 4, 1)).
+
+%% Dropping the header's declarations must not cost this file its own tokens.
+including_file_still_tokenizes_its_own_names_and_header_record_usage(Config) ->
+    Tokens = tokens_of(Config, "include_source.erl"),
+    ?assertEqual({1, 9, 14, namespace, [definition]}, find_token(Tokens, 1, 9)),
+    ?assertEqual({4, 3, 1, parameter, [definition]}, find_token(Tokens, 4, 3)),
+    ?assertEqual({5, 5, 1, variable, []}, find_token(Tokens, 5, 5)),
+    ?assertEqual({5, 7, 10, struct, []}, find_token(Tokens, 5, 7)),
+    ?assertEqual({5, 18, 1, property, []}, find_token(Tokens, 5, 18)).
+
 %%%%%%%%%%%%%
 %% helpers %%
 %%%%%%%%%%%%%
 
 tokens(Config) ->
+    tokens_of(Config, "tokens_source.erl").
+
+tokens_of(Config, Name) ->
     AppDir = ?config(data_dir, Config),
-    File = filename:join(AppDir, "tokens_source.erl"),
+    File = filename:join(AppDir, Name),
     #{data := Data} = lsp_semantic_tokens:full_tokens(File),
     decode(Data, 1, 1).
 
 token_at(Config, Line, Col) ->
-    case [T || {L, C, _, _, _} = T <- tokens(Config), L =:= Line, C =:= Col] of
+    find_token(tokens(Config), Line, Col).
+
+find_token(Tokens, Line, Col) ->
+    case [T || {L, C, _, _, _} = T <- Tokens, L =:= Line, C =:= Col] of
         [Token] -> Token;
         [] -> ct:fail({no_token_at, Line, Col});
         Many -> ct:fail({multiple_tokens_at, Line, Col, Many})
