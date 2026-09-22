@@ -40,10 +40,10 @@ export default class RebarShell extends GenericShell {
             escript = path.join(erlPath, escript);
         }
         let rebarFileName = await this.getRebarFullPath();
-        if (rebarFileName.search(' ') > -1) {
-            // There is at least one space in rebarPath. Use double quotes
-            // instead of single quotes for cross-operability between
-            // Unix shells (e.g. bash) and the Windows shell.
+        if (this.useShell && rebarFileName.search(' ') > -1) {
+            // There is at least one space in rebarPath. cmd.exe (the only
+            // shell this still goes through - see erlang.useShell) needs it
+            // quoted to keep it one argument.
             rebarFileName = ('"' + rebarFileName + '"');
         }
         let args = [rebarFileName].concat(commands);

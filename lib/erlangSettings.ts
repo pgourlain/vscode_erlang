@@ -12,6 +12,8 @@ export interface ErlangSettings {
 	semanticTokensEnabled: boolean;
 	verbose: boolean;
 	debuggerRunMode : string;
+	// resolved from erlang.useShell ("auto"/"always"/"never") - see ErlangConfigurationProvider.resolveUseShell
+	useShell: boolean;
 	/// workspace.rootPath, since VSCode 1.78 workspace.workspaceFolders[0].Uri.path 
 	rootPath: string;
 }

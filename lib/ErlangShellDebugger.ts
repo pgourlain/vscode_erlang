@@ -16,6 +16,7 @@ export interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArgum
     verbose: boolean;
     addEbinsToCodepath: boolean;
     erlangPath : string; // path of erlang if specified in configuration
+    useShell: boolean; // resolved from erlang.useShell (see ErlangConfigurationProvider)
 }
 
 /** `attach` request: debug a node that is already running on this machine. */
@@ -26,9 +27,11 @@ export interface AttachRequestArguments extends DebugProtocol.AttachRequestArgum
     erlpath: string;
     verbose: boolean;
     erlangPath : string;
+    useShell: boolean;
 }
 
-// Values end up on a shell command line (GenericShell spawns with shell:true).
+// Values end up on a shell command line when this shell is spawned through
+// one (see erlang.useShell); direct-spawn otherwise has no shell to inject into.
 const NODE_NAME = /^[A-Za-z0-9_\-.]+@[A-Za-z0-9_\-.]+$/;
 const COOKIE = /^[A-Za-z0-9_\-.@]+$/;
 
@@ -88,10 +91,10 @@ export class ErlangShellForDebugging extends GenericShell {
         this.argsFileName = path.join(os.tmpdir(), path.basename(startDir) + '_' + randomSuffix);
         this.argsPrecompiledFileName = path.join(os.tmpdir(), 'bp_' + randomSuffix + ".erl");
         this.argsPrecompiledFileName = this.formatPath(this.argsPrecompiledFileName);
-        var debugStartArgs = ["-noshell", "-pa", `"${bridgePath}"`, "-s", "int",
+        var debugStartArgs = ["-noshell", "-pa", this.shellQuote(bridgePath), "-s", "int",
             "-vscode_port", listen_port.toString()];
         if (!launchArguments.noDebug) {
-            debugStartArgs.push("-compiled_args_file", `"${this.argsPrecompiledFileName}"`);
+            debugStartArgs.push("-compiled_args_file", this.shellQuote(this.argsPrecompiledFileName));
         }
         debugStartArgs.push("-s", "vscode_connection", "start");
         
@@ -120,11 +123,11 @@ export class ErlangShellForDebugging extends GenericShell {
         }
         processArgs.push(
             // loopback-only distribution listener, as for the LSP node
-            "-kernel", "inet_dist_use_interface", '"{127,0,0,1}"',
-            "-pa", `"${bridgePath}"`,
+            "-kernel", "inet_dist_use_interface", this.shellQuote("{127,0,0,1}"),
+            "-pa", this.shellQuote(bridgePath),
             "-vscode_port", listen_port.toString(),
             "-vscode_attach_node", args.node,
-            "-compiled_args_file", `"${this.argsPrecompiledFileName}"`,
+            "-compiled_args_file", this.shellQuote(this.argsPrecompiledFileName),
             "-s", "vscode_connection", "attach");
         this.started = true;
         return this.LaunchProcess(erlPath, startDir, processArgs, !args.verbose);
@@ -230,7 +233,7 @@ export class ErlangShellForDebugging extends GenericShell {
             fs.writeFileSync(this.argsFileName, argsFileContents);
             
             result.push("-args_file");
-            result.push("\"" + this.argsFileName + "\"");
+            result.push(this.shellQuote(this.argsFileName));
         }
         return result;
     }
@@ -313,7 +316,7 @@ export class ErlangShellForDebugging extends GenericShell {
             fs.writeFileSync(this.argsFileName, argsFileContents);
             
             result.push("-args_file");
-            result.push("\"" + this.argsFileName + "\"");
+            result.push(this.shellQuote(this.argsFileName));
         }
         return result;
     }

@@ -20,11 +20,23 @@ export class ErlangDebugConfigurationProvider implements DebugConfigurationProvi
         }
         debugConfiguration.verbose = cfg.verbose;
         debugConfiguration.erlangPath = cfg.erlangPath;
+        debugConfiguration.useShell = cfg.useShell;
         return debugConfiguration;
     }
 };
 
 let currentSettings: ErlangSettings = null;
+
+// "auto" matches prior (unconfigurable) behavior: a shell is only needed on
+// Windows to dispatch .bat/.cmd and re-parse quoted args. "always"/"never"
+// are the escape hatch - e.g. for a sandboxed POSIX environment that blocks
+// or lacks a shell (#351), or for erlangArgs/erlangPath/rebarPath values that
+// rely on shell expansion and would break under "auto" on non-Windows.
+export function resolveUseShell(setting: string): boolean {
+    if (setting === 'always') return true;
+    if (setting === 'never') return false;
+    return process.platform === 'win32';
+}
 
 export function configurationChanged(): void {
     let erlangConf = workspace.getConfiguration("erlang");
@@ -42,6 +54,7 @@ export function configurationChanged(): void {
         linting: erlangConf.get<boolean>('linting', false),
         rebarBuildArgs: erlangConf.get("rebarBuildArgs", ['compile']),
         rootPath: extractRootPath(),
+        useShell: resolveUseShell(erlangConf.get<string>("useShell", "auto")),
         verbose: erlangConf.get("verbose", false)
     };
     currentSettings = settings;

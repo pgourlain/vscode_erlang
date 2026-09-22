@@ -30,6 +30,14 @@ export interface IShellOutput {
     append(value: string): void;
 }
 
+// Wraps a value that must survive cmd.exe re-parsing (a space, or a
+// metacharacter like the `{a,b,c}` in an inet address tuple). A no-op when
+// useShell is false: spawn then passes argv elements straight to the OS, so
+// a literal quote character would otherwise end up inside the argument itself.
+export function quoteForShell(value: string, useShell: boolean): string {
+    return useShell ? `"${value}"` : value;
+}
+
 export class GenericShell extends EventEmitter {
     protected childProcess: ChildProcess;
     protected logOutput: ILogOutput;
@@ -40,6 +48,12 @@ export class GenericShell extends EventEmitter {
 	public erlangArgs : string[] = [];
 	public erlangDistributedNode: boolean = false;
     public cacheManagement: string = "memory";
+    // cmd.exe is still needed on Windows to dispatch .bat/.cmd and to
+    // re-parse quoted args; this default ("auto", see erlang.useShell) spawns
+    // the binary directly everywhere else, since a sandboxed or minimal
+    // environment (e.g. Kiro, #351) can deny/lack a shell entirely while
+    // still allowing the binary itself to run. Overridable per erlang.useShell.
+    public useShell: boolean = process.platform === 'win32';
 
     //provide IGenericShellConfiguration, in order to avoid dependencies on vscode module (it doesn't works with debugger-adpater)
     constructor(logOutput?: ILogOutput, shellOutput?: IShellOutput, erlangConfiguration?: ErlangSettings) {
@@ -69,7 +83,12 @@ export class GenericShell extends EventEmitter {
             this.erlangArgs = erlangConfiguration.erlangArgs;
             this.erlangDistributedNode = erlangConfiguration.erlangDistributedNode;
             this.cacheManagement = erlangConfiguration.cacheManagement;
+            this.useShell = erlangConfiguration.useShell;
         }
+    }
+
+    protected shellQuote(value: string): string {
+        return quoteForShell(value, this.useShell);
     }
 
     protected RunProcess(processName, startDir: string, args: string[]): Promise<number> {
@@ -111,7 +130,7 @@ export class GenericShell extends EventEmitter {
                 // until an unrelated layer surfaced an opaque failure later
                 // (#326, #239) instead of the real spawn error.
                 let launchFailed = false;
-                this.childProcess = spawn(processName, args, { cwd: startDir, shell: true, stdio: 'pipe', env : childEnv });
+                this.childProcess = spawn(processName, args, { cwd: startDir, shell: this.useShell, stdio: 'pipe', env : childEnv });
                 this.childProcess.on('error', error => {
                     launchFailed = true;
                     this.log("stderr", error.message);

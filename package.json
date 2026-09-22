@@ -498,6 +498,21 @@
 					"type": "number",
 					"default": 100,
 					"description": "Maximum line length for document formatting."
+				},
+				"erlang.useShell": {
+					"type": "string",
+					"default": "auto",
+					"description": "Whether erl/escript/erlc are spawned through a shell. 'auto' uses one on Windows only (cmd.exe is needed there for .bat/.cmd and quoting) and spawns the binary directly elsewhere. Set to 'always' if you rely on shell expansion in erlangArgs/erlangPath/rebarPath, or your environment needs it; set to 'never' to force direct spawning (e.g. if a sandboxed environment blocks or lacks a shell).",
+					"enum": [
+						"auto",
+						"always",
+						"never"
+					],
+					"enumDescriptions": [
+						"Shell on Windows only (default)",
+						"Always spawn through a shell",
+						"Never spawn through a shell"
+					]
 				}
 			}
 		},
