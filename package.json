@@ -339,6 +339,18 @@
 							"onCommand:workbench.action.debug.configure",
 							"onCommand:workbench.action.debug.start"
 						]
+					},
+					{
+						"id": "troubleshoot",
+						"title": "When something goes wrong",
+						"description": "Common symptoms and their fixes: erl not found, the language server not starting, false include errors, breakpoints never hit.\n[Check installation](command:erlang.checkInstallation)\n[Show language server output](command:erlang.showLanguageServerOutput)",
+						"media": {
+							"markdown": "HELP.MD"
+						},
+						"completionEvents": [
+							"onCommand:erlang.checkInstallation",
+							"onCommand:erlang.showLanguageServerOutput"
+						]
 					}
 				]
 			}

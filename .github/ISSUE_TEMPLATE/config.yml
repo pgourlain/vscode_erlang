@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Help & troubleshooting
+    url: https://github.com/pgourlain/vscode_erlang/blob/master/HELP.MD
+    about: Common symptoms and their fixes - erl not found, language server not starting, false include errors, breakpoints, memory usage.
+  - name: Developer's readme
+    url: https://github.com/pgourlain/vscode_erlang/blob/master/DevelopersReadme.md
+    about: Building, testing and packaging the extension.
