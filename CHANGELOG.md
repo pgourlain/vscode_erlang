@@ -1,5 +1,13 @@
 # Change log
 
+## Version 1.2.2 (Unreleased)
+
+* Semantic tokens in files that include a header
+  - `textDocument/semanticTokens/full` no longer fails with `Handler error` (-32001) when a file `-include`s a header that declares a record or a type: `epp` splices those forms into the including file's AST but they keep the header's own line numbers, which were then measured against the wrong file - crashing whenever the colliding line held no atom token, and silently highlighting an unrelated name otherwise
+  - A declaration name the scan cannot place (a document mid-edit, say) now costs that one token instead of the whole document's semantic highlighting
+
+---
+
 ## Version 1.2.1 (September 21, 2026)
 
 ### Bug fixes (backlog triage)
@@ -18,10 +26,6 @@
   - Update the bundled rebar3 from 3.18.0 to 3.24.0: the old escript was built with OTP 24 and fails to load on OTP 28 (`op bs_append ... please re-compile this module`), so the language server never started
   - Hover and signature help show `-spec`s for OTP functions again on OTP 27+, whose doc chunks no longer carry them
   - Running Common Test suites from the Testing view no longer aborts with `make_failed` on OTP 28
-
-* Semantic tokens in files that include a header
-  - `textDocument/semanticTokens/full` no longer fails with `Handler error` (-32001) when a file `-include`s a header that declares a record or a type: `epp` splices those forms into the including file's AST but they keep the header's own line numbers, which were then measured against the wrong file - crashing whenever the colliding line held no atom token, and silently highlighting an unrelated name otherwise
-  - A declaration name the scan cannot place (a document mid-edit, say) now costs that one token instead of the whole document's semantic highlighting
 
 ---
 
