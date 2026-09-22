@@ -1,6 +1,11 @@
 # Change log
 
-## Unreleased
+## ## Version 1.2.3 (September 22, 2026)
+
+* [317](https://github.com/pgourlain/vscode_erlang/issues/317), [316](https://github.com/pgourlain/vscode_erlang/issues/316) : Syntax highlighting of `fun` expressions
+  - `fun () -> ... end` and `fun() -> ... end` (a fun with no parameter) highlighted `fun` as a function name instead of a keyword: the rule matching the `fun()` *type* of a `-spec`/`-type` also matched the zero-arity fun *expression*. It now requires that the `)` is not followed by `->`, so the `fun()` type introduced for [297](https://github.com/pgourlain/vscode_erlang/issues/297) keeps working
+  - A named fun (`fun Loop() -> ... end`, OTP 17+) had no rule at all and fell into the one meant for `fun Module:Name/Arity`, which scans forward to the next `/` - so every construct after it, `-spec`s included, lost its highlighting for the rest of the file. Named funs are now recognized, on one line or with the clause heads on their own lines, and the name is highlighted as a function name
+  - Fixed in the `grammar` submodule ([erlang-ls/grammar](https://github.com/erlang-ls/grammar)), which is also updated to its current upstream revision
 
 * [351](https://github.com/pgourlain/vscode_erlang/issues/351) : `erl`/`escript`/`erlc` no longer always spawn through a shell
   - A sandboxed or minimal environment (e.g. Kiro) can deny or lack a shell entirely while still allowing the binary itself to run; spawning everything through `/bin/sh -c ...` there failed with `spawn /bin/sh ENOENT` regardless of whether `erl` or the working directory were actually fine
