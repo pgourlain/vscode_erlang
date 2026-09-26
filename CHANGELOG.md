@@ -5,6 +5,11 @@
 * [356](https://github.com/pgourlain/vscode_erlang/issues/356) : Header files (`.hrl`) treated as modules
   - Opening a `.hrl` no longer reports `no module definition` and `record ... is unused` for every record it declares: the pull-diagnostics path (`textDocument/diagnostic`, `workspace/diagnostic`) linted any file on its own, unlike the push path which only ever lints `.erl` files. Both now lint `.erl` files only
 
+* Diagnostics are pushed only
+  - Every warning and error showed twice on hover, and each quick fix was offered twice (the Problems view merged the identical entries, hiding it there): the server advertised pull diagnostics next to push, and vscode-languageclient pulls open documents on open, on tab change and on refresh whatever `diagnosticPullOptions` says, into a second collection. The server no longer advertises `diagnosticProvider`, so there is one channel and one collection, whatever the client (VS Code, Neovim, Emacs, Kiro...)
+  - Files that are not open still get their diagnostics, now pushed too: every module of the project is linted from disk in the background after the project scan, one file at a time, and relinted when it changes on disk. Closing a document keeps its diagnostics, recomputed from disk; a deleted file, a file excluded from the project and every file when `erlang.linting` is turned off are cleared
+  - Fast typing: `textDocument/didOpen`, `didChange`, `didClose` and `didSave` are now applied in the order they are received. They used to be handled concurrently, so two quick incremental edits could be applied out of order and corrupt the server's copy of the document
+
 
 ---
 

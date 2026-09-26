@@ -28,7 +28,8 @@ all() -> [
     shutdown_closes_the_connection,
     exit_closes_the_connection,
     initialized_requests_configuration_with_a_tagged_unique_id,
-    did_change_configuration_burst_collapses_to_one_configuration_call
+    did_change_configuration_burst_collapses_to_one_configuration_call,
+    did_change_burst_is_applied_in_order
 ].
 
 init_per_testcase(_TestCase, Config) ->
@@ -141,6 +142,36 @@ did_change_configuration_burst_collapses_to_one_configuration_call(Config) ->
                                 result => [#{verbose => false}, #{}, #{}, #{}, #{}]}),
     assert_connection_still_responsive(Socket).
 
+%% Document sync must be applied in wire order. gen_lsp_server used to spawn
+%% one process per incoming message, so a burst of incremental didChange
+%% notifications - each one positioned against the buffer left by the
+%% previous one - could be applied out of order, or race on the same buffer
+%% (read, splice, write) and lose an edit. Diagnostics and every other
+%% analysis were then computed on a text the editor never had.
+did_change_burst_is_applied_in_order(Config) ->
+    Socket = ?config(socket, Config),
+    Peer = ?config(peer, Config),
+    %% Not an .erl: nothing to parse or lint, only the buffer is under test.
+    File = filename:join(?config(priv_dir, Config), "ordering.txt"),
+    Uri = peer:call(Peer, lsp_utils, file_to_file_uri, [File]),
+    Count = 300,
+    ok = send_notification(Socket, <<"textDocument/didOpen">>,
+                           #{textDocument => #{uri => Uri, text => <<>>, version => 0}}),
+    %% Each change appends one character at the end of what the previous one
+    %% left, so any reordering or lost update shows up in the final text.
+    lists:foreach(fun (I) ->
+        ok = send_notification(Socket, <<"textDocument/didChange">>, #{
+            textDocument => #{uri => Uri, version => I},
+            contentChanges => [#{range => #{start => #{line => 0, character => I - 1},
+                                            'end' => #{line => 0, character => I - 1}},
+                                 text => <<($a + (I rem 26))>>}]})
+    end, lists:seq(1, Count)),
+    %% Requests are still answered concurrently, but only after every sync
+    %% notification ahead of them has been applied.
+    assert_connection_still_responsive(Socket),
+    Expected = << <<($a + (I rem 26))>> || I <- lists:seq(1, Count) >>,
+    ?assertEqual(Expected, peer:call(Peer, gen_lsp_doc_server, get_document_contents, [File])).
+
 %%%%%%%%%%%%%%%%%%%%%%
 %% golden reference %%
 %%%%%%%%%%%%%%%%%%%%%%
@@ -192,7 +223,7 @@ golden_initialize_result() ->
         typeHierarchyProvider => true, %% task 4.6
         inlineValueProvider => true,
         inlayHintProvider => #{resolveProvider => true}, %% task 5.8
-        diagnosticProvider => #{interFileDependencies => true, workspaceDiagnostics => true}, %% task 5.9
+        %% no diagnosticProvider: push only
         workspaceSymbolProvider => #{resolveProvider => true}, %% task 4.1
         workspace => #{
             workspaceFolders => #{supported => true, changeNotifications => true}

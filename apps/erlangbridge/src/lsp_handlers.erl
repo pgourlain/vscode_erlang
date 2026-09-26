@@ -19,20 +19,17 @@
 -export([textDocument_foldingRange/2, textDocument_selectionRange/2]).
 -export([completionItem_resolve/2, textDocument_documentLink/2, documentLink_resolve/2]).
 -export([codeLens_resolve/2, inlayHint_resolve/2]).
--export([textDocument_diagnostic/2, workspace_diagnostic/2, workspace_diagnostic_refresh/2]).
 -export([erlang_discoverTests/2, erlang_runTests/2]).
-%% Exported for lsp_diagnostic_SUITE, which drives the stale-version drop and
-%% the refresh nudge directly - they are unreachable through a handler.
+%% Exported for lsp_diagnostic_SUITE, which drives the stale-version drop
+%% directly - it is unreachable through a handler.
 -export([maybe_send_diagnostics/4]).
 %% Exported for lsp_diagnostics, which debounces workspace/didChangeConfiguration
-%% notifications into a single call, and textDocument/didChange edits into a
-%% single validation per file.
--export([request_configuration/2, validate_file/2]).
+%% notifications into a single call, textDocument/didChange edits into a
+%% single validation per file, lints closed project files in the background and
+%% clears files that should no longer show anything.
+-export([request_configuration/2, validate_file/2, validate_closed_file/3, send_diagnostics/3]).
 
 -include("lsp_log.hrl").
-
-%% How long workspace_diagnostic/2 parks a pull that has nothing new to report.
--define(WORKSPACE_DIAGNOSTIC_POLL_MS, 30000).
 
 initialize(_Socket, Params) ->
     RootPath = resolve_root(Params),
@@ -82,7 +79,11 @@ initialize(_Socket, Params) ->
         typeHierarchyProvider => true, %% task 4.6
         inlineValueProvider => true,
         inlayHintProvider => #{resolveProvider => true}, %% task 5.8
-        diagnosticProvider => #{interFileDependencies => true, workspaceDiagnostics => true}, %% task 5.9
+        %% No diagnosticProvider: diagnostics are pushed only
+        %% (textDocument/publishDiagnostics), closed project files included -
+        %% see lsp_diagnostics. Advertising the pull model as well made
+        %% vscode-languageclient keep a second collection for the same files,
+        %% so every problem showed twice on hover and in quick fixes.
         workspaceSymbolProvider => #{resolveProvider => true}, %% task 4.1
         workspace => #{
             workspaceFolders => #{supported => true, changeNotifications => true}
@@ -180,8 +181,9 @@ configuration(Socket, [ErlangSection, FilesSection, ComputedSection, HttpSection
         true ->
             ?LOG(<<"diag">>, "configuration: unchanged, skipping project scan and validation of ~p", [Documents]);
         false ->
-            %% Scan workspace for source files
-            gen_lsp_doc_server:config_change(),
+            %% Scan workspace for source files, then lint the closed ones in
+            %% the background (or clear everything if linting is now off).
+            rescan_project(Socket),
             ?LOG(<<"diag">>, "configuration: Starting validation for documents ~p", [Documents]),
             %% NOTE: no send_diagnostics(Socket, File, []) clear ahead of
             %% validate_file here - see the "Why validate_file alone is enough"
@@ -211,18 +213,53 @@ configuration(Socket, [ErlangSection, FilesSection, ComputedSection, HttpSection
 workspace_didChangeConfiguration(Socket, _Params) ->
     lsp_diagnostics:schedule_configuration_request(Socket, <<"didChangeConfiguration">>).
 
-workspace_didChangeWatchedFiles(_Socket, Params) ->
+%% A closed file changed on disk is relinted from disk (a deleted one is
+%% cleared). An open one is left alone: its buffer, not the disk, is what its
+%% diagnostics describe.
+workspace_didChangeWatchedFiles(Socket, Params) ->
     lists:foreach(fun
         (#{uri := Uri, type := 1} = Change) -> % Created
             ?LOG(<<"diag">>, "watchedFiles: Created ~p", [Change]),
-            gen_lsp_doc_server:project_file_added(lsp_utils:file_uri_to_file(Uri));
+            File = lsp_utils:file_uri_to_file(Uri),
+            gen_lsp_doc_server:project_file_added(File),
+            revalidate_closed_file(Socket, File);
         (#{uri := Uri, type := 2} = Change) -> % Changed
             ?LOG(<<"diag">>, "watchedFiles: Changed ~p", [Change]),
-            gen_lsp_doc_server:project_file_changed(lsp_utils:file_uri_to_file(Uri));
+            File = lsp_utils:file_uri_to_file(Uri),
+            gen_lsp_doc_server:project_file_changed(File),
+            revalidate_closed_file(Socket, File);
         (#{uri := Uri, type := 3} = Change) -> % Deleted
             ?LOG(<<"diag">>, "watchedFiles: Deleted ~p", [Change]),
-            gen_lsp_doc_server:project_file_deleted(lsp_utils:file_uri_to_file(Uri))
+            File = lsp_utils:file_uri_to_file(Uri),
+            gen_lsp_doc_server:project_file_deleted(File),
+            revalidate_closed_file(Socket, File)
     end, maps:get(changes, Params)).
+
+revalidate_closed_file(Socket, File) ->
+    case {filename:extension(File), gen_lsp_doc_server:get_document_contents(File)} of
+        {".erl", undefined} -> lsp_diagnostics:schedule_disk_validation(Socket, File);
+        _ -> ok
+    end.
+
+%% @doc Rescan the project, then push diagnostics for every closed project
+%% file - or, with erlang.linting off, clear every file showing any.
+%%
+%% The scan runs in gen_lsp_doc_server, from a cast that does not know the
+%% socket. all_project_files/0 is a call to that same server, so it is only
+%% answered once the config_change cast sent just before has been handled,
+%% i.e. once the scan is done: the socket stays here, with the handler that
+%% has it, and the scan needs no knowledge of diagnostics.
+rescan_project(Socket) ->
+    gen_lsp_doc_server:config_change(),
+    case gen_lsp_config_server:linting() of
+        true ->
+            %% Only modules are linted (#356).
+            Files = [File || File <- gen_lsp_doc_server:all_project_files(),
+                             filename:extension(File) =:= ".erl"],
+            lsp_diagnostics:project_scanned(Socket, Files);
+        _ ->
+            lsp_diagnostics:clear_all(Socket)
+    end.
 
 %% @doc Only handles the case where the server started with no root at all
 %% (single-file mode) and a folder is then added to the workspace: that
@@ -232,18 +269,22 @@ workspace_didChangeWatchedFiles(_Socket, Params) ->
 %% additions or removals are not reflected - see resolve_root/1's comment
 %% and task 1.3's scope note. Real multi-root support is a separate,
 %% follow-up task.
-workspace_didChangeWorkspaceFolders(_Socket, Params) ->
+workspace_didChangeWorkspaceFolders(Socket, Params) ->
     #{event := #{added := Added}} = Params,
     case {gen_lsp_config_server:root(), Added} of
         {"", [#{uri := Uri} | _]} ->
             NewRoot = lsp_utils:to_string(lsp_utils:file_uri_to_file(Uri)),
             gen_lsp_config_server:update_config(root, NewRoot),
             gen_lsp_doc_server:root_available(),
-            gen_lsp_doc_server:config_change();
+            rescan_project(Socket);
         _ ->
             ok
     end.
 
+%% didOpen, didChange, didClose and didSave run in gen_lsp_server's socket
+%% process, in wire order (see gen_lsp_server:dispatch/2), so they only update
+%% the buffer and hand the lint to lsp_diagnostics. No parse here either:
+%% gen_lsp_doc_server:get_syntax_tree/1 parses the buffer on demand.
 textDocument_didOpen(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
     ?LOG(<<"diag">>, "didOpen: ~p version=~p", [File, mapmapfind(textDocument, version, Params, fun () -> undefined end)]),
@@ -251,31 +292,27 @@ textDocument_didOpen(Socket, Params) ->
     %% Not gated on autosave() any more - see textDocument_didChange/2. With
     %% autosave off, the gate left a freshly opened document with no
     %% diagnostics at all until its first edit.
-    gen_lsp_doc_server:parse_document(File),
-    ?LOG(<<"diag">>, "didOpen: Parsing document for file ~p", [File]),
-    validate_file(Socket, File).
+    lsp_diagnostics:schedule_validation(Socket, File).
 
+%% Closing a document does not clear its diagnostics: a closed project file
+%% keeps showing its problems, computed from disk - which is what it holds
+%% once unsaved edits are discarded. Other files (e.g. rebar.config) are only
+%% linted while open, so closing one clears it.
 textDocument_didClose(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
     ?LOG(<<"diag">>, "didClose: ~p", [File]),
-    %% Before the clear, so a debounced edit cannot republish just after it.
     lsp_diagnostics:cancel_validation(File),
-    send_diagnostics(Socket, File, []),
     gen_lsp_doc_server:document_closed(File),
-    %% The file is the pull channel's again now (workspace_diagnostic_item/2
-    %% reports only *open* documents as empty), so release the workspace
-    %% pull's long poll instead of leaving the problems it holds hidden until
-    %% the poll times out.
-    lsp_diagnostics:notify_changed(),
-    request_diagnostic_refresh(Socket).
+    case filename:extension(File) of
+        ".erl" -> lsp_diagnostics:schedule_disk_validation(Socket, File);
+        _ -> send_diagnostics(Socket, File, [])
+    end.
 
 textDocument_didSave(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
     ?LOG(<<"diag">>, "didSave: ~p", [File]),
     %% Not gated on autosave() any more - see textDocument_didChange/2.
-    gen_lsp_doc_server:parse_document(File),
-    ?LOG(<<"diag">>, "didsave: Parsing document for file ~p", [File]),
-    validate_file(Socket, File).
+    lsp_diagnostics:schedule_validation(Socket, File).
 
 %% Content changes are applied in the order the client sent them - each
 %% one (range-based or, still legal even under Incremental sync, a full
@@ -287,11 +324,9 @@ textDocument_didChange(Socket, Params) ->
     ?LOG(<<"diag">>, "didChange: ~p version=~p changes=~p",
         [File, mapmapfind(textDocument, version, Params, fun () -> undefined end), length(ContentChanges)]),
     lists:foreach(fun (ContentChange) -> apply_content_change(File, ContentChange) end, ContentChanges),
-    %% Not gated on autosave() any more: an open document's diagnostics come
-    %% from this push channel alone (workspace_diagnostic_item/2 reports open
-    %% documents as empty), so skipping revalidation here would leave a
-    %% problem listed until the next save - which is what made an applied
-    %% quick fix look like it had done nothing. No parse_document/1 call:
+    %% Not gated on autosave() any more: skipping revalidation here would
+    %% leave a problem listed until the next save - which is what made an
+    %% applied quick fix look like it had done nothing. No parse_document/1 call:
     %% gen_lsp_doc_server:get_syntax_tree/1 now reparses the buffer by itself
     %% when the cached tree predates this edit, so only the files a request
     %% actually touches get reparsed.
@@ -808,6 +843,18 @@ validate_file(Socket, File) ->
             ok
     end.
 
+%% @doc Background lint of a file that is not open (see lsp_diagnostics):
+%% from disk, reparsed first when Mode is `disk`. A file no longer on disk is
+%% cleared.
+validate_closed_file(Socket, File, Mode) ->
+    case filelib:is_regular(File) of
+        false ->
+            maybe_send_diagnostics(Socket, File, gen_lsp_doc_server:get_document_version(File), []);
+        true ->
+            Mode =:= disk andalso gen_lsp_doc_server:reparse(File),
+            validate_file(Socket, File)
+    end.
+
 validate_parsed_source_file(Socket, File) ->
     ValidatingVersion = gen_lsp_doc_server:get_document_version(File),
     ?LOG(<<"diag">>, "Validating parsed source file ~p at version ~p", [File, ValidatingVersion]),
@@ -885,52 +932,22 @@ request_configuration(Socket, Source) ->
 %% before a since-applied edit (e.g. a quick fix's workspace/applyEdit
 %% firing a normal textDocument/didChange), from finishing late and
 %% clobbering a fresher/correct publishDiagnostics with stale results.
-%%
-%% Also nudges pull-mode clients: a client showing a diagnostic it pulled
-%% via textDocument/diagnostic rather than push is not guaranteed to
-%% re-pull right after this edit on its own schedule, so a fresh push is
-%% followed by a workspace/diagnostic/refresh request asking it to re-pull
-%% now. That request is *debounced* in gen_lsp_server (a burst of pushes
-%% produces one refresh) - one refresh per push restarts the client's whole
-%% workspace pull each time and is a large part of what made the pull spin.
-%% Not gated on the client having declared
-%% workspace.diagnostics.refreshSupport - a client that never declared
-%% support simply has nothing registered for the request and
-%% ignores/errors on it harmlessly, matching how request_configuration/2
-%% already sends without checking a capability first.
+%% A closed file is at version 0, so a background lint that started before the
+%% file was opened is dropped the same way.
 maybe_send_diagnostics(Socket, File, ValidatingVersion, Diagnostics) ->
     case gen_lsp_doc_server:get_document_version(File) of
         ValidatingVersion ->
             ?LOG(<<"diag">>, "maybe_send_diagnostics: pushing for ~p at version ~p (~p diagnostics)",
                 [File, ValidatingVersion, length(Diagnostics)]),
-            send_diagnostics(Socket, File, Diagnostics),
-            %% Releases any workspace/diagnostic long poll parked in
-            %% workspace_diagnostic/2 waiting for exactly this.
-            lsp_diagnostics:notify_changed(),
-            request_diagnostic_refresh(Socket);
+            send_diagnostics(Socket, File, Diagnostics);
         CurrentVersion ->
             ?LOG(<<"diag">>, "maybe_send_diagnostics: SKIPPED for ~p, stale version ~p (current ~p)",
                 [File, ValidatingVersion, CurrentVersion])
     end.
 
-%% @doc No-op handler for the client's reply to a server-initiated
-%% workspace/diagnostic/refresh request (see request_diagnostic_refresh/1)
-%% - the response body carries nothing meaningful (LSP 3.17 defines it as
-%% an empty result), it only needs to be routed here instead of falling
-%% into gen_lsp_server's "Notification not handled" error log.
-workspace_diagnostic_refresh(_Socket, _Result) ->
-    ?LOG(<<"diag">>, "workspace_diagnostic_refresh: client acknowledged refresh", []),
-    ok.
-
-%% @doc Server-initiated request (LSP 3.17 workspace/diagnostic/refresh)
-%% asking every pull-capable client to discard whatever diagnostics it last
-%% pulled and pull again. See the comment on maybe_send_diagnostics/4.
-%% lsp_diagnostics does the actual send, debounced, with a unique request id.
-request_diagnostic_refresh(Socket) ->
-    lsp_diagnostics:schedule_refresh(Socket).
-
 send_diagnostics(Socket, File, Diagnostics) ->
     ?LOG(<<"diag">>, "send_diagnostics: ~p (~p diagnostics)", [File, length(Diagnostics)]),
+    lsp_diagnostics:published(File, Diagnostics),
     gen_lsp_server:send_to_client(Socket, <<"textDocument/publishDiagnostics">>, #{
         method => <<"textDocument/publishDiagnostics">>,
         params => #{
@@ -949,107 +966,6 @@ to_lsp_diagnostic(Diagnostic) ->
         data => lsp_utils:try_get(correlation_data, Diagnostic, null)
     }.
 
-%% @doc task 5.9: `textDocument/diagnostic` (LSP 3.17 pull model),
-%% alongside the existing push (publishDiagnostics, unchanged - the two
-%% are meant to coexist per spec) - reuses the exact same validation and
-%% wire-shape as the push path (lsp_syntax:validate_parsed_source_file/1,
-%% to_lsp_diagnostic/1), just returned synchronously instead of sent as a
-%% notification.
-%% A `resultId` is what lets the client say "this is what I already have" on
-%% the next pull (as `previousResultId` here, `previousResultIds` for the
-%% workspace pull) and lets us answer `unchanged` instead of resending - and,
-%% for workspace_diagnostic/2 below, recognise that there is nothing to report
-%% at all.
-textDocument_diagnostic(_Socket, Params) ->
-    Uri = mapmapget(textDocument, uri, Params),
-    File = lsp_utils:file_uri_to_file(Uri),
-    ?LOG(<<"diag">>, "textDocument_diagnostic: client pulled ~p", [File]),
-    Diagnostics = diagnostics_for(File),
-    ResultId = result_id(File, Diagnostics),
-    case maps:get(previousResultId, Params, undefined) of
-        ResultId ->
-            #{kind => <<"unchanged">>, resultId => ResultId};
-        _ ->
-            #{kind => <<"full">>, resultId => ResultId, items => Diagnostics}
-    end.
-
-%% @doc `workspace/diagnostic` - the same, for every project file, so
-%% problems can be seen without opening each one.
-%%
-%% This is a *long poll*, not a plain request/response: vscode-languageclient
-%% re-issues it as soon as we answer. Answering an all-unchanged pull straight
-%% away therefore spins the server, re-linting every project file per round -
-%% which is exactly what it did before every report carried a resultId. So when
-%% nothing has changed since the resultIds the client sent back, park here until
-%% something does (or ?WORKSPACE_DIAGNOSTIC_POLL_MS elapses) and answer then.
-%%
-%% Blocking is safe: gen_lsp_server spawns a process per incoming message, so
-%% this holds up nothing but this one request. cancelRequest/2 is a no-op, so a
-%% cancelled pull stays parked until the timeout rather than being released
-%% early - bounded, and cheap while parked.
-workspace_diagnostic(_Socket, Params) ->
-    Previous = previous_result_ids(Params),
-    ?LOG(<<"diag">>, "workspace_diagnostic: client pulled whole workspace (~p files)",
-        [length(gen_lsp_doc_server:all_project_files())]),
-    case workspace_diagnostic_items(Previous) of
-        {changed, Items} ->
-            #{items => Items};
-        {unchanged, Items} ->
-            case lsp_diagnostics:wait_for_change(?WORKSPACE_DIAGNOSTIC_POLL_MS) of
-                changed ->
-                    {_, FreshItems} = workspace_diagnostic_items(Previous),
-                    ?LOG(<<"diag">>, "workspace_diagnostic: long poll woken by a change", []),
-                    #{items => FreshItems};
-                timeout ->
-                    ?LOG(<<"diag">>, "workspace_diagnostic: long poll timed out, reporting unchanged", []),
-                    #{items => Items}
-            end
-    end.
-
-%% Reports for every project file, plus whether any of them differs from what
-%% the client says it already has.
-workspace_diagnostic_items(Previous) ->
-    Opened = gen_lsp_doc_server:opened_documents(),
-    Items = [workspace_diagnostic_item(File, Previous, lists:member(File, Opened))
-             || File <- gen_lsp_doc_server:all_project_files()],
-    case lists:any(fun (#{kind := Kind}) -> Kind =:= <<"full">> end, Items) of
-        true -> {changed, Items};
-        false -> {unchanged, Items}
-    end.
-
-%% An open document is reported as having nothing, whatever it actually has:
-%% while it is open, its diagnostics belong to the push channel
-%% (textDocument/publishDiagnostics, see maybe_send_diagnostics/4). Reporting
-%% them here as well puts the same problem in two DiagnosticCollections at
-%% once - the client's pull collection and the push one - which is what
-%% showed every problem twice in the Problems list, twice on hover, and
-%% offered each quick fix twice (code_actions/3 emits one action per
-%% diagnostic in the request context).
-%%
-%% Reported as an empty `full` report rather than left out of the list: a URI
-%% simply missing keeps whatever the client last pulled for it, so dropping
-%% the file would freeze its stale pull entry on screen next to the live push
-%% one. textDocument_didClose/2 clears the push side, and the next pull sees
-%% the file as closed again and reports it for real.
-workspace_diagnostic_item(File, Previous, IsOpen) ->
-    Uri = lsp_utils:file_uri_to_vscode_uri(lsp_utils:file_to_file_uri(File)),
-    Diagnostics = case IsOpen of
-        true -> [];
-        false -> diagnostics_for(File)
-    end,
-    ResultId = result_id(File, Diagnostics),
-    case maps:get(Uri, Previous, undefined) of
-        ResultId ->
-            #{uri => Uri, version => null, kind => <<"unchanged">>, resultId => ResultId};
-        _ ->
-            #{uri => Uri, version => null, kind => <<"full">>, resultId => ResultId, items => Diagnostics}
-    end.
-
-%% `previousResultIds` is a list of #{uri, value} - flatten it to a lookup map.
-previous_result_ids(Params) ->
-    maps:from_list([{Uri, Value} ||
-        #{uri := Uri, value := Value} <- maps:get(previousResultIds, Params, [])]).
-
 %% @doc `erlang/discoverTests` - task 6.1. Delegates to lsp_testing.erl.
 erlang_discoverTests(Socket, Params) ->
     lsp_testing:discover_tests(Socket, Params).
@@ -1059,30 +975,6 @@ erlang_discoverTests(Socket, Params) ->
 %% while this request is in flight, the response carries only the summary.
 erlang_runTests(Socket, Params) ->
     lsp_testing:run_tests(Socket, Params).
-
-%% Only a module is linted, as in validate_file/2: a header (.hrl) linted on
-%% its own reports "no module definition" and every record as unused (#356).
-diagnostics_for(File) ->
-    case filename:extension(File) of
-        ".erl" -> erl_diagnostics_for(File);
-        _ -> []
-    end.
-
-erl_diagnostics_for(File) ->
-    case gen_lsp_doc_server:get_diagnostics_cache(File) of
-        undefined ->
-            ErrorsWarnings = lsp_syntax:validate_parsed_source_file(File),
-            Diagnostics = lists:map(fun to_lsp_diagnostic/1, maps:get(errors_warnings, ErrorsWarnings, [])),
-            gen_lsp_doc_server:store_diagnostics_cache(File, Diagnostics),
-            Diagnostics;
-        Cached ->
-            Cached
-    end.
-
-%% @doc Stable identity of a file's current diagnostics, so an unchanged pull
-%% can be recognised without resending them.
-result_id(File, Diagnostics) ->
-    integer_to_binary(erlang:phash2({File, Diagnostics})).
 
 get_range(Info) ->
     LS = maps:get(line, Info),

@@ -4,11 +4,10 @@
 %% API
 -export([start_link/0]).
 
--export([document_opened/2, document_changed/2, document_range_changed/4, document_closed/1, opened_documents/0, get_document_contents/1, get_document_version/1, parse_document/1]).
+-export([document_opened/2, document_changed/2, document_range_changed/4, document_closed/1, opened_documents/0, get_document_contents/1, get_document_version/1, parse_document/1, reparse/1]).
 -export([project_file_added/1, project_file_changed/1, project_file_deleted/1]).
 -export([get_syntax_tree/1, get_dodged_syntax_tree/1, get_references/1, get_inlayhints/1]).
 -export([get_semantic_tokens_cache/1, store_semantic_tokens_cache/3]).
--export([get_diagnostics_cache/1, store_diagnostics_cache/2]).
 -export([root_available/0, config_change/0, project_modules/0, get_module_file/1, get_module_files/1, get_build_dir/0, find_source_file/1]).
 -export([all_project_files/0]).
 
@@ -132,6 +131,17 @@ parse_document(File) ->
             ok
     end.
 
+%% @doc Parse File again now, from disk unless it is open - for a closed file
+%% known to have changed on disk (or just closed with its edits discarded)
+%% while the tree held for it is still stamped as current.
+%%
+%% No diagnostics cache is kept next to the trees: with push only, a file is
+%% linted once per event that can change its diagnostics (open document edit,
+%% close, change on disk, project scan) and never again on a client's request,
+%% so there is no repeated lint for a cache to save.
+reparse(File) ->
+    parse_and_store(File, File).
+
 project_file_added(File) ->
     gen_server:cast(?SERVER, {project_file_added, File}).
 
@@ -195,23 +205,6 @@ get_semantic_tokens_cache(File) ->
 
 store_semantic_tokens_cache(File, ResultId, Tokens) ->
     ?XETS:insert(document_semantic_tokens, {File, ResultId, Tokens}).
-
-%% @doc Diagnostics as last computed for File, or undefined when never
-%% computed or computed against an older revision of the document.
-%%
-%% The LSP 3.17 pull endpoints (lsp_handlers:textDocument_diagnostic/2 and
-%% workspace_diagnostic/2) would otherwise re-lint every project file on every
-%% pull. Keyed by the same document_version counter the push path uses, and
-%% dropped outright by parse_and_store/2, so a reparse always recomputes.
-get_diagnostics_cache(File) ->
-    Version = get_document_version(File),
-    case ?XETS:lookup(document_diagnostics, File) of
-        [{File, Version, Diagnostics}] -> Diagnostics;
-        _ -> undefined
-    end.
-
-store_diagnostics_cache(File, Diagnostics) ->
-    ?XETS:insert(document_diagnostics, {File, get_document_version(File), Diagnostics}).
 
 root_available() ->
     gen_server:cast(?SERVER, root_available).
@@ -280,7 +273,6 @@ start_link() ->
     safe_new_table(references, ets, bag, []),
     safe_new_table(document_inlayhints, ?XETS, set, ExtraCreateOpts),
     safe_new_table(document_semantic_tokens, ?XETS, set, ExtraCreateOpts),
-    safe_new_table(document_diagnostics, ?XETS, set, ExtraCreateOpts),
     gen_server:start_link({local, ?SERVER}, ?MODULE, [],[]).
 
 init(_Args) ->
@@ -347,7 +339,6 @@ terminate(_Reason, _State) ->
     delete_cache_file(dodged_syntax_tree),
     delete_cache_file(document_inlayhints),
     delete_cache_file(document_semantic_tokens),
-    delete_cache_file(document_diagnostics),
     ok.
 
 code_change(_OldVersion, State, _Extra) ->
@@ -619,7 +610,6 @@ parse_and_store(File, ContentsFile) ->
     end.
 
 parse_and_store(File, ContentsFile, Version) ->
-    ?XETS:delete(document_diagnostics, File),
     {SyntaxTree, DodgedSyntaxTree} = lsp_parse:parse_source_file(File, ContentsFile),
     case SyntaxTree of
         undefined ->

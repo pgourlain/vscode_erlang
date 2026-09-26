@@ -7,25 +7,26 @@
 
 -include("./testlog.hrl").
 
-%% Task 5.9: textDocument/diagnostic (per-document pull) and workspace/
-%% diagnostic (project-wide pull), alongside the existing push model
-%% (unchanged - lsp_syntax_SUITE/lsp_codeaction_SUITE already exercise
-%% that). Both reuse to_lsp_diagnostic/1, the exact same wire shape
-%% push already uses (lsp_handlers:send_diagnostics/3) - with_warning.erl
-%% has one real erl_lint warning (X unused); clean.erl has none.
+%% Diagnostics are pushed only (textDocument/publishDiagnostics): open
+%% documents from their buffer, closed project files from disk, through
+%% lsp_diagnostics' background queue. No pull (textDocument/diagnostic,
+%% workspace/diagnostic): running both made the client hold two collections
+%% for the same file, so every problem showed twice on hover and in quick
+%% fixes. with_warning.erl has one real erl_lint warning (X unused);
+%% clean.erl has none; records.hrl is a header, never linted (#356).
 
 all() -> [
-    pull_diagnostic_reports_a_real_warning,
-    pull_diagnostic_reports_nothing_for_a_clean_file,
-    pull_diagnostic_reports_nothing_for_a_header_file,
-    workspace_diagnostic_covers_every_project_file,
-    workspace_diagnostic_reports_an_open_document_as_empty,
+    initialize_does_not_advertise_pull_diagnostics,
+    project_scan_pushes_diagnostics_for_closed_files,
+    closing_a_document_republishes_its_on_disk_diagnostics,
+    watched_file_change_republishes_a_closed_file,
+    deleted_file_is_cleared,
+    excluded_file_is_cleared_on_rescan,
+    linting_disabled_clears_published_diagnostics,
+    open_document_is_published_once,
+    an_open_header_file_is_never_linted,
     an_unsaved_edit_republishes_diagnostics_for_the_new_contents,
     stale_validation_result_is_dropped_once_a_newer_edit_has_landed,
-    fresh_publish_is_followed_by_a_diagnostic_refresh_request,
-    pull_diagnostic_reports_unchanged_when_result_id_matches,
-    workspace_diagnostic_long_polls_until_something_changes,
-    diagnostic_refreshes_are_debounced_and_uniquely_identified,
     identical_configuration_is_not_revalidated,
     configuration_never_publishes_an_empty_clear_ahead_of_the_real_state,
     concurrent_configuration_calls_do_not_clobber_a_later_edit
@@ -48,56 +49,127 @@ init_per_testcase(_TestCase, Config) ->
     gen_lsp_doc_server:config_change(),
     Config.
 
+%% Every case starts with nothing open, default settings, and no lint left
+%% over from the previous case that could land on its socket.
+end_per_testcase(_TestCase, Config) ->
+    lists:foreach(fun gen_lsp_doc_server:document_closed/1, gen_lsp_doc_server:opened_documents()),
+    gen_lsp_config_server:update_config(erlang, #{verbose => false}),
+    gen_lsp_config_server:update_config(search, #{}),
+    wait_until_idle(100),
+    Config.
+
 %%%%%%%%%%%%%%%%
 %% test cases %%
 %%%%%%%%%%%%%%%%
 
-pull_diagnostic_reports_a_real_warning(Config) ->
-    #{kind := <<"full">>, items := [Diagnostic]} = pull(Config, "with_warning.erl"),
-    ?assertEqual(<<"variable 'X' is unused">>, maps:get(message, Diagnostic)),
-    ?assertEqual(2, maps:get(severity, Diagnostic)).
+%% Without diagnosticProvider, vscode-languageclient never pulls: one channel,
+%% one collection, no duplicate.
+initialize_does_not_advertise_pull_diagnostics(_Config) ->
+    #{capabilities := Capabilities} = lsp_handlers:initialize(undefined, #{rootPath => null}),
+    ?assertNot(maps:is_key(diagnosticProvider, Capabilities)).
 
-pull_diagnostic_reports_nothing_for_a_clean_file(Config) ->
-    ?assertMatch(#{kind := <<"full">>, resultId := _, items := []}, pull(Config, "clean.erl")).
+%% Problems for files never opened come from the project scan: each closed
+%% module is linted from disk and pushed - a clean one as an explicit empty
+%% list - and a header is not linted at all.
+project_scan_pushes_diagnostics_for_closed_files(Config) ->
+    Raw = configure(#{}),
+    ?assertMatch([[#{message := <<"variable 'X' is unused">>}]],
+                 publishes_for(Raw, data_file(Config, "with_warning.erl"))),
+    ?assertEqual([[]], publishes_for(Raw, data_file(Config, "clean.erl"))),
+    ?assertEqual([], publishes_for(Raw, data_file(Config, "records.hrl"))).
+
+%% Closing a document no longer clears it: its unsaved edits are gone, so
+%% what it shows from then on is what is on disk.
+closing_a_document_republishes_its_on_disk_diagnostics(Config) ->
+    File = data_file(Config, "with_warning.erl"),
+    {ok, Content} = file:read_file(File),
+    Uri = lsp_utils:file_to_file_uri(File),
+
+    {ServerSocket, ClientSocket} = open_socket_pair(),
+    lsp_handlers:textDocument_didOpen(ServerSocket, #{textDocument =>
+        #{uri => Uri, text => Content, version => 1}}),
+    lsp_handlers:textDocument_didChange(ServerSocket, #{
+        textDocument => #{uri => Uri, version => 2},
+        contentChanges => [#{text => fixed_with_warning()}]}),
+    EditRaw = drain_raw(ClientSocket, 5000, <<>>),
+    ?assertEqual([[]], publishes_for(EditRaw, File)),
+
+    lsp_handlers:textDocument_didClose(ServerSocket, #{textDocument => #{uri => Uri}}),
+    CloseRaw = drain_raw(ClientSocket, 5000, <<>>),
+    close_socket_pair(ServerSocket, ClientSocket),
+    ?assertMatch([[#{message := <<"variable 'X' is unused">>}]], publishes_for(CloseRaw, File)).
+
+%% A closed file edited outside the editor (another tool, a branch switch) is
+%% relinted from disk - reparsed, not linted from the tree held for it.
+watched_file_change_republishes_a_closed_file(Config) ->
+    File = filename:join(?config(priv_dir, Config), "watched.erl"),
+    ok = file:write_file(File, with_warning_module(watched)),
+    {ServerSocket, ClientSocket} = open_socket_pair(),
+
+    watched_file_event(ServerSocket, File, 1),
+    CreatedRaw = drain_raw(ClientSocket, 5000, <<>>),
+    ?assertMatch([[#{message := <<"variable 'X' is unused">>}]], publishes_for(CreatedRaw, File)),
+
+    ok = file:write_file(File, <<"-module(watched).\n-export([go/0]).\n\ngo() -> ok.\n">>),
+    watched_file_event(ServerSocket, File, 2),
+    ChangedRaw = drain_raw(ClientSocket, 5000, <<>>),
+    close_socket_pair(ServerSocket, ClientSocket),
+    ?assertEqual([[]], publishes_for(ChangedRaw, File)).
+
+deleted_file_is_cleared(Config) ->
+    File = filename:join(?config(priv_dir, Config), "deleted.erl"),
+    ok = file:write_file(File, with_warning_module(deleted)),
+    {ServerSocket, ClientSocket} = open_socket_pair(),
+    watched_file_event(ServerSocket, File, 1),
+    CreatedRaw = drain_raw(ClientSocket, 5000, <<>>),
+    ?assertMatch([[_]], publishes_for(CreatedRaw, File)),
+
+    ok = file:delete(File),
+    watched_file_event(ServerSocket, File, 3),
+    DeletedRaw = drain_raw(ClientSocket, 5000, <<>>),
+    close_socket_pair(ServerSocket, ClientSocket),
+    ?assertEqual([[]], publishes_for(DeletedRaw, File)).
+
+%% With push only, the client keeps whatever it was last sent: a file that
+%% leaves the project has to be cleared explicitly.
+excluded_file_is_cleared_on_rescan(Config) ->
+    File = data_file(Config, "with_warning.erl"),
+    ?assertMatch([[_]], publishes_for(configure(#{}), File)),
+    Raw = configure(#{exclude => #{'**/with_warning.erl' => true}}),
+    ?assertEqual([[]], publishes_for(Raw, File)).
+
+linting_disabled_clears_published_diagnostics(Config) ->
+    File = data_file(Config, "with_warning.erl"),
+    ?assertMatch([[_]], publishes_for(configure(#{}), File)),
+    Raw = configure(#{}, #{linting => false}),
+    ?assertEqual([[]], publishes_for(Raw, File)),
+    ?assertEqual([], publishes_for(Raw, data_file(Config, "clean.erl"))).
+
+%% The duplicate on hover came from the same file being reported through two
+%% channels: opening a file now yields one push, and nothing asks the client
+%% to pull.
+open_document_is_published_once(Config) ->
+    File = data_file(Config, "with_warning.erl"),
+    {ok, Content} = file:read_file(File),
+    {ServerSocket, ClientSocket} = open_socket_pair(),
+    lsp_handlers:textDocument_didOpen(ServerSocket, #{textDocument =>
+        #{uri => lsp_utils:file_to_file_uri(File), text => Content, version => 1}}),
+    Raw = drain_raw(ClientSocket, 5000, <<>>),
+    close_socket_pair(ServerSocket, ClientSocket),
+    ?assertMatch([[#{message := <<"variable 'X' is unused">>}]], publishes_for(Raw, File)),
+    ?assertEqual(nomatch, binary:match(Raw, <<"workspace\\/diagnostic\\/refresh">>)).
 
 %% #356: a header is not a module - linting it on its own reported "no module
 %% definition" and every record it declares as unused.
-pull_diagnostic_reports_nothing_for_a_header_file(Config) ->
-    ?assertMatch(#{kind := <<"full">>, resultId := _, items := []}, pull(Config, "records.hrl")).
-
-%% One WorkspaceFullDocumentDiagnosticReport per project file, each with
-%% its own uri and the same items shape the single-document pull uses.
-workspace_diagnostic_covers_every_project_file(_Config) ->
-    #{items := Reports} = lsp_handlers:workspace_diagnostic(undefined, #{}),
-    ?assertEqual(2, length(Reports)),
-    [WithWarningReport] = [R || R <- Reports, binary:match(maps:get(uri, R), <<"with_warning.erl">>) =/= nomatch],
-    ?assertMatch(#{kind := <<"full">>, version := null, resultId := _, items := [_]}, WithWarningReport),
-    [CleanReport] = [R || R <- Reports, binary:match(maps:get(uri, R), <<"clean.erl">>) =/= nomatch],
-    ?assertMatch(#{kind := <<"full">>, resultId := _, items := []}, CleanReport).
-
-%% Regression test for every problem being listed twice (and every quick fix
-%% offered twice): while a document is open, its diagnostics belong to the
-%% push channel, so the workspace pull must not report them a second time
-%% into the client's own DiagnosticCollection. Reported as an empty `full`
-%% report rather than omitted - a URI missing from the report keeps whatever
-%% the client last pulled for it, which would freeze the duplicate on screen
-%% instead of clearing it.
-workspace_diagnostic_reports_an_open_document_as_empty(Config) ->
-    AppDir = ?config(data_dir, Config),
-    File = filename:join(AppDir, "with_warning.erl"),
+an_open_header_file_is_never_linted(Config) ->
+    File = data_file(Config, "records.hrl"),
     {ok, Content} = file:read_file(File),
-
-    ?assertMatch(#{kind := <<"full">>, items := [_]}, workspace_report(<<"with_warning.erl">>)),
-
-    gen_lsp_doc_server:document_opened(File, Content),
-    ?assertMatch(#{kind := <<"full">>, items := []}, workspace_report(<<"with_warning.erl">>)),
-    %% the file that stayed closed is still reported for real (clean.erl has
-    %% nothing to report, but it is reported)
-    ?assertMatch(#{kind := <<"full">>, items := []}, workspace_report(<<"clean.erl">>)),
-
-    %% closing it hands the file back to the pull channel
-    gen_lsp_doc_server:document_closed(File),
-    ?assertMatch(#{kind := <<"full">>, items := [_]}, workspace_report(<<"with_warning.erl">>)).
+    {ServerSocket, ClientSocket} = open_socket_pair(),
+    lsp_handlers:textDocument_didOpen(ServerSocket, #{textDocument =>
+        #{uri => lsp_utils:file_to_file_uri(File), text => Content, version => 1}}),
+    Raw = drain_raw(ClientSocket, 3000, <<>>),
+    close_socket_pair(ServerSocket, ClientSocket),
+    ?assertEqual([], publishes_for(Raw, File)).
 
 %% Regression test for "the quick fix is applied but the problem stays in the
 %% Problems list": a quick fix's WorkspaceEdit reaches the server as a plain
@@ -121,10 +193,9 @@ an_unsaved_edit_republishes_diagnostics_for_the_new_contents(Config) ->
 
     %% the fix: use X, so erl_lint has nothing left to say. No didSave, and
     %% no parse_document/1 - exactly what a quick fix's applyEdit produces.
-    Fixed = <<"-module(with_warning).\n-export([go/0]).\n\ngo() ->\n    X = 1,\n    X.\n">>,
     lsp_handlers:textDocument_didChange(ServerSocket, #{
         textDocument => #{uri => Uri, version => 2},
-        contentChanges => [#{text => Fixed}]}),
+        contentChanges => [#{text => fixed_with_warning()}]}),
     ChangeRaw = drain_raw(ClientSocket, 5000, <<>>),
     gen_tcp:close(ServerSocket),
     gen_tcp:close(ClientSocket),
@@ -137,8 +208,8 @@ an_unsaved_edit_republishes_diagnostics_for_the_new_contents(Config) ->
 
 %% Regression test for the out-of-order validate_file/2 race behind the
 %% "quick fix leaves a stale red squiggle" bug: every incoming LSP message
-%% is handled by gen_lsp_server via an independent spawn/1
-%% (gen_lsp_server.erl:201/206), with no ordering guarantee, so a slow
+%% but document sync is handled by gen_lsp_server via an independent spawn/1,
+%% with no ordering guarantee between them, so a slow
 %% validate started against an OLD document version can finish and publish
 %% *after* a newer, correct one already did - clobbering the client's
 %% diagnostics with stale results. Reproduced here deterministically (no
@@ -167,9 +238,8 @@ stale_validation_result_is_dropped_once_a_newer_edit_has_landed(Config) ->
     %% The current validate_file, finishing after, must publish.
     lsp_handlers:maybe_send_diagnostics(ServerSocket, File, FreshVersion, []),
 
-    %% Both the stale-drop and the fresh publish's own refresh request (see
-    %% the next test) can be on the wire here - drain raw bytes rather than
-    %% decoding a single framed message, and check what actually landed.
+    %% Drain raw bytes rather than decoding a single framed message, and
+    %% check what actually landed.
     Raw = drain_raw(ClientSocket, 5000, <<>>),
     gen_tcp:close(ServerSocket),
     gen_tcp:close(ClientSocket),
@@ -178,85 +248,6 @@ stale_validation_result_is_dropped_once_a_newer_edit_has_landed(Config) ->
     ?assertEqual(nomatch, binary:match(Raw, <<"stale">>)),
     %% Exactly the fresh, empty diagnostics list was published.
     ?assertNotEqual(nomatch, binary:match(Raw, <<"\"diagnostics\":[]">>)).
-
-%% A pull-mode client (textDocument/diagnostic) may be showing a diagnostic
-%% it pulled once and is not guaranteed to re-pull right after an edit on
-%% its own schedule - every fresh publish must also nudge it to re-pull via
-%% workspace/diagnostic/refresh (LSP 3.17), sent unconditionally (task
-%% history: not gated on the client having declared
-%% workspace.diagnostics.refreshSupport, per explicit product direction).
-fresh_publish_is_followed_by_a_diagnostic_refresh_request(Config) ->
-    AppDir = ?config(data_dir, Config),
-    File = filename:join(AppDir, "clean.erl"),
-    {ok, Content} = file:read_file(File),
-    gen_lsp_doc_server:document_opened(File, Content),
-    Version = gen_lsp_doc_server:get_document_version(File),
-
-    {ServerSocket, ClientSocket} = open_socket_pair(),
-    lsp_handlers:maybe_send_diagnostics(ServerSocket, File, Version, []),
-    Raw = drain_raw(ClientSocket, 5000, <<>>),
-    gen_tcp:close(ServerSocket),
-    gen_tcp:close(ClientSocket),
-
-    ?assertNotEqual(nomatch, binary:match(Raw, <<"textDocument\\/publishDiagnostics">>)),
-    ?assertNotEqual(nomatch, binary:match(Raw, <<"workspace\\/diagnostic\\/refresh">>)).
-
-%% Handing back the resultId the server just gave us means "I already have
-%% this" - the server must say so rather than resend the items. Without a
-%% resultId on the way out, the client can never say this, which is half of
-%% why the workspace pull below used to spin.
-pull_diagnostic_reports_unchanged_when_result_id_matches(Config) ->
-    #{resultId := ResultId} = pull(Config, "with_warning.erl"),
-    AppDir = ?config(data_dir, Config),
-    File = filename:join(AppDir, "with_warning.erl"),
-    Params = #{textDocument => #{uri => lsp_utils:file_to_file_uri(File)},
-               previousResultId => ResultId},
-    ?assertEqual(#{kind => <<"unchanged">>, resultId => ResultId},
-                 lsp_handlers:textDocument_diagnostic(undefined, Params)).
-
-%% Regression test for the workspace/diagnostic spin: vscode-languageclient
-%% re-issues the pull as soon as it is answered, so a pull with nothing new to
-%% report must NOT answer straight away - it parks until diagnostics actually
-%% change. Before this, every round answered instantly with full reports and
-%% re-linted every project file, forever.
-workspace_diagnostic_long_polls_until_something_changes(_Config) ->
-    #{items := Reports} = lsp_handlers:workspace_diagnostic(undefined, #{}),
-    Previous = [#{uri => maps:get(uri, R), value => maps:get(resultId, R)} || R <- Reports],
-    Params = #{previousResultIds => Previous},
-
-    Self = self(),
-    Puller = spawn(fun () -> Self ! {pulled, lsp_handlers:workspace_diagnostic(undefined, Params)} end),
-
-    %% Nothing changed, so the pull must still be parked.
-    receive {pulled, _} -> ct:fail("workspace_diagnostic answered an unchanged pull immediately")
-    after 1000 -> ok
-    end,
-
-    lsp_diagnostics:notify_changed(),
-    receive
-        {pulled, #{items := Woken}} ->
-            ?assertEqual(length(Reports), length(Woken))
-    after 5000 ->
-        exit(Puller, kill),
-        ct:fail("workspace_diagnostic stayed parked after a change was signalled")
-    end.
-
-%% One refresh per push restarts the client's whole workspace pull each time,
-%% so a burst must collapse to one request - and each request needs its own
-%% JSON-RPC id (they used to share a constant one, so three requests went out
-%% and only one response ever came back).
-diagnostic_refreshes_are_debounced_and_uniquely_identified(Config) ->
-    AppDir = ?config(data_dir, Config),
-    File = filename:join(AppDir, "clean.erl"),
-    {ok, Content} = file:read_file(File),
-    gen_lsp_doc_server:document_opened(File, Content),
-    Version = gen_lsp_doc_server:get_document_version(File),
-
-    FirstIds = refresh_ids_of_a_push_burst(File, Version),
-    ?assertEqual(1, length(FirstIds)),
-    SecondIds = refresh_ids_of_a_push_burst(File, Version),
-    ?assertEqual(1, length(SecondIds)),
-    ?assertNotEqual(FirstIds, SecondIds).
 
 %% workspace/configuration is answered more than once per session (the trace
 %% behind this change shows configuration/2 running twice at startup), and each
@@ -359,34 +350,45 @@ concurrent_configuration_calls_do_not_clobber_a_later_edit(Config) ->
 %% helpers %%
 %%%%%%%%%%%%%
 
-%% Three pushes back to back, then whatever refresh ids reached the client.
-refresh_ids_of_a_push_burst(File, Version) ->
+data_file(Config, Name) ->
+    filename:join(?config(data_dir, Config), Name).
+
+fixed_with_warning() ->
+    <<"-module(with_warning).\n-export([go/0]).\n\ngo() ->\n    X = 1,\n    X.\n">>.
+
+with_warning_module(Name) ->
+    iolist_to_binary(["-module(", atom_to_list(Name), ").\n-export([go/0]).\n\ngo() ->\n    X = 1,\n    ok.\n"]).
+
+watched_file_event(Socket, File, Type) ->
+    lsp_handlers:workspace_didChangeWatchedFiles(Socket, #{changes =>
+        [#{uri => lsp_utils:file_to_file_uri(File), type => Type}]}).
+
+%% configuration/2 with the given search section and erlang settings, plus a
+%% marker so it is never short-circuited as identical to the previous call;
+%% returns everything pushed until the background lint goes quiet.
+configure(SearchSection) ->
+    configure(SearchSection, #{}).
+
+configure(SearchSection, ErlangSettings) ->
+    Erlang = maps:merge(#{verbose => false, linting => true, marker => erlang:unique_integer()},
+                        ErlangSettings),
     {ServerSocket, ClientSocket} = open_socket_pair(),
-    lists:foreach(fun (_) ->
-        lsp_handlers:maybe_send_diagnostics(ServerSocket, File, Version, [])
-    end, [1, 2, 3]),
+    lsp_handlers:configuration(ServerSocket, [Erlang, #{}, #{}, #{}, SearchSection]),
     Raw = drain_raw(ClientSocket, 5000, <<>>),
+    close_socket_pair(ServerSocket, ClientSocket),
+    Raw.
+
+close_socket_pair(ServerSocket, ClientSocket) ->
     gen_tcp:close(ServerSocket),
-    gen_tcp:close(ClientSocket),
-    case re:run(Raw, "\"(workspace_diagnostic_refresh#[0-9]+)\"",
-                [global, {capture, all_but_first, binary}]) of
-        {match, Matches} -> lists:usort([Id || [Id] <- Matches]);
-        nomatch -> []
+    gen_tcp:close(ClientSocket).
+
+wait_until_idle(0) ->
+    ct:fail(lsp_diagnostics_never_idle);
+wait_until_idle(N) ->
+    case lsp_diagnostics:idle() of
+        true -> ok;
+        false -> timer:sleep(100), wait_until_idle(N - 1)
     end.
-
-pull(Config, FileName) ->
-    AppDir = ?config(data_dir, Config),
-    File = filename:join(AppDir, FileName),
-    Params = #{textDocument => #{uri => lsp_utils:file_to_file_uri(File)}},
-    lsp_handlers:textDocument_diagnostic(undefined, Params).
-
-%% One named file's report out of a fresh whole-workspace pull. Sending no
-%% previousResultIds makes every report `full`, so the pull answers at once
-%% rather than parking in its long poll.
-workspace_report(FileName) ->
-    #{items := Reports} = lsp_handlers:workspace_diagnostic(undefined, #{}),
-    [Report] = [R || R <- Reports, binary:match(maps:get(uri, R), FileName) =/= nomatch],
-    Report.
 
 open_socket_pair() ->
     {ok, LSock} = gen_tcp:listen(0, [binary, {active, false}, {packet, raw}, {ip, {127, 0, 0, 1}}]),
@@ -399,7 +401,7 @@ open_socket_pair() ->
 %% Raw bytes until the stream goes quiet, rather than a single
 %% Content-Length-framed message: more than one notification/request can
 %% legitimately be in flight per test case here (a dropped stale publish
-%% alongside a fresh one, or a publish alongside its own refresh request),
+%% alongside a fresh one, or one publish per project file after a scan),
 %% and a framed single-message reader would silently drop whatever
 %% trailing bytes of a *following* message arrived in the same TCP read.
 drain_raw(Socket, Timeout, Acc) ->

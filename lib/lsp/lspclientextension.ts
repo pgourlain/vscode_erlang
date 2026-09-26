@@ -261,24 +261,6 @@ export function activate(context: ExtensionContext) {
 		documentSelector: [{ scheme: 'file', language: 'erlang' }],
 		middleware: middleware,
 		diagnosticCollectionName: 'Erlang Language Server',
-		// An open document's diagnostics come from the push channel
-		// (textDocument/publishDiagnostics); workspace/diagnostic covers the
-		// project files that are *not* open (lsp_handlers reports open ones as
-		// empty). Document pull would report an open file a second time, into
-		// the client's own DiagnosticCollection, and two collections holding
-		// the same problem means two Problems rows, two hover messages, and
-		// each quick fix offered twice - lsp_codeaction:code_actions/3 emits
-		// one action per diagnostic in the request context.
-		// `filter` is the actual off-switch: with only the trigger flags
-		// cleared, a server-sent workspace/diagnostic/refresh still makes the
-		// client re-pull open documents.
-		diagnosticPullOptions: {
-			onChange: false,
-			onSave: false,
-			onFocus: false,
-			onTabs: false,
-			filter: () => true // true = do not pull this document
-		},
 		outputChannel: lspOutputChannel
 	}
 
