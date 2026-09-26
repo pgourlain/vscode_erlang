@@ -9,7 +9,7 @@
 -export([get_syntax_tree/1, get_dodged_syntax_tree/1, get_references/1, get_inlayhints/1]).
 -export([get_semantic_tokens_cache/1, store_semantic_tokens_cache/3]).
 -export([root_available/0, config_change/0, project_modules/0, get_module_file/1, get_module_files/1, get_build_dir/0, find_source_file/1]).
--export([all_project_files/0]).
+-export([all_project_files/0, get_includers/1]).
 
 %% Cache management
 -export([delete_unused_caches/2,
@@ -271,6 +271,7 @@ start_link() ->
     safe_new_table(syntax_tree, ?XETS, set, ExtraCreateOpts),
     safe_new_table(dodged_syntax_tree, ?XETS, set, ExtraCreateOpts),
     safe_new_table(references, ets, bag, []),
+    safe_new_table(document_includes, ets, set, []),
     safe_new_table(document_inlayhints, ?XETS, set, ExtraCreateOpts),
     safe_new_table(document_semantic_tokens, ?XETS, set, ExtraCreateOpts),
     gen_server:start_link({local, ?SERVER}, ?MODULE, [],[]).
@@ -541,6 +542,7 @@ delete_project_files([File | Files], State) ->
     ?XETS:delete(syntax_tree, File),
     ?XETS:delete(dodged_syntax_tree, File),
     ets:delete(references, File),
+    ets:delete(document_includes, File),
     ?XETS:delete(document_inlayhints, File),
     ?XETS:delete(document_semantic_tokens, File),
     Module = filename:rootname(filename:basename(File)),
@@ -616,6 +618,7 @@ parse_and_store(File, ContentsFile, Version) ->
             ok;
         _ ->
             ?XETS:insert(syntax_tree, {File, Version, SyntaxTree}),
+            ets:insert(document_includes, {File, included_files(File, SyntaxTree)}),
             ets:delete(references, File),
             ?XETS:delete(document_inlayhints, File),
             lsp_navigation:fold_references(fun (Reference, Line, Column, End, _) ->
@@ -627,6 +630,36 @@ parse_and_store(File, ContentsFile, Version) ->
         undefined -> ok;
         _ -> ?XETS:insert(dodged_syntax_tree, {File, Version, DodgedSyntaxTree})
     end.
+
+%% Every file epp entered while parsing File - its headers, and theirs.
+included_files(File, SyntaxTree) ->
+    lists:usort([normalize_path(Included) ||
+                    {attribute, _, file, {Included, _}} <- SyntaxTree, Included =/= File]).
+
+%% @doc Project files whose last parse included Hrl, directly or through
+%% another header - what has to be reparsed when Hrl changes. A scan of the
+%% whole index rather than a reverse one: it only runs when a header changes,
+%% while a reverse index would cost a table scan on every parse to drop the
+%% file's old entries.
+get_includers(Hrl) ->
+    Target = normalize_path(Hrl),
+    ets:foldl(fun ({File, Included}, Acc) ->
+        case lists:member(Target, Included) of
+            true -> [File | Acc];
+            false -> Acc
+        end
+    end, [], document_includes).
+
+%% Absolute, with `.` and `..` segments resolved, so that an include path
+%% like "src/../include/x.hrl" matches the watcher's "include/x.hrl".
+normalize_path(Path) ->
+    [Root | Segments] = filename:split(filename:absname(unicode:characters_to_list(Path))),
+    filename:join([Root | lists:reverse(lists:foldl(fun
+        (".", Acc) -> Acc;
+        ("..", [_ | Acc]) -> Acc;
+        ("..", []) -> [];
+        (Segment, Acc) -> [Segment | Acc]
+    end, [], Segments))]).
 
 %% `undefined` for never parsed, `{Version, Tree}` otherwise - Version being
 %% the document_version the contents were read at (see parse_document/1).

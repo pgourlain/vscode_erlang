@@ -24,7 +24,7 @@
 %% API
 -export([start_link/0]).
 -export([schedule_configuration_request/2]).
--export([schedule_validation/2, cancel_validation/1]).
+-export([schedule_validation/2, schedule_validation/3, cancel_validation/1]).
 -export([schedule_background_validation/2, schedule_disk_validation/2]).
 -export([project_scanned/2, clear_all/1, published/2]).
 %% For lsp_diagnostic_SUITE: nothing pending, nothing running.
@@ -52,12 +52,13 @@
 -define(VALIDATION_DEBOUNCE_MS, 400).
 
 %% `cached` lints the syntax tree gen_lsp_doc_server already holds (parsed on
-%% demand if missing); `disk` reparses the file from disk first, for when it is
-%% known to have changed under a tree still stamped as current.
--type mode() :: cached | disk.
+%% demand if missing); `reparse` parses the file again first (its buffer when
+%% open, the disk otherwise), for when it is known to have changed under a
+%% tree still stamped as current - changed on disk, or one of its headers did.
+-type mode() :: cached | reparse.
 
 -record(state, {configuration_timer, configuration_socket, configuration_source,
-                validation_timers = #{} :: #{file:filename() => reference()},
+                validation_timers = #{} :: #{file:filename() => {reference(), mode()}},
                 background = [] :: [{file:filename(), mode()}],
                 background_socket,
                 running :: undefined | file:filename(),
@@ -78,7 +79,12 @@ schedule_configuration_request(Socket, Source) ->
 %% document File, debounced per file - a later call within the window
 %% restarts the wait, so a burst of edits lints once, at the end.
 schedule_validation(Socket, File) ->
-    gen_server:cast(?SERVER, {schedule_validation, Socket, File}).
+    schedule_validation(Socket, File, cached).
+
+%% @doc Same, reparsing the buffer first when Mode is `reparse` - for an open
+%% module whose header changed. A pending `reparse` is never downgraded.
+schedule_validation(Socket, File, Mode) ->
+    gen_server:cast(?SERVER, {schedule_validation, Socket, File, Mode}).
 
 %% @doc Drop any debounced validation still pending for File. Called when the
 %% document closes: from then on the file is linted from disk, through the
@@ -93,10 +99,10 @@ schedule_background_validation(Socket, Files) ->
     gen_server:cast(?SERVER, {schedule_background_validation, Socket, Files, cached, back}).
 
 %% @doc Lint File from disk ahead of the rest of the queue: a document just
-%% closed, or a closed file created, changed or deleted on disk. A file that
-%% no longer exists has its diagnostics cleared.
+%% closed, a closed file created, changed or deleted on disk, or one whose
+%% header changed. A file that no longer exists has its diagnostics cleared.
 schedule_disk_validation(Socket, File) ->
-    gen_server:cast(?SERVER, {schedule_background_validation, Socket, [File], disk, front}).
+    gen_server:cast(?SERVER, {schedule_background_validation, Socket, [File], reparse, front}).
 
 %% @doc The project scan has finished and found Files: lint each of them in
 %% the background, and clear any file still showing diagnostics that is no
@@ -134,10 +140,13 @@ handle_cast({schedule_configuration_request, Socket, Source}, State) ->
     %% A request is already pending - coalesce into it.
     {noreply, State#state{configuration_socket = Socket, configuration_source = Source}};
 
-handle_cast({schedule_validation, Socket, File}, #state{validation_timers = Timers} = State) ->
-    cancel_timer(maps:get(File, Timers, undefined)),
+handle_cast({schedule_validation, Socket, File, Mode}, #state{validation_timers = Timers} = State) ->
+    Mode2 = case maps:get(File, Timers, undefined) of
+        undefined -> Mode;
+        {_, PendingMode} = Pending -> cancel_timer(Pending), max_mode(Mode, PendingMode)
+    end,
     Timer = erlang:send_after(?VALIDATION_DEBOUNCE_MS, self(), {validate, Socket, File}),
-    {noreply, State#state{validation_timers = Timers#{File => Timer}}};
+    {noreply, State#state{validation_timers = Timers#{File => {Timer, Mode2}}}};
 
 handle_cast({cancel_validation, File}, #state{validation_timers = Timers} = State) ->
     cancel_timer(maps:get(File, Timers, undefined)),
@@ -184,14 +193,17 @@ handle_cast(_Request, State) ->
 %% the validation itself runs outside it - like gen_lsp_server does for every
 %% incoming request.
 handle_info({validate, Socket, File}, #state{validation_timers = Timers} = State) ->
-    case maps:is_key(File, Timers) of
-        false ->
+    case maps:get(File, Timers, undefined) of
+        undefined ->
             %% cancel_validation/1 came in after this timer had already fired
             ?LOG(<<"diag">>, "schedule_validation: dropping cancelled validation of ~p", [File]),
             {noreply, State};
-        true ->
-            ?LOG(<<"diag">>, "schedule_validation: debounce elapsed, validating ~p", [File]),
-            spawn(fun () -> lsp_handlers:validate_file(Socket, File) end),
+        {_Timer, Mode} ->
+            ?LOG(<<"diag">>, "schedule_validation: debounce elapsed, validating ~p (~p)", [File, Mode]),
+            spawn(fun () ->
+                Mode =:= reparse andalso gen_lsp_doc_server:reparse(File),
+                lsp_handlers:validate_file(Socket, File)
+            end),
             {noreply, State#state{validation_timers = maps:remove(File, Timers)}}
     end;
 handle_info({worker_result, {background, File}, _Result}, #state{running = File} = State) ->
@@ -216,15 +228,19 @@ code_change(_OldVersion, State, _Extra) ->
     {ok, State}.
 
 cancel_timer(undefined) -> ok;
-cancel_timer(Timer) -> erlang:cancel_timer(Timer).
+cancel_timer({Timer, _Mode}) -> erlang:cancel_timer(Timer).
 
-%% Deduplicated: a file already queued stays queued once, `disk` winning over
+max_mode(reparse, _) -> reparse;
+max_mode(_, reparse) -> reparse;
+max_mode(cached, cached) -> cached.
+
+%% Deduplicated: a file already queued stays queued once, `reparse` winning over
 %% `cached` (a reparse covers a plain lint, not the other way around), and
 %% moved to the front when asked for there.
 enqueue(Files, Mode, Where, Queue) ->
     lists:foldl(fun (File, Acc) ->
         {Mode2, Rest} = case lists:keytake(File, 1, Acc) of
-            {value, {File, disk}, Others} -> {disk, Others};
+            {value, {File, reparse}, Others} -> {reparse, Others};
             {value, {File, cached}, Others} -> {Mode, Others};
             false -> {Mode, Acc}
         end,

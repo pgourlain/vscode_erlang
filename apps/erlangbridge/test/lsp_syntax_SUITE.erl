@@ -21,6 +21,11 @@ all() -> [
     unused_variable_is_reported,
     unused_function_is_reported,
     missing_include_is_reported,
+    non_latin1_path_and_message_are_utf8,
+    error_in_included_file_is_reported_on_the_include_line,
+    module_and_header_problems_are_both_reported,
+    header_problem_is_on_the_include_line_with_crlf_endings,
+    header_problem_is_on_the_include_line_with_a_trailing_comment,
     bad_record_field_is_reported,
     parse_transform_from_rebar_config_is_applied,
     eunit_generator_is_not_reported_as_unused,
@@ -81,6 +86,61 @@ missing_include_is_reported(Config) ->
     ?assertEqual(2, maps:get(line, Info)),
     assert_message_contains(Info, "does_not_exist.hrl").
 
+%% erl_lint reports a header's problems in a group of their own, at the
+%% header's positions. They used to be shown at those positions in the module
+%% (a syntax error on line 1 of the header underlined line 1 of the module);
+%% they go on the -include line, naming where they really are, with no
+%% correlation data - a quick fix would edit the module at the header's
+%% positions - and a link to the header.
+error_in_included_file_is_reported_on_the_include_line(Config) ->
+    AppDir = ?config(data_dir, Config),
+    File = filename:join(AppDir, "include_with_error.erl"),
+    Hrl = filename:join(AppDir, "broken_include.hrl"),
+    #{errors_warnings := [Item]} = lsp_syntax:validate_parsed_source_file(File),
+    ?assertMatch(#{type := <<"error">>, info := #{line := 2, character := 1}}, Item),
+    #{info := #{message := Message}} = Item,
+    ?assertMatch(<<"broken_include.hrl:1:17: syntax error before: ')'">>, Message),
+    ?assertNot(maps:is_key(correlation_data, Item)),
+    ?assertMatch(#{file := Hrl, line := 1, character := 17}, maps:get(related, Item)).
+
+%% Two groups - the module's and the header's - used to fall through the
+%% single-group patterns in lsp_syntax:lint/2 and drop every diagnostic.
+module_and_header_problems_are_both_reported(Config) ->
+    AppDir = ?config(data_dir, Config),
+    File = filename:join(AppDir, "include_and_module_problems.erl"),
+    #{errors_warnings := Items} = lsp_syntax:validate_parsed_source_file(File),
+    ?assertMatch([#{type := <<"error">>, info := #{line := 2}},
+                  #{type := <<"warning">>, info := #{line := 6}}], Items).
+
+%% epp says where the module resumes after a header, which is the line after
+%% the -include only when the `.` ending it is followed by a bare newline:
+%% with CRLF endings or a comment after it, it is the -include line itself -
+%% and the problem used to land on the line above.
+header_problem_is_on_the_include_line_with_crlf_endings(Config) ->
+    assert_header_problem_on_line(Config, "include_with_error_crlf.erl", 3).
+
+header_problem_is_on_the_include_line_with_a_trailing_comment(Config) ->
+    assert_header_problem_on_line(Config, "include_with_error_comment.erl", 3).
+
+assert_header_problem_on_line(Config, FileName, Line) ->
+    File = filename:join(?config(data_dir, Config), FileName),
+    #{errors_warnings := [Item]} = lsp_syntax:validate_parsed_source_file(File),
+    ?assertMatch(#{info := #{line := Line}}, Item).
+
+%% File names and messages are lists of Unicode code points: turned into
+%% binaries byte by byte, a character above 255 (a module under a folder
+%% named in Japanese) crashed the whole lint, and one between 128 and 255 (an
+%% accented variable name) came out as Latin-1, not the UTF-8 JSON expects.
+%% Written at test time so that no non-ASCII name is committed.
+non_latin1_path_and_message_are_utf8(Config) ->
+    Dir = filename:join(?config(priv_dir, Config), [26085, 26412]), % "日本"
+    File = filename:join(Dir, "unicode_path.erl"),
+    ok = filelib:ensure_dir(File),
+    ok = file:write_file(File, <<"-module(unicode_path).\n-export([go/0]).\n\ngo() ->\n    Été = 1,\n    ok.\n"/utf8>>),
+    #{errors_warnings := [Item]} = lsp_syntax:validate_parsed_source_file(File),
+    ?assertEqual(unicode:characters_to_binary(File), maps:get(file, Item)),
+    ?assertEqual(<<"variable 'Été' is unused"/utf8>>, maps:get(message, maps:get(info, Item))).
+
 bad_record_field_is_reported(Config) ->
     Item = the_one_diagnostic(Config, "bad_record_field.erl"),
     ?assertMatch(#{type := <<"error">>}, Item),
@@ -122,7 +182,7 @@ the_one_diagnostic(Config, FileName) ->
     ?assertMatch(#{parse_result := true, errors_warnings := [_ | _]}, Result),
     #{errors_warnings := [Item | _]} = Result,
     ?assertEqual(lists:sort([type, file, info, correlation_data]), lists:sort(maps:keys(Item))),
-    ?assertEqual(list_to_binary(File), maps:get(file, Item)),
+    ?assertEqual(unicode:characters_to_binary(File), maps:get(file, Item)),
     ?assertEqual(lists:sort([module, messageBody]), lists:sort(maps:keys(maps:get(correlation_data, Item)))),
     #{info := Info} = Item,
     ?assertEqual(lists:sort([line, character, message]), lists:sort(maps:keys(Info))),

@@ -215,25 +215,37 @@ workspace_didChangeConfiguration(Socket, _Params) ->
 
 %% A closed file changed on disk is relinted from disk (a deleted one is
 %% cleared). An open one is left alone: its buffer, not the disk, is what its
-%% diagnostics describe.
+%% diagnostics describe. A header is not a project module: only the modules
+%% that include it are relinted.
 workspace_didChangeWatchedFiles(Socket, Params) ->
-    lists:foreach(fun
-        (#{uri := Uri, type := 1} = Change) -> % Created
-            ?LOG(<<"diag">>, "watchedFiles: Created ~p", [Change]),
-            File = lsp_utils:file_uri_to_file(Uri),
-            gen_lsp_doc_server:project_file_added(File),
-            revalidate_closed_file(Socket, File);
-        (#{uri := Uri, type := 2} = Change) -> % Changed
-            ?LOG(<<"diag">>, "watchedFiles: Changed ~p", [Change]),
-            File = lsp_utils:file_uri_to_file(Uri),
-            gen_lsp_doc_server:project_file_changed(File),
-            revalidate_closed_file(Socket, File);
-        (#{uri := Uri, type := 3} = Change) -> % Deleted
-            ?LOG(<<"diag">>, "watchedFiles: Deleted ~p", [Change]),
-            File = lsp_utils:file_uri_to_file(Uri),
-            gen_lsp_doc_server:project_file_deleted(File),
-            revalidate_closed_file(Socket, File)
+    lists:foreach(fun (#{uri := Uri, type := Type} = Change) ->
+        ?LOG(<<"diag">>, "watchedFiles: ~p", [Change]),
+        File = lsp_utils:file_uri_to_file(Uri),
+        case {filename:extension(File), Type} of
+            {".hrl", _} ->
+                revalidate_includers(Socket, File);
+            {_, 1} -> % Created
+                gen_lsp_doc_server:project_file_added(File),
+                revalidate_closed_file(Socket, File);
+            {_, 2} -> % Changed
+                gen_lsp_doc_server:project_file_changed(File),
+                revalidate_closed_file(Socket, File);
+            {_, 3} -> % Deleted
+                gen_lsp_doc_server:project_file_deleted(File),
+                revalidate_closed_file(Socket, File)
+        end
     end, maps:get(changes, Params)).
+
+%% @doc Relint every module whose last parse included Hrl: their syntax
+%% trees hold the header as it was then, and nothing about the module itself
+%% changed to make get_syntax_tree/1 reparse it.
+revalidate_includers(Socket, Hrl) ->
+    lists:foreach(fun (File) ->
+        case gen_lsp_doc_server:get_document_contents(File) of
+            undefined -> lsp_diagnostics:schedule_disk_validation(Socket, File);
+            _Open -> lsp_diagnostics:schedule_validation(Socket, File, reparse)
+        end
+    end, gen_lsp_doc_server:get_includers(Hrl)).
 
 revalidate_closed_file(Socket, File) ->
     case {filename:extension(File), gen_lsp_doc_server:get_document_contents(File)} of
@@ -311,8 +323,13 @@ textDocument_didClose(Socket, Params) ->
 textDocument_didSave(Socket, Params) ->
     File = lsp_utils:file_uri_to_file(mapmapget(textDocument, uri, Params)),
     ?LOG(<<"diag">>, "didSave: ~p", [File]),
-    %% Not gated on autosave() any more - see textDocument_didChange/2.
-    lsp_diagnostics:schedule_validation(Socket, File).
+    case filename:extension(File) of
+        %% epp reads headers from disk, so saving is what changes them for
+        %% the modules including them.
+        ".hrl" -> revalidate_includers(Socket, File);
+        %% Not gated on autosave() any more - see textDocument_didChange/2.
+        _ -> lsp_diagnostics:schedule_validation(Socket, File)
+    end.
 
 %% Content changes are applied in the order the client sent them - each
 %% one (range-based or, still legal even under Incremental sync, a full
@@ -844,14 +861,14 @@ validate_file(Socket, File) ->
     end.
 
 %% @doc Background lint of a file that is not open (see lsp_diagnostics):
-%% from disk, reparsed first when Mode is `disk`. A file no longer on disk is
+%% from disk, reparsed first when Mode is `reparse`. A file no longer on disk is
 %% cleared.
 validate_closed_file(Socket, File, Mode) ->
     case filelib:is_regular(File) of
         false ->
             maybe_send_diagnostics(Socket, File, gen_lsp_doc_server:get_document_version(File), []);
         true ->
-            Mode =:= disk andalso gen_lsp_doc_server:reparse(File),
+            Mode =:= reparse andalso gen_lsp_doc_server:reparse(File),
             validate_file(Socket, File)
     end.
 
@@ -958,13 +975,24 @@ send_diagnostics(Socket, File, Diagnostics) ->
 
 to_lsp_diagnostic(Diagnostic) ->
     Info = maps:get(info, Diagnostic),
-    #{
+    LspDiagnostic = #{
         severity => severity(maps:get(type, Diagnostic)),
         range => get_range(Info),
         message => maps:get(message, Info),
         source => lsp_utils:try_get(source, Diagnostic, <<"erl">>),
         data => lsp_utils:try_get(correlation_data, Diagnostic, null)
-    }.
+    },
+    case maps:get(related, Diagnostic, undefined) of
+        undefined ->
+            LspDiagnostic;
+        %% A problem reported on an -include line links to where it really is
+        %% (see lsp_syntax:extract_group/4).
+        #{file := File, line := Line, character := Character, message := Message} ->
+            LspDiagnostic#{relatedInformation => [#{
+                location => #{uri => lsp_utils:file_uri_to_vscode_uri(lsp_utils:file_to_file_uri(File)),
+                              range => lsp_utils:client_range(Line, Character, Line, Character + 1)},
+                message => Message}]}
+    end.
 
 %% @doc `erlang/discoverTests` - task 6.1. Delegates to lsp_testing.erl.
 erlang_discoverTests(Socket, Params) ->

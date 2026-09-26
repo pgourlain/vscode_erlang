@@ -1,6 +1,6 @@
 # Change log
 
-## Version 1.2.4 (September 22, 2026)
+## Version 1.2.4 (September 26, 2026)
 
 * [356](https://github.com/pgourlain/vscode_erlang/issues/356) : Header files (`.hrl`) treated as modules
   - Opening a `.hrl` no longer reports `no module definition` and `record ... is unused` for every record it declares: the pull-diagnostics path (`textDocument/diagnostic`, `workspace/diagnostic`) linted any file on its own, unlike the push path which only ever lints `.erl` files. Both now lint `.erl` files only
@@ -10,6 +10,11 @@
   - Files that are not open still get their diagnostics, now pushed too: every module of the project is linted from disk in the background after the project scan, one file at a time, and relinted when it changes on disk. Closing a document keeps its diagnostics, recomputed from disk; a deleted file, a file excluded from the project and every file when `erlang.linting` is turned off are cleared
   - Fast typing: `textDocument/didOpen`, `didChange`, `didClose` and `didSave` are now applied in the order they are received. They used to be handled concurrently, so two quick incremental edits could be applied out of order and corrupt the server's copy of the document
 
+* Header files (`.hrl`) and the modules including them
+  - Fixing and saving a header now relints every module that includes it, directly or through another header, open or not: a module kept showing the header's old error until the module itself was edited. Headers changed outside the editor are picked up too (the file watcher now covers `.hrl`)
+
+* Diagnostics for files with non-ASCII names or messages
+  - A module whose path contains characters outside Latin-1 (e.g. a folder named in Japanese) got no diagnostics at all: turning its path into the diagnostic failed and stopped the whole lint. Accented characters in a path or a message (e.g. an unused variable `Été`) were sent to the client as Latin-1 instead of UTF-8. Paths and messages are now encoded as UTF-8
 
 ---
 

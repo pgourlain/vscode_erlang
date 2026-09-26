@@ -25,6 +25,10 @@ all() -> [
     linting_disabled_clears_published_diagnostics,
     open_document_is_published_once,
     an_open_header_file_is_never_linted,
+    closed_includer_is_relinted_when_its_header_changes,
+    open_includer_is_relinted_when_its_header_is_saved,
+    header_change_is_not_registered_as_a_module,
+    open_buffer_problems_stay_on_their_own_line,
     an_unsaved_edit_republishes_diagnostics_for_the_new_contents,
     stale_validation_result_is_dropped_once_a_newer_edit_has_landed,
     identical_configuration_is_not_revalidated,
@@ -55,6 +59,7 @@ end_per_testcase(_TestCase, Config) ->
     lists:foreach(fun gen_lsp_doc_server:document_closed/1, gen_lsp_doc_server:opened_documents()),
     gen_lsp_config_server:update_config(erlang, #{verbose => false}),
     gen_lsp_config_server:update_config(search, #{}),
+    gen_lsp_config_server:update_config(computed, #{}),
     wait_until_idle(100),
     Config.
 
@@ -170,6 +175,75 @@ an_open_header_file_is_never_linted(Config) ->
     Raw = drain_raw(ClientSocket, 3000, <<>>),
     close_socket_pair(ServerSocket, ClientSocket),
     ?assertEqual([], publishes_for(Raw, File)).
+
+%% A module's syntax tree holds its headers as they were when it was parsed,
+%% and nothing about the module itself changes when one of them does - so a
+%% fixed header left its error on every module including it until that
+%% module was edited. A header change seen by the file watcher relints them.
+closed_includer_is_relinted_when_its_header_changes(Config) ->
+    {Hrl, File} = write_includer(Config, "closed_dep.hrl", "closed_includer"),
+    {ServerSocket, ClientSocket} = open_socket_pair(),
+    watched_file_event(ServerSocket, File, 1),
+    BrokenRaw = drain_raw(ClientSocket, 5000, <<>>),
+    [[Diagnostic]] = publishes_for(BrokenRaw, File),
+    %% on the -include line (0-based 1), linking to the header
+    ?assertMatch(#{range := #{start := #{line := 1}},
+                   relatedInformation := [#{location := #{range := #{start := #{line := 0}}}}]},
+                 Diagnostic),
+    [#{location := #{uri := HrlUri}}] = maps:get(relatedInformation, Diagnostic),
+    ?assertEqual(lsp_utils:file_uri_to_vscode_uri(lsp_utils:file_to_file_uri(Hrl)), HrlUri),
+
+    ok = file:write_file(Hrl, <<"-record(r, {a}).\n">>),
+    watched_file_event(ServerSocket, Hrl, 2),
+    FixedRaw = drain_raw(ClientSocket, 5000, <<>>),
+    close_socket_pair(ServerSocket, ClientSocket),
+    ?assertEqual([[]], publishes_for(FixedRaw, File)).
+
+%% Same for an open module, whose header is saved from the editor: its
+%% buffer is reparsed, since the buffer itself did not change.
+open_includer_is_relinted_when_its_header_is_saved(Config) ->
+    {Hrl, File} = write_includer(Config, "open_dep.hrl", "open_includer"),
+    {ok, Content} = file:read_file(File),
+    {ServerSocket, ClientSocket} = open_socket_pair(),
+    lsp_handlers:textDocument_didOpen(ServerSocket, #{textDocument =>
+        #{uri => lsp_utils:file_to_file_uri(File), text => Content, version => 1}}),
+    OpenRaw = drain_raw(ClientSocket, 5000, <<>>),
+    ?assertMatch([[_]], publishes_for(OpenRaw, File)),
+
+    ok = file:write_file(Hrl, <<"-record(r, {a}).\n">>),
+    lsp_handlers:textDocument_didSave(ServerSocket, #{textDocument =>
+        #{uri => lsp_utils:file_to_file_uri(Hrl)}}),
+    SavedRaw = drain_raw(ClientSocket, 5000, <<>>),
+    close_socket_pair(ServerSocket, ClientSocket),
+    ?assertEqual([[]], publishes_for(SavedRaw, File)).
+
+%% The watcher now reports headers too; they must not be added to the project
+%% as if they were modules.
+header_change_is_not_registered_as_a_module(Config) ->
+    Hrl = filename:join(?config(priv_dir, Config), "not_a_module.hrl"),
+    ok = file:write_file(Hrl, <<"-define(X, 1).\n">>),
+    watched_file_event(undefined, Hrl, 1),
+    ?assertNot(lists:member("not_a_module", gen_lsp_doc_server:project_modules())).
+
+%% An open buffer is parsed from a temporary copy. The client sends
+%% erlang.tmpdir as a JSON string, i.e. a binary, so the copy's path was a
+%% binary while epp names files with strings: the module's own -file
+%% attribute kept the copy's name, and its problems - taken for a header's -
+%% all landed on line 1 of the module, prefixed with the copy's random name.
+open_buffer_problems_stay_on_their_own_line(Config) ->
+    gen_lsp_config_server:update_config(computed,
+        #{tmpdir => unicode:characters_to_binary(?config(priv_dir, Config))}),
+    File = data_file(Config, "with_warning.erl"),
+    {ok, Content} = file:read_file(File),
+    {ServerSocket, ClientSocket} = open_socket_pair(),
+    lsp_handlers:textDocument_didOpen(ServerSocket, #{textDocument =>
+        #{uri => lsp_utils:file_to_file_uri(File), text => Content, version => 1}}),
+    Raw = drain_raw(ClientSocket, 5000, <<>>),
+    close_socket_pair(ServerSocket, ClientSocket),
+    [[Diagnostic]] = publishes_for(Raw, File),
+    ?assertMatch(#{message := <<"variable 'X' is unused">>,
+                   range := #{start := #{line := 4}}}, Diagnostic),
+    ?assertNot(maps:is_key(relatedInformation, Diagnostic)).
 
 %% Regression test for "the quick fix is applied but the problem stays in the
 %% Problems list": a quick fix's WorkspaceEdit reaches the server as a plain
@@ -358,6 +432,16 @@ fixed_with_warning() ->
 
 with_warning_module(Name) ->
     iolist_to_binary(["-module(", atom_to_list(Name), ").\n-export([go/0]).\n\ngo() ->\n    X = 1,\n    ok.\n"]).
+
+%% A header with a syntax error, and a module including it on line 2.
+write_includer(Config, HrlName, Module) ->
+    Dir = ?config(priv_dir, Config),
+    Hrl = filename:join(Dir, HrlName),
+    File = filename:join(Dir, Module ++ ".erl"),
+    ok = file:write_file(Hrl, <<"-record(r, {a = )}).\n">>),
+    ok = file:write_file(File, iolist_to_binary(["-module(", Module, ").\n-include(\"", HrlName,
+                                                 "\").\n-export([go/0]).\n\ngo() -> ok.\n"])),
+    {Hrl, File}.
 
 watched_file_event(Socket, File, Type) ->
     lsp_handlers:workspace_didChangeWatchedFiles(Socket, #{changes =>

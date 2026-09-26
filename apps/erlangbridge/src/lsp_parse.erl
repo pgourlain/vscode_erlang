@@ -272,9 +272,14 @@ rebar_define_to_epp_define([H|T]) ->
 
 update_file_in_forms(File, File, FileSyntaxTree) ->
     FileSyntaxTree;
+%% epp names files with strings, while ContentsFile is a binary whenever
+%% erlang.tmpdir came from the client (a JSON string): compare them as strings,
+%% or the temporary copy's name stays in the tree and its problems are taken
+%% for an included file's.
 update_file_in_forms(File, ContentsFile, FileSyntaxTree) ->
+    ContentsFileName = unicode:characters_to_list(ContentsFile),
     lists:map(fun 
-        ({attribute, A1, file, {FunContentsFile, A2}}) when FunContentsFile =:= ContentsFile ->
+        ({attribute, A1, file, {FunContentsFile, A2}}) when FunContentsFile =:= ContentsFileName ->
 		      {attribute, A1, file, {File, A2}};
 		  (Form) ->
               Form

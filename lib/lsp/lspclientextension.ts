@@ -105,7 +105,7 @@ namespace Configuration {
 			lspcodelens.configurationChanged();
 			client.sendNotification(DidChangeConfigurationNotification.type, { settings: null });
 		});
-		fileSystemWatcher = workspace.createFileSystemWatcher('**/*.erl');
+		fileSystemWatcher = workspace.createFileSystemWatcher('**/*.{erl,hrl}');
 		fileSystemWatcher.onDidCreate(uri => {
 			client.sendNotification(DidChangeWatchedFilesNotification.type,
 				{ changes: [{ uri: uri.toString(), type: FileChangeType.Created }] });
