@@ -1,0 +1,2 @@
+-record(point, {x = 0, y = 0}).
+-record(user, {name, age}).

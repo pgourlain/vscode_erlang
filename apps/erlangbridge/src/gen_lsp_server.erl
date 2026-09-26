@@ -194,6 +194,22 @@ send_to_client(Socket, Method, Body) ->
     gen_tcp:send(Socket, <<Header/binary, "\r\n\r\n", Json/binary>>).
 
 
+%% Document synchronisation notifications are applied right here, in the
+%% socket process, in the order they came off the wire: an incremental
+%% didChange is positioned against the buffer left by the previous one, so
+%% two of them handled by independent processes could land in either order,
+%% or both read the same buffer and lose one edit. Their handlers only touch
+%% the buffer tables and hand any linting to lsp_diagnostics, so this does not
+%% hold up the socket. Everything else still gets a process of its own.
+dispatch(Socket, #{method := Method} = Input) when
+        Method =:= <<"textDocument/didOpen">>;
+        Method =:= <<"textDocument/didChange">>;
+        Method =:= <<"textDocument/didClose">>;
+        Method =:= <<"textDocument/didSave">> ->
+    do_contents(Socket, Input);
+dispatch(Socket, Input) ->
+    spawn(fun() -> do_contents(Socket, Input) end).
+
 handle_tcp_data(Socket, Contents, State) ->
     StateWithContents = State#state{contents = <<(State#state.contents)/binary, Contents/binary>>},
     StateWithLength = case StateWithContents#state.content_length of
@@ -223,12 +239,12 @@ handle_tcp_data(Socket, Contents, State) ->
             StateWithLength;
         ContentLength when ContentLength =:= byte_size(StateWithLength#state.contents) ->
             {ok, Input, _} = vscode_jsone_decode:decode(StateWithLength#state.contents, [{keys, atom}]),
-            spawn(fun() -> do_contents(Socket, Input) end),
+            dispatch(Socket, Input),
             StateWithLength#state{contents = <<"">>, content_length = undefined};
         ContentLength when ContentLength < byte_size(StateWithLength#state.contents) ->
             ShorterContents = binary:part(StateWithLength#state.contents, 0, ContentLength),
             {ok, Input, _} = vscode_jsone_decode:decode(ShorterContents, [{keys, atom}]),
-            spawn(fun() -> do_contents(Socket, Input) end),
+            dispatch(Socket, Input),
             handle_tcp_data(
                 Socket,
                 binary:part(StateWithLength#state.contents, ContentLength, byte_size(StateWithLength#state.contents) - ContentLength),

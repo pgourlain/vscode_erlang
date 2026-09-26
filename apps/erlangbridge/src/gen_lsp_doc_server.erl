@@ -4,13 +4,12 @@
 %% API
 -export([start_link/0]).
 
--export([document_opened/2, document_changed/2, document_range_changed/4, document_closed/1, opened_documents/0, get_document_contents/1, get_document_version/1, parse_document/1]).
+-export([document_opened/2, document_changed/2, document_range_changed/4, document_closed/1, opened_documents/0, get_document_contents/1, get_document_version/1, parse_document/1, reparse/1]).
 -export([project_file_added/1, project_file_changed/1, project_file_deleted/1]).
 -export([get_syntax_tree/1, get_dodged_syntax_tree/1, get_references/1, get_inlayhints/1]).
 -export([get_semantic_tokens_cache/1, store_semantic_tokens_cache/3]).
--export([get_diagnostics_cache/1, store_diagnostics_cache/2]).
 -export([root_available/0, config_change/0, project_modules/0, get_module_file/1, get_module_files/1, get_build_dir/0, find_source_file/1]).
--export([all_project_files/0]).
+-export([all_project_files/0, get_includers/1]).
 
 %% Cache management
 -export([delete_unused_caches/2,
@@ -132,6 +131,17 @@ parse_document(File) ->
             ok
     end.
 
+%% @doc Parse File again now, from disk unless it is open - for a closed file
+%% known to have changed on disk (or just closed with its edits discarded)
+%% while the tree held for it is still stamped as current.
+%%
+%% No diagnostics cache is kept next to the trees: with push only, a file is
+%% linted once per event that can change its diagnostics (open document edit,
+%% close, change on disk, project scan) and never again on a client's request,
+%% so there is no repeated lint for a cache to save.
+reparse(File) ->
+    parse_and_store(File, File).
+
 project_file_added(File) ->
     gen_server:cast(?SERVER, {project_file_added, File}).
 
@@ -195,23 +205,6 @@ get_semantic_tokens_cache(File) ->
 
 store_semantic_tokens_cache(File, ResultId, Tokens) ->
     ?XETS:insert(document_semantic_tokens, {File, ResultId, Tokens}).
-
-%% @doc Diagnostics as last computed for File, or undefined when never
-%% computed or computed against an older revision of the document.
-%%
-%% The LSP 3.17 pull endpoints (lsp_handlers:textDocument_diagnostic/2 and
-%% workspace_diagnostic/2) would otherwise re-lint every project file on every
-%% pull. Keyed by the same document_version counter the push path uses, and
-%% dropped outright by parse_and_store/2, so a reparse always recomputes.
-get_diagnostics_cache(File) ->
-    Version = get_document_version(File),
-    case ?XETS:lookup(document_diagnostics, File) of
-        [{File, Version, Diagnostics}] -> Diagnostics;
-        _ -> undefined
-    end.
-
-store_diagnostics_cache(File, Diagnostics) ->
-    ?XETS:insert(document_diagnostics, {File, get_document_version(File), Diagnostics}).
 
 root_available() ->
     gen_server:cast(?SERVER, root_available).
@@ -278,9 +271,9 @@ start_link() ->
     safe_new_table(syntax_tree, ?XETS, set, ExtraCreateOpts),
     safe_new_table(dodged_syntax_tree, ?XETS, set, ExtraCreateOpts),
     safe_new_table(references, ets, bag, []),
+    safe_new_table(document_includes, ets, set, []),
     safe_new_table(document_inlayhints, ?XETS, set, ExtraCreateOpts),
     safe_new_table(document_semantic_tokens, ?XETS, set, ExtraCreateOpts),
-    safe_new_table(document_diagnostics, ?XETS, set, ExtraCreateOpts),
     gen_server:start_link({local, ?SERVER}, ?MODULE, [],[]).
 
 init(_Args) ->
@@ -347,7 +340,6 @@ terminate(_Reason, _State) ->
     delete_cache_file(dodged_syntax_tree),
     delete_cache_file(document_inlayhints),
     delete_cache_file(document_semantic_tokens),
-    delete_cache_file(document_diagnostics),
     ok.
 
 code_change(_OldVersion, State, _Extra) ->
@@ -550,6 +542,7 @@ delete_project_files([File | Files], State) ->
     ?XETS:delete(syntax_tree, File),
     ?XETS:delete(dodged_syntax_tree, File),
     ets:delete(references, File),
+    ets:delete(document_includes, File),
     ?XETS:delete(document_inlayhints, File),
     ?XETS:delete(document_semantic_tokens, File),
     Module = filename:rootname(filename:basename(File)),
@@ -619,13 +612,13 @@ parse_and_store(File, ContentsFile) ->
     end.
 
 parse_and_store(File, ContentsFile, Version) ->
-    ?XETS:delete(document_diagnostics, File),
     {SyntaxTree, DodgedSyntaxTree} = lsp_parse:parse_source_file(File, ContentsFile),
     case SyntaxTree of
         undefined ->
             ok;
         _ ->
             ?XETS:insert(syntax_tree, {File, Version, SyntaxTree}),
+            ets:insert(document_includes, {File, included_files(File, SyntaxTree)}),
             ets:delete(references, File),
             ?XETS:delete(document_inlayhints, File),
             lsp_navigation:fold_references(fun (Reference, Line, Column, End, _) ->
@@ -637,6 +630,36 @@ parse_and_store(File, ContentsFile, Version) ->
         undefined -> ok;
         _ -> ?XETS:insert(dodged_syntax_tree, {File, Version, DodgedSyntaxTree})
     end.
+
+%% Every file epp entered while parsing File - its headers, and theirs.
+included_files(File, SyntaxTree) ->
+    lists:usort([normalize_path(Included) ||
+                    {attribute, _, file, {Included, _}} <- SyntaxTree, Included =/= File]).
+
+%% @doc Project files whose last parse included Hrl, directly or through
+%% another header - what has to be reparsed when Hrl changes. A scan of the
+%% whole index rather than a reverse one: it only runs when a header changes,
+%% while a reverse index would cost a table scan on every parse to drop the
+%% file's old entries.
+get_includers(Hrl) ->
+    Target = normalize_path(Hrl),
+    ets:foldl(fun ({File, Included}, Acc) ->
+        case lists:member(Target, Included) of
+            true -> [File | Acc];
+            false -> Acc
+        end
+    end, [], document_includes).
+
+%% Absolute, with `.` and `..` segments resolved, so that an include path
+%% like "src/../include/x.hrl" matches the watcher's "include/x.hrl".
+normalize_path(Path) ->
+    [Root | Segments] = filename:split(filename:absname(unicode:characters_to_list(Path))),
+    filename:join([Root | lists:reverse(lists:foldl(fun
+        (".", Acc) -> Acc;
+        ("..", [_ | Acc]) -> Acc;
+        ("..", []) -> [];
+        (Segment, Acc) -> [Segment | Acc]
+    end, [], Segments))]).
 
 %% `undefined` for never parsed, `{Version, Tree}` otherwise - Version being
 %% the document_version the contents were read at (see parse_document/1).

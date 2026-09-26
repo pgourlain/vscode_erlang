@@ -26,7 +26,7 @@
 			"type": "extensionHost",
 			"request": "launch",
 			"runtimeExecutable": "${execPath}",
-			"args": ["--extensionDevelopmentPath=${workspaceRoot}" ],
+			"args": ["--disable-extensions", "--extensionDevelopmentPath=${workspaceRoot}" ],
 			"sourceMaps": true,
 			"outFiles": ["${workspaceRoot}/out"],
 		},

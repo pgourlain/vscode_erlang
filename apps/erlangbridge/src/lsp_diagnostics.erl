@@ -1,20 +1,34 @@
 -module(lsp_diagnostics).
 -behavior(gen_server).
 
-%% Coordination point for the two diagnostic paths that must not fight each
-%% other: the push path (textDocument/publishDiagnostics) and the LSP 3.17
-%% pull path (textDocument/diagnostic, workspace/diagnostic).
+%% Schedules every lint whose result is pushed to the client
+%% (textDocument/publishDiagnostics - the only diagnostics channel, the server
+%% advertises no pull support):
+%%
+%% - open documents: one debounced validation per file (schedule_validation/2),
+%%   run as soon as the debounce elapses;
+%% - closed project files: a background queue linted one file at a time
+%%   (schedule_background_validation/2, schedule_disk_validation/2), so a
+%%   project scan never floods the VM with hundreds of concurrent lints.
+%%
+%% It also remembers which files currently show diagnostics, so that files
+%% leaving the project, or everything when erlang.linting is turned off, can
+%% be cleared: with push only, the client keeps whatever it was last sent.
 %%
 %% Deliberately a process of its own rather than state on gen_lsp_server:
 %% gen_lsp_server owns the socket and parks in gen_tcp:accept/1, so it cannot
 %% also service casts promptly, and tests that exercise diagnostics have no way
-%% to stand one up.
+%% to stand one up. Lints themselves never run in here, nor in
+%% gen_lsp_doc_server or gen_lsp_server.
 
 %% API
 -export([start_link/0]).
--export([schedule_refresh/1, wait_for_change/1, notify_changed/0]).
 -export([schedule_configuration_request/2]).
--export([schedule_validation/2, cancel_validation/1]).
+-export([schedule_validation/2, schedule_validation/3, cancel_validation/1]).
+-export([schedule_background_validation/2, schedule_disk_validation/2]).
+-export([project_scanned/2, clear_all/1, published/2]).
+%% For lsp_diagnostic_SUITE: nothing pending, nothing running.
+-export([idle/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -22,10 +36,6 @@
 -include("lsp_log.hrl").
 
 -define(SERVER, ?MODULE).
-
-%% A burst of pushes is coalesced into a single workspace/diagnostic/refresh.
-%% One refresh per push restarts the client's whole workspace pull every time.
--define(REFRESH_DEBOUNCE_MS, 300).
 
 %% A burst of workspace/didChangeConfiguration notifications (VS Code can
 %% fire Workspace.onDidChangeConfiguration more than once per logical
@@ -36,39 +46,26 @@
 -define(CONFIGURATION_DEBOUNCE_MS, 300).
 
 %% Keystrokes inside a textDocument/didChange burst are coalesced into a
-%% single validation per file. Open documents are reported through the push
-%% channel only (see lsp_handlers:workspace_diagnostic_item/2), so a change
-%% has to revalidate to keep unsaved edits - a quick fix's WorkspaceEdit
-%% among them - from leaving a fixed problem in the Problems list; this is
-%% what keeps that off the per-keystroke path.
+%% single validation per file, so that an unsaved edit - a quick fix's
+%% WorkspaceEdit among them - republishes the file's diagnostics without
+%% linting on every keystroke.
 -define(VALIDATION_DEBOUNCE_MS, 400).
 
--record(state, {refresh_timer, refresh_socket, waiters = [],
-                configuration_timer, configuration_socket, configuration_source,
-                validation_timers = #{} :: #{file:filename() => reference()}}).
+%% `cached` lints the syntax tree gen_lsp_doc_server already holds (parsed on
+%% demand if missing); `reparse` parses the file again first (its buffer when
+%% open, the disk otherwise), for when it is known to have changed under a
+%% tree still stamped as current - changed on disk, or one of its headers did.
+-type mode() :: cached | reparse.
+
+-record(state, {configuration_timer, configuration_socket, configuration_source,
+                validation_timers = #{} :: #{file:filename() => {reference(), mode()}},
+                background = [] :: [{file:filename(), mode()}],
+                background_socket,
+                running :: undefined | file:filename(),
+                published = #{} :: #{file:filename() => true}}).
 
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
-
-%% @doc Ask for one workspace/diagnostic/refresh, debounced.
-schedule_refresh(Socket) ->
-    gen_server:cast(?SERVER, {schedule_refresh, Socket}).
-
-%% @doc Block the calling process until diagnostics change anywhere, or Timeout
-%% elapses. lsp_handlers:workspace_diagnostic/2 uses this to honour the
-%% workspace pull being a long poll - answering an all-unchanged pull at once
-%% makes the client re-pull immediately, spinning the server.
-wait_for_change(Timeout) ->
-    Ref = make_ref(),
-    gen_server:cast(?SERVER, {register_waiter, self(), Ref}),
-    receive
-        {diagnostics_changed, Ref} -> changed
-    after Timeout ->
-        timeout
-    end.
-
-notify_changed() ->
-    gen_server:cast(?SERVER, notify_changed).
 
 %% @doc Ask for one workspace/configuration round-trip, debounced. Source
 %% identifies the triggering notification (rides into the request id via
@@ -78,35 +75,62 @@ notify_changed() ->
 schedule_configuration_request(Socket, Source) ->
     gen_server:cast(?SERVER, {schedule_configuration_request, Socket, Source}).
 
-%% @doc Ask for one validation (lint + publishDiagnostics) of File, debounced
-%% per file - a later call within the window restarts the wait, so a burst of
-%% edits lints once, at the end.
+%% @doc Ask for one validation (lint + publishDiagnostics) of the open
+%% document File, debounced per file - a later call within the window
+%% restarts the wait, so a burst of edits lints once, at the end.
 schedule_validation(Socket, File) ->
-    gen_server:cast(?SERVER, {schedule_validation, Socket, File}).
+    schedule_validation(Socket, File, cached).
 
-%% @doc Drop any validation still pending for File. Called when the document
-%% closes: textDocument/didClose clears the file's push diagnostics, and a
-%% debounced validation landing just after that would publish them straight
-%% back - for a file the workspace pull has meanwhile taken back over, i.e.
-%% the duplicate all over again.
+%% @doc Same, reparsing the buffer first when Mode is `reparse` - for an open
+%% module whose header changed. A pending `reparse` is never downgraded.
+schedule_validation(Socket, File, Mode) ->
+    gen_server:cast(?SERVER, {schedule_validation, Socket, File, Mode}).
+
+%% @doc Drop any debounced validation still pending for File. Called when the
+%% document closes: from then on the file is linted from disk, through the
+%% background queue.
 cancel_validation(File) ->
     gen_server:cast(?SERVER, {cancel_validation, File}).
+
+%% @doc Queue closed project files for linting, one at a time, behind whatever
+%% is already queued. A file already queued keeps its place; a file open by
+%% the time its turn comes is skipped, its own push path owns it.
+schedule_background_validation(Socket, Files) ->
+    gen_server:cast(?SERVER, {schedule_background_validation, Socket, Files, cached, back}).
+
+%% @doc Lint File from disk ahead of the rest of the queue: a document just
+%% closed, a closed file created, changed or deleted on disk, or one whose
+%% header changed. A file that no longer exists has its diagnostics cleared.
+schedule_disk_validation(Socket, File) ->
+    gen_server:cast(?SERVER, {schedule_background_validation, Socket, [File], reparse, front}).
+
+%% @doc The project scan has finished and found Files: lint each of them in
+%% the background, and clear any file still showing diagnostics that is no
+%% longer part of the project (e.g. newly excluded by search.exclude) - unless
+%% it is open, in which case its buffer still owns what it shows.
+project_scanned(Socket, Files) ->
+    gen_server:cast(?SERVER, {project_scanned, Socket, Files}).
+
+%% @doc erlang.linting was turned off: drop every pending lint and clear every
+%% file still showing diagnostics.
+clear_all(Socket) ->
+    gen_server:cast(?SERVER, {clear_all, Socket}).
+
+%% @doc Bookkeeping for lsp_handlers:send_diagnostics/3 - which files are
+%% currently showing something, so they can be cleared later.
+published(File, Diagnostics) ->
+    gen_server:cast(?SERVER, {published, File, Diagnostics =/= []}).
+
+idle() ->
+    gen_server:call(?SERVER, idle).
 
 init(_Args) ->
     {ok, #state{}}.
 
+handle_call(idle, _From, #state{validation_timers = Timers, background = Queue, running = Running} = State) ->
+    {reply, map_size(Timers) =:= 0 andalso Queue =:= [] andalso Running =:= undefined, State};
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
-
-handle_cast({schedule_refresh, Socket}, #state{refresh_timer = undefined} = State) ->
-    Timer = erlang:send_after(?REFRESH_DEBOUNCE_MS, self(), send_refresh),
-    {noreply, State#state{refresh_timer = Timer, refresh_socket = Socket}};
-handle_cast({schedule_refresh, Socket}, State) ->
-    %% A refresh is already pending - coalesce into it.
-    {noreply, State#state{refresh_socket = Socket}};
-
-handle_cast({register_waiter, Pid, Ref}, State) ->
-    {noreply, State#state{waiters = [{Pid, Ref} | State#state.waiters]}};
 
 handle_cast({schedule_configuration_request, Socket, Source}, #state{configuration_timer = undefined} = State) ->
     Timer = erlang:send_after(?CONFIGURATION_DEBOUNCE_MS, self(), send_configuration_request),
@@ -116,29 +140,48 @@ handle_cast({schedule_configuration_request, Socket, Source}, State) ->
     %% A request is already pending - coalesce into it.
     {noreply, State#state{configuration_socket = Socket, configuration_source = Source}};
 
-handle_cast({schedule_validation, Socket, File}, #state{validation_timers = Timers} = State) ->
-    case maps:get(File, Timers, undefined) of
-        undefined -> ok;
-        Pending -> erlang:cancel_timer(Pending)
+handle_cast({schedule_validation, Socket, File, Mode}, #state{validation_timers = Timers} = State) ->
+    Mode2 = case maps:get(File, Timers, undefined) of
+        undefined -> Mode;
+        {_, PendingMode} = Pending -> cancel_timer(Pending), max_mode(Mode, PendingMode)
     end,
     Timer = erlang:send_after(?VALIDATION_DEBOUNCE_MS, self(), {validate, Socket, File}),
-    {noreply, State#state{validation_timers = Timers#{File => Timer}}};
+    {noreply, State#state{validation_timers = Timers#{File => {Timer, Mode2}}}};
 
 handle_cast({cancel_validation, File}, #state{validation_timers = Timers} = State) ->
-    case maps:get(File, Timers, undefined) of
-        undefined -> ok;
-        Pending -> erlang:cancel_timer(Pending)
-    end,
+    cancel_timer(maps:get(File, Timers, undefined)),
     %% A {validate, ...} message already in this process's own mailbox is
     %% dropped by handle_info's cancelled clause below, which is why the
     %% timers map is the authority on what is still wanted.
     {noreply, State#state{validation_timers = maps:remove(File, Timers)}};
 
-handle_cast(notify_changed, State) ->
-    lists:foreach(fun ({Pid, Ref}) ->
-        is_process_alive(Pid) andalso (Pid ! {diagnostics_changed, Ref})
-    end, State#state.waiters),
-    {noreply, State#state{waiters = []}};
+handle_cast({schedule_background_validation, Socket, Files, Mode, Where}, State) ->
+    Queue = enqueue(Files, Mode, Where, State#state.background),
+    {noreply, run_next(State#state{background = Queue, background_socket = Socket})};
+
+handle_cast({project_scanned, Socket, Files}, #state{published = Published} = State) ->
+    Opened = gen_lsp_doc_server:opened_documents(),
+    Gone = [File || File <- maps:keys(Published),
+                    not lists:member(File, Files), not lists:member(File, Opened)],
+    ?LOG(<<"diag">>, "project_scanned: ~p files to lint, clearing ~p", [length(Files), Gone]),
+    lists:foreach(fun (File) -> lsp_handlers:send_diagnostics(Socket, File, []) end, Gone),
+    Queue = enqueue(Files, cached, back, [Item || {File, _} = Item <- State#state.background,
+                                                  not lists:member(File, Gone)]),
+    {noreply, run_next(State#state{background = Queue, background_socket = Socket,
+                                   published = maps:without(Gone, Published)})};
+
+handle_cast({clear_all, Socket}, #state{published = Published, validation_timers = Timers} = State) ->
+    ?LOG(<<"diag">>, "clear_all: linting disabled, clearing ~p", [maps:keys(Published)]),
+    lists:foreach(fun cancel_timer/1, maps:values(Timers)),
+    lists:foreach(fun (File) -> lsp_handlers:send_diagnostics(Socket, File, []) end, maps:keys(Published)),
+    %% A lint already running is not stopped: validate_file/2 checks
+    %% erlang.linting before it publishes anything.
+    {noreply, State#state{background = [], validation_timers = #{}, published = #{}}};
+
+handle_cast({published, File, true}, #state{published = Published} = State) ->
+    {noreply, State#state{published = Published#{File => true}}};
+handle_cast({published, File, false}, #state{published = Published} = State) ->
+    {noreply, State#state{published = maps:remove(File, Published)}};
 
 handle_cast(stop, State) ->
     {stop, normal, State};
@@ -146,30 +189,28 @@ handle_cast(stop, State) ->
 handle_cast(_Request, State) ->
     {noreply, State}.
 
-handle_info(send_refresh, #state{refresh_socket = undefined} = State) ->
-    {noreply, State#state{refresh_timer = undefined}};
-handle_info(send_refresh, #state{refresh_socket = Socket} = State) ->
-    ?LOG(<<"diag">>, "request_diagnostic_refresh: asking client to re-pull diagnostics", []),
-    gen_lsp_server:send_to_client(Socket, <<"workspace/diagnostic/refresh">>, #{
-        id => gen_lsp_server:next_request_id(<<"workspace_diagnostic_refresh">>),
-        method => <<"workspace/diagnostic/refresh">>,
-        params => null
-    }),
-    {noreply, State#state{refresh_timer = undefined}};
-%% Linting a large file is slow and this process also services the workspace
-%% pull's waiters, so the validation itself runs outside it - like
-%% gen_lsp_server does for every incoming message.
+%% Linting a large file is slow and this process has to stay responsive, so
+%% the validation itself runs outside it - like gen_lsp_server does for every
+%% incoming request.
 handle_info({validate, Socket, File}, #state{validation_timers = Timers} = State) ->
-    case maps:is_key(File, Timers) of
-        false ->
+    case maps:get(File, Timers, undefined) of
+        undefined ->
             %% cancel_validation/1 came in after this timer had already fired
             ?LOG(<<"diag">>, "schedule_validation: dropping cancelled validation of ~p", [File]),
             {noreply, State};
-        true ->
-            ?LOG(<<"diag">>, "schedule_validation: debounce elapsed, validating ~p", [File]),
-            spawn(fun () -> lsp_handlers:validate_file(Socket, File) end),
+        {_Timer, Mode} ->
+            ?LOG(<<"diag">>, "schedule_validation: debounce elapsed, validating ~p (~p)", [File, Mode]),
+            spawn(fun () ->
+                Mode =:= reparse andalso gen_lsp_doc_server:reparse(File),
+                lsp_handlers:validate_file(Socket, File)
+            end),
             {noreply, State#state{validation_timers = maps:remove(File, Timers)}}
     end;
+handle_info({worker_result, {background, File}, _Result}, #state{running = File} = State) ->
+    {noreply, run_next(State#state{running = undefined})};
+handle_info({worker_error, {background, File}, Error}, #state{running = File} = State) ->
+    lsp_log:error(<<"diag">>, "background validation of ~p failed: ~p", [File, Error]),
+    {noreply, run_next(State#state{running = undefined})};
 handle_info(send_configuration_request, #state{configuration_socket = undefined} = State) ->
     {noreply, State#state{configuration_timer = undefined}};
 handle_info(send_configuration_request, #state{configuration_socket = Socket,
@@ -185,3 +226,42 @@ terminate(_Reason, _State) ->
 
 code_change(_OldVersion, State, _Extra) ->
     {ok, State}.
+
+cancel_timer(undefined) -> ok;
+cancel_timer({Timer, _Mode}) -> erlang:cancel_timer(Timer).
+
+max_mode(reparse, _) -> reparse;
+max_mode(_, reparse) -> reparse;
+max_mode(cached, cached) -> cached.
+
+%% Deduplicated: a file already queued stays queued once, `reparse` winning over
+%% `cached` (a reparse covers a plain lint, not the other way around), and
+%% moved to the front when asked for there.
+enqueue(Files, Mode, Where, Queue) ->
+    lists:foldl(fun (File, Acc) ->
+        {Mode2, Rest} = case lists:keytake(File, 1, Acc) of
+            {value, {File, reparse}, Others} -> {reparse, Others};
+            {value, {File, cached}, Others} -> {Mode, Others};
+            false -> {Mode, Acc}
+        end,
+        case {Where, Rest =:= Acc} of
+            {front, _} -> [{File, Mode2} | Rest];
+            %% already queued: keep its place, only the mode may change
+            {back, false} -> lists:keystore(File, 1, Acc, {File, Mode2});
+            {back, true} -> Acc ++ [{File, Mode2}]
+        end
+    end, Queue, case Where of front -> lists:reverse(Files); back -> Files end).
+
+run_next(#state{running = undefined, background = [{File, Mode} | Rest],
+                background_socket = Socket} = State) ->
+    case gen_lsp_doc_server:get_document_contents(File) of
+        undefined ->
+            worker:start(fun () -> lsp_handlers:validate_closed_file(Socket, File, Mode) end,
+                         {background, File}),
+            State#state{running = File, background = Rest};
+        _Open ->
+            %% Opened since it was queued - its own push path lints the buffer.
+            run_next(State#state{background = Rest})
+    end;
+run_next(State) ->
+    State.

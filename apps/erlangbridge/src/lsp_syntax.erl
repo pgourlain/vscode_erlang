@@ -12,7 +12,8 @@ validate_parsed_source_file(File) ->
     ParseTranformModules = parse_transforms(FileSyntaxTree, File),
     ModulesToDelete = load_not_loaded_modules(BehaviourModulea ++ ParseTranformModules),
     NewFileSyntaxTree = parse_transform(FileSyntaxTree, ParseTranformModules),
-    Result = lint(NewFileSyntaxTree, File),
+    IncludeDirectiveLines = include_directive_lines(gen_lsp_doc_server:get_dodged_syntax_tree(File)),
+    Result = lint(NewFileSyntaxTree, File, IncludeDirectiveLines),
     % Too long and bad effect on performance with large project
     %Result = combine_lint(ErlLintResult, NewFileSyntaxTree, File),
     code_delete(ModulesToDelete),
@@ -100,32 +101,111 @@ parse_transform(FileSyntaxTree, Transformers) ->
     FileSyntaxTree, Transformers).
     %FileSyntaxTree.
 
-lint(FileSyntaxTree, File) ->
+lint(FileSyntaxTree, File, IncludeDirectiveLines) ->
     LintResult = case lsp_utils:is_erlang_lib_file(File) of
         false when FileSyntaxTree /= undefined ->
             erl_lint:module(FileSyntaxTree, File, [strong_validation, {feature, all, enable}]);
         _ ->
             {ok, []}
     end,
+    %% erl_lint groups what it reports by file: the module itself, plus one
+    %% group per included file that has something to say.
+    %% The module is whatever file epp started from - named in the tree's first
+    %% -file attribute - rather than File, which differs from it should the
+    %% tree still carry the name of a temporary copy of the buffer.
+    Main = main_file(File, FileSyntaxTree),
+    IncludeLines = include_lines(Main, FileSyntaxTree, IncludeDirectiveLines),
+    Extract = fun (Type, Groups) ->
+        lists:flatmap(fun (Group) ->
+            extract_group(Type, Main, IncludeLines, filter_unused_functions(Group))
+        end, Groups)
+    end,
     case LintResult of
-        {ok, []} ->
-            #{parse_result => true};
-        {ok, [Warnings]} ->
-            ErrorsWarnings = extract_error_or_warning(<<"warning">>, filter_unused_functions(Warnings)),
-	        #{parse_result => true, errors_warnings => ErrorsWarnings};
-        {error, [Errors], []} ->
-            ErrorsWarnings = extract_error_or_warning(<<"error">>, Errors),
-	        #{parse_result => true, errors_warnings => ErrorsWarnings};
-        {error, [Errors], [Warnings]} ->
-            ErrorsWarnings = extract_error_or_warning(<<"error">>, Errors) ++
-                    extract_error_or_warning(<<"warning">>, filter_unused_functions(Warnings)),
-	        #{parse_result => true, errors_warnings => ErrorsWarnings};
-        {error, [], [Warnings]} ->
-            ErrorsWarnings = extract_error_or_warning(<<"warning">>, filter_unused_functions(Warnings)),
-	        #{parse_result => true, errors_warnings => ErrorsWarnings};
+        {ok, Warnings} ->
+            lint_result(Extract(<<"warning">>, Warnings));
+        {error, Errors, Warnings} ->
+            lint_result(Extract(<<"error">>, Errors) ++ Extract(<<"warning">>, Warnings));
         _Any ->
-	        #{parse_result => false, error_message => <<"lint error">>}
+            #{parse_result => false, error_message => <<"lint error">>}
     end.
+
+main_file(_File, [{attribute, _, file, {Main, _}} | _]) -> Main;
+main_file(File, _Forms) -> File.
+
+lint_result([]) -> #{parse_result => true};
+lint_result(ErrorsWarnings) -> #{parse_result => true, errors_warnings => ErrorsWarnings}.
+
+extract_group(_Type, _File, _IncludeLines, []) ->
+    [];
+extract_group(Type, File, _IncludeLines, {File, _} = Group) ->
+    extract_error_or_warning(Type, Group);
+extract_group(Type, _File, IncludeLines, {IncludedFile, Infos}) ->
+    %% Problems in an included file have no place of their own in the module:
+    %% they go on the -include line that brought the file in, as a single
+    %% diagnostic naming the file and linking to each of them - the links
+    %% carry the messages, so the hover does not repeat each one. Their
+    %% positions are the header's, so it carries no correlation data - a quick
+    %% fix would edit the module at them.
+    IncludeLine = maps:get(IncludedFile, IncludeLines, 1),
+    Related = [begin
+                   #{line := Line, character := Column, message := Message} = extract_info(Info),
+                   #{file => IncludedFile, line => Line, character => Column, message => Message}
+               end || Info <- Infos],
+    Count = length(Related),
+    Summary = unicode:characters_to_binary(
+                  io_lib:format("~p ~ts~ts in included file ~ts",
+                                [Count, Type, plural(Count), filename:basename(IncludedFile)])),
+    [#{type => Type,
+       file => unicode:characters_to_binary(IncludedFile),
+       info => #{line => IncludeLine, character => 1, message => Summary},
+       related => Related}].
+
+plural(1) -> "";
+plural(_) -> "s".
+
+%% @doc Every file included by File, directly or through another header,
+%% mapped to the line of the -include in File that brought it in. epp marks
+%% entering an included file with -file(Included, _) and coming back with
+%% -file(File, L), L being where File resumes - the line after the -include
+%% when its `.` is followed by a bare newline, but the -include line itself
+%% with CRLF line endings, a comment after the `.`, or no final newline. So L
+%% only bounds it: the -include is the last one at or before L, read from the
+%% epp_dodger tree, which keeps the directives epp expands.
+include_lines(_File, undefined, _IncludeDirectiveLines) ->
+    #{};
+include_lines(File, Forms, IncludeDirectiveLines) ->
+    {Lines, _Pending} = lists:foldl(fun
+        ({attribute, _, file, {F, L}}, {Acc, Pending}) when F =:= File ->
+            IncludeLine = include_line_before(L, IncludeDirectiveLines),
+            {lists:foldl(fun (Included, In) ->
+                             maps:merge(#{Included => IncludeLine}, In)
+                         end, Acc, Pending), []};
+        ({attribute, _, file, {F, _}}, {Acc, Pending}) ->
+            {Acc, [F | Pending]};
+        (_, Acc) ->
+            Acc
+    end, {#{}, []}, Forms),
+    Lines.
+
+include_line_before(L, IncludeDirectiveLines) ->
+    case [Line || Line <- IncludeDirectiveLines, Line =< L] of
+        [] -> max(L - 1, 1); % no dodged tree: assume a bare newline
+        Before -> lists:last(Before)
+    end.
+
+%% Sorted lines of the -include and -include_lib directives in a dodged tree.
+include_directive_lines(undefined) ->
+    [];
+include_directive_lines(DodgedForms) ->
+    lists:usort(lists:filtermap(fun (Form) ->
+        try erl_syntax:type(Form) =:= attribute andalso
+                lists:member(erl_syntax:atom_value(erl_syntax:attribute_name(Form)),
+                             [include, include_lib]) of
+            true -> {true, erl_anno:line(erl_syntax:get_pos(Form))};
+            false -> false
+        catch _:_ -> false
+        end
+    end, DodgedForms)).
 
 % combine_lint(LintResult, SyntaxTree, File) ->
 %     case LintResult of
@@ -305,7 +385,7 @@ extract_error_or_warning(_Type, {_, []}) ->
 extract_error_or_warning(Type, ErrorsOrWarnings) ->
     [#{type => Type,
         file =>
-        erlang:list_to_binary(element(1, ErrorsOrWarnings)),
+        unicode:characters_to_binary(element(1, ErrorsOrWarnings)),
         info => extract_info(X),
         correlation_data => correlation_data(X)}
         || X <- element(2, ErrorsOrWarnings)].
@@ -319,7 +399,7 @@ extract_info({{Line, Column}, Module, MessageBody}) ->
     #{
         line => Line,
         character => Column,
-        message => erlang:list_to_binary(lists:flatten(apply(Module, format_error, [MessageBody]), []))
+        message => unicode:characters_to_binary(apply(Module, format_error, [MessageBody]))
     }.
 
 %% @doc Task 2.1 infrastructure: a JSON-safe, machine-readable identity for
