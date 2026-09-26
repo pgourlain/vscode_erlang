@@ -89,9 +89,10 @@ missing_include_is_reported(Config) ->
 %% erl_lint reports a header's problems in a group of their own, at the
 %% header's positions. They used to be shown at those positions in the module
 %% (a syntax error on line 1 of the header underlined line 1 of the module);
-%% they go on the -include line, naming where they really are, with no
+%% they go on the -include line as one diagnostic naming the header, with no
 %% correlation data - a quick fix would edit the module at the header's
-%% positions - and a link to the header.
+%% positions - and a link to each problem in the header, carrying its message
+%% (the summary does not repeat it, or the hover shows it twice).
 error_in_included_file_is_reported_on_the_include_line(Config) ->
     AppDir = ?config(data_dir, Config),
     File = filename:join(AppDir, "include_with_error.erl"),
@@ -99,9 +100,10 @@ error_in_included_file_is_reported_on_the_include_line(Config) ->
     #{errors_warnings := [Item]} = lsp_syntax:validate_parsed_source_file(File),
     ?assertMatch(#{type := <<"error">>, info := #{line := 2, character := 1}}, Item),
     #{info := #{message := Message}} = Item,
-    ?assertMatch(<<"broken_include.hrl:1:17: syntax error before: ')'">>, Message),
+    ?assertEqual(<<"1 error in included file broken_include.hrl">>, Message),
     ?assertNot(maps:is_key(correlation_data, Item)),
-    ?assertMatch(#{file := Hrl, line := 1, character := 17}, maps:get(related, Item)).
+    ?assertMatch([#{file := Hrl, line := 1, character := 17,
+                    message := <<"syntax error before: ')'">>}], maps:get(related, Item)).
 
 %% Two groups - the module's and the header's - used to fall through the
 %% single-group patterns in lsp_syntax:lint/2 and drop every diagnostic.

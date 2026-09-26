@@ -985,13 +985,14 @@ to_lsp_diagnostic(Diagnostic) ->
     case maps:get(related, Diagnostic, undefined) of
         undefined ->
             LspDiagnostic;
-        %% A problem reported on an -include line links to where it really is
-        %% (see lsp_syntax:extract_group/4).
-        #{file := File, line := Line, character := Character, message := Message} ->
+        %% Problems reported on an -include line link to where they really
+        %% are (see lsp_syntax:extract_group/4).
+        Related ->
             LspDiagnostic#{relatedInformation => [#{
                 location => #{uri => lsp_utils:file_uri_to_vscode_uri(lsp_utils:file_to_file_uri(File)),
                               range => lsp_utils:client_range(Line, Character, Line, Character + 1)},
-                message => Message}]}
+                message => Message}
+                || #{file := File, line := Line, character := Character, message := Message} <- Related]}
     end.
 
 %% @doc `erlang/discoverTests` - task 6.1. Delegates to lsp_testing.erl.

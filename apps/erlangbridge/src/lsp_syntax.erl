@@ -140,21 +140,28 @@ extract_group(_Type, _File, _IncludeLines, []) ->
 extract_group(Type, File, _IncludeLines, {File, _} = Group) ->
     extract_error_or_warning(Type, Group);
 extract_group(Type, _File, IncludeLines, {IncludedFile, Infos}) ->
-    %% A problem in an included file has no place of its own in the module:
-    %% it goes on the -include line that brought the file in, says where it
-    %% really is, and links there. Its positions are the header's, so it
-    %% carries no correlation data - a quick fix would edit the module at them.
+    %% Problems in an included file have no place of their own in the module:
+    %% they go on the -include line that brought the file in, as a single
+    %% diagnostic naming the file and linking to each of them - the links
+    %% carry the messages, so the hover does not repeat each one. Their
+    %% positions are the header's, so it carries no correlation data - a quick
+    %% fix would edit the module at them.
     IncludeLine = maps:get(IncludedFile, IncludeLines, 1),
-    [begin
-        #{line := Line, character := Column, message := Message} = extract_info(Info),
-        Prefix = unicode:characters_to_binary(
-                     io_lib:format("~ts:~p:~p: ", [filename:basename(IncludedFile), Line, Column])),
-        #{type => Type,
-          file => unicode:characters_to_binary(IncludedFile),
-          info => #{line => IncludeLine, character => 1,
-                    message => <<Prefix/binary, Message/binary>>},
-          related => #{file => IncludedFile, line => Line, character => Column, message => Message}}
-     end || Info <- Infos].
+    Related = [begin
+                   #{line := Line, character := Column, message := Message} = extract_info(Info),
+                   #{file => IncludedFile, line => Line, character => Column, message => Message}
+               end || Info <- Infos],
+    Count = length(Related),
+    Summary = unicode:characters_to_binary(
+                  io_lib:format("~p ~ts~ts in included file ~ts",
+                                [Count, Type, plural(Count), filename:basename(IncludedFile)])),
+    [#{type => Type,
+       file => unicode:characters_to_binary(IncludedFile),
+       info => #{line => IncludeLine, character => 1, message => Summary},
+       related => Related}].
+
+plural(1) -> "";
+plural(_) -> "s".
 
 %% @doc Every file included by File, directly or through another header,
 %% mapped to the line of the -include in File that brought it in. epp marks
