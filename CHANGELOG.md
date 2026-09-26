@@ -1,6 +1,14 @@
 # Change log
 
-## ## Version 1.2.3 (September 22, 2026)
+## Version 1.2.4 (September 22, 2026)
+
+* [356](https://github.com/pgourlain/vscode_erlang/issues/356) : Header files (`.hrl`) treated as modules
+  - Opening a `.hrl` no longer reports `no module definition` and `record ... is unused` for every record it declares: the pull-diagnostics path (`textDocument/diagnostic`, `workspace/diagnostic`) linted any file on its own, unlike the push path which only ever lints `.erl` files. Both now lint `.erl` files only
+
+
+---
+
+## Version 1.2.3 (September 22, 2026)
 
 * [317](https://github.com/pgourlain/vscode_erlang/issues/317), [316](https://github.com/pgourlain/vscode_erlang/issues/316) : Syntax highlighting of `fun` expressions
   - `fun () -> ... end` and `fun() -> ... end` (a fun with no parameter) highlighted `fun` as a function name instead of a keyword: the rule matching the `fun()` *type* of a `-spec`/`-type` also matched the zero-arity fun *expression*. It now requires that the `)` is not followed by `->`, so the `fun()` type introduced for [297](https://github.com/pgourlain/vscode_erlang/issues/297) keeps working

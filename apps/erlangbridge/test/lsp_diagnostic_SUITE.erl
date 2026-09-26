@@ -17,6 +17,7 @@
 all() -> [
     pull_diagnostic_reports_a_real_warning,
     pull_diagnostic_reports_nothing_for_a_clean_file,
+    pull_diagnostic_reports_nothing_for_a_header_file,
     workspace_diagnostic_covers_every_project_file,
     workspace_diagnostic_reports_an_open_document_as_empty,
     an_unsaved_edit_republishes_diagnostics_for_the_new_contents,
@@ -58,6 +59,11 @@ pull_diagnostic_reports_a_real_warning(Config) ->
 
 pull_diagnostic_reports_nothing_for_a_clean_file(Config) ->
     ?assertMatch(#{kind := <<"full">>, resultId := _, items := []}, pull(Config, "clean.erl")).
+
+%% #356: a header is not a module - linting it on its own reported "no module
+%% definition" and every record it declares as unused.
+pull_diagnostic_reports_nothing_for_a_header_file(Config) ->
+    ?assertMatch(#{kind := <<"full">>, resultId := _, items := []}, pull(Config, "records.hrl")).
 
 %% One WorkspaceFullDocumentDiagnosticReport per project file, each with
 %% its own uri and the same items shape the single-document pull uses.

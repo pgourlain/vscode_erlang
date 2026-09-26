@@ -1060,7 +1060,15 @@ erlang_discoverTests(Socket, Params) ->
 erlang_runTests(Socket, Params) ->
     lsp_testing:run_tests(Socket, Params).
 
+%% Only a module is linted, as in validate_file/2: a header (.hrl) linted on
+%% its own reports "no module definition" and every record as unused (#356).
 diagnostics_for(File) ->
+    case filename:extension(File) of
+        ".erl" -> erl_diagnostics_for(File);
+        _ -> []
+    end.
+
+erl_diagnostics_for(File) ->
     case gen_lsp_doc_server:get_diagnostics_cache(File) of
         undefined ->
             ErrorsWarnings = lsp_syntax:validate_parsed_source_file(File),
