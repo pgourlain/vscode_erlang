@@ -1,5 +1,12 @@
 # Change log
 
+## Version 1.2.5 (September 27, 2026)
+
+* [358](https://github.com/pgourlain/vscode_erlang/issues/358) : Launch (Run / Debug) broken on Linux and macOS since 1.2.4
+  - Since `erl` is spawned without a shell (`erlang.useShell` = `auto`), the launch.json `arguments` string was handed to `erl` as a single word (e.g. `-s myapp start`), which `erl` silently ignores, and a missing `arguments` became the literal word `undefined`, which crashed the node at boot. `arguments` and `erlang.erlangArgs` items are now split into words like `/bin/sh` does (quotes and backslash escapes included), and an empty value adds nothing to the command line
+
+---
+
 ## Version 1.2.4 (September 26, 2026)
 
 * [356](https://github.com/pgourlain/vscode_erlang/issues/356) : Header files (`.hrl`) treated as modules

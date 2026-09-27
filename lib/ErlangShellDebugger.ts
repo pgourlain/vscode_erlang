@@ -99,7 +99,7 @@ export class ErlangShellForDebugging extends GenericShell {
         debugStartArgs.push("-s", "vscode_connection", "start");
         
         var argsFile = this.createArgsFilev1(startDir, launchArguments.noDebug, launchArguments.addEbinsToCodepath, launchArguments.verbose);
-        var processArgs = debugStartArgs.concat(argsFile).concat([launchArguments.arguments]);
+        var processArgs = debugStartArgs.concat(argsFile).concat(this.commandLineArgs(launchArguments.arguments));
         this.started = true;
         var result = this.LaunchProcess(erlPath, startDir, processArgs, !launchArguments.verbose);
         return result;
