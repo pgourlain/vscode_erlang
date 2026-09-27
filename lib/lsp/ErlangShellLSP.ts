@@ -41,7 +41,9 @@ export class ErlangShellLSP extends GenericShell {
         }
         // Use special command line arguments
         if (this.erlangArgs) {
-            debugStartArgs = debugStartArgs.concat(this.erlangArgs)
+            this.erlangArgs.forEach(arg => {
+                debugStartArgs = debugStartArgs.concat(this.commandLineArgs(arg));
+            });
         }
         debugStartArgs.push(
             "-noshell",
@@ -50,7 +52,7 @@ export class ErlangShellLSP extends GenericShell {
             "-s", "int",
             "-vscode_port", listen_port.toString(),
             "-s", "vscode_lsp_entry", "start", listen_port.toString());
-        var processArgs = debugStartArgs.concat([args]);
+        var processArgs = debugStartArgs.concat(this.commandLineArgs(args));
 
         var result = this.LaunchProcess("erl", startDir, processArgs);
         return result;

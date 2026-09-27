@@ -38,6 +38,71 @@ export function quoteForShell(value: string, useShell: boolean): string {
     return useShell ? `"${value}"` : value;
 }
 
+// Splits a free-form command line (launch.json "arguments", erlang.erlangArgs
+// items) into argv words the way /bin/sh would: whitespace separates words,
+// '...' is literal, "..." allows \" \\ \$ \` escapes, a bare \ escapes the
+// next character. Needed when useShell is false (#358): spawn would otherwise
+// hand "-s myapp start" to erl as one word, which erl silently ignores.
+export function splitCommandLine(value: string): string[] {
+    const words: string[] = [];
+    let current = '';
+    let inWord = false;
+    let i = 0;
+    while (i < value.length) {
+        const c = value[i];
+        if (c === "'") {
+            const end = value.indexOf("'", i + 1);
+            const stop = end === -1 ? value.length : end;
+            current += value.substring(i + 1, stop);
+            inWord = true;
+            i = stop + 1;
+        } else if (c === '"') {
+            inWord = true;
+            i++;
+            while (i < value.length && value[i] !== '"') {
+                if (value[i] === '\\' && i + 1 < value.length && '"\\$`'.indexOf(value[i + 1]) !== -1) {
+                    i++;
+                }
+                current += value[i];
+                i++;
+            }
+            i++;
+        } else if (c === '\\' && i + 1 < value.length) {
+            current += value[i + 1];
+            inWord = true;
+            i += 2;
+        } else if (/\s/.test(c)) {
+            if (inWord) {
+                words.push(current);
+                current = '';
+                inWord = false;
+            }
+            i++;
+        } else {
+            current += c;
+            inWord = true;
+            i++;
+        }
+    }
+    if (inWord) {
+        words.push(current);
+    }
+    return words;
+}
+
+// argv words for a user-supplied command line. Through a shell it is passed
+// as-is (the shell splits it); otherwise it is split here. A missing or blank
+// value yields no word at all: without a shell, spawn would pass undefined as
+// the literal word "undefined" and "" as an empty word, and erl appends either
+// to the preceding flag (-eval ... / -s vscode_connection start), which kills
+// the node at boot (#358).
+export function commandLineArgs(value: string | undefined, useShell: boolean): string[] {
+    if (value === undefined || value === null || value.trim() === '') {
+        return [];
+    }
+    return useShell ? [value] : splitCommandLine(value);
+}
+
 export class GenericShell extends EventEmitter {
     protected childProcess: ChildProcess;
     protected logOutput: ILogOutput;
@@ -89,6 +154,10 @@ export class GenericShell extends EventEmitter {
 
     protected shellQuote(value: string): string {
         return quoteForShell(value, this.useShell);
+    }
+
+    protected commandLineArgs(value: string | undefined): string[] {
+        return commandLineArgs(value, this.useShell);
     }
 
     protected RunProcess(processName, startDir: string, args: string[]): Promise<number> {

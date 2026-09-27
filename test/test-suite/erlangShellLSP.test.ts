@@ -42,3 +42,12 @@ suite('ErlangShellLSP distribution hardening', () => {
         assert.ok(!args.includes('ERL_EPMD_ADDRESS'), 'no epmd binding when not distributed');
     });
 });
+
+suite('ErlangShellLSP argv', () => {
+    test('blank extra args add no empty word to the erl command line (#358)', async () => {
+        const { args } = await captureStartArgs(false);
+        assert.ok(!args.includes(''), 'no empty argv word');
+        assert.ok(!args.includes(undefined as any), 'no undefined argv word');
+        assert.strictEqual(args[args.length - 1], '12345', '-s vscode_lsp_entry start <port> ends the command line');
+    });
+});
