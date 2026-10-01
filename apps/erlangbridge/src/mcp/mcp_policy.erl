@@ -13,7 +13,7 @@
 %%
 %% Normalized configuration (internal contract, atom keys) :
 %%   #{host => "127.0.0.1", port => 0,
-%%     allowed_tools => [<<"runtime_summary">>, ...],
+%%     allowed_tools => [<<"runtime_summary">>, ...],   (project term: a list, `default`, or [default, <<"tool">>])
 %%     allowed_ets_tables => [<<"orders_index">>],
 %%     limits => #{max_items => 500, ...}}
 %% and its JSON form (camelCase binary keys) which crosses to the target.
@@ -337,11 +337,20 @@ normalize_project_term(Term) when is_list(Term) ->
 normalize_project_term(_) ->
     {error, "invalid mcp policy: the mcp term must be a list"}.
 
-project_key({allowed_tools, Tools}, Acc) ->
+project_key({allowed_tools, default}, Acc) ->
+    Acc#{allowed_tools => ?DEFAULT_TOOLS};
+project_key({allowed_tools, Tools0}, Acc) when is_list(Tools0) ->
+    %% the atom `default` stands for the built-in default set, so that a policy keeps up
+    %% with tools added later: [default, <<"process_state">>]
+    {Defaults, Explicit} = lists:partition(fun(T) -> T =:= default end, Tools0),
+    length(Defaults) =< 1 orelse throw("allowed_tools lists default twice"),
+    Tools = Explicit ++ [T || _ <- Defaults, T <- ?DEFAULT_TOOLS, not lists:member(T, Explicit)],
     Names = binary_list(Tools, "allowed_tools"),
     length(Names) =:= length(lists:usort(Names)) orelse throw("allowed_tools has duplicates"),
     lists:foreach(fun(N) -> lists:member(N, ?TOOLS) orelse throw("allowed_tools has an unknown tool name") end, Names),
     Acc#{allowed_tools => Names};
+project_key({allowed_tools, _}, _Acc) ->
+    throw("allowed_tools must be a list of tool names, optionally with default, or default");
 project_key({allowed_ets_tables, all}, Acc) ->
     Acc#{allowed_ets_tables => all};
 project_key({allowed_ets_tables, Tables}, Acc) ->

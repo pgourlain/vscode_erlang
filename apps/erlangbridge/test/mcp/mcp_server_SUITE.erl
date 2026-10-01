@@ -18,6 +18,8 @@ all() ->
      host_and_origin_validated,
      method_content_type_and_size_enforced,
      initialize_negotiates_and_lists_only_readonly_tools,
+     initialize_tells_the_agent_which_tools_are_disabled,
+     initialize_is_silent_when_nothing_is_disabled,
      allowlist_enforced,
      arguments_are_strict,
      runtime_summary_redacts_node_host,
@@ -92,6 +94,8 @@ test_config(Case) ->
     Base1 = Base#{allowed_ets_tables => Ets},
     case Case of
         allowlist_enforced ->
+            Base1#{allowed_tools => [<<"runtime_summary">>, <<"ets_tables">>]};
+        initialize_tells_the_agent_which_tools_are_disabled ->
             Base1#{allowed_tools => [<<"runtime_summary">>, <<"ets_tables">>]};
         ets_summary_aggregates_per_owner_without_names ->
             Base1#{allowed_ets_tables => all};
@@ -350,6 +354,25 @@ initialize_negotiates_and_lists_only_readonly_tools(Config) ->
     [?assertMatch({rpc_error, -32602, _}, call(Config, T, #{}))
      || T <- [<<"eval">>, <<"ets_lookup">>, <<"rpc_call">>, <<"sys_get_state">>, <<"shell">>, <<"trace">>,
               <<"kill_process">>, <<"set_breakpoint">>, <<"load_code">>]].
+
+initialize_tells_the_agent_which_tools_are_disabled(Config) ->
+    #{<<"result">> := #{<<"instructions">> := Instr}} =
+        rpc(Config, <<"initialize">>, #{<<"protocolVersion">> => <<"2025-06-18">>}),
+    %% allowlist_enforced config: only runtime_summary and ets_tables are enabled
+    ?assertNotEqual(nomatch, binary:match(Instr, <<"Not available in this session">>)),
+    ?assertNotEqual(nomatch, binary:match(Instr, <<"top_processes">>)),
+    ?assertNotEqual(nomatch, binary:match(Instr, <<"`default`">>)),
+    ?assertNotEqual(nomatch, binary:match(Instr, <<"Developer tools not enabled">>)),
+    %% enabled tools are not listed as disabled
+    ?assertEqual(nomatch, binary:match(Instr, <<"ets_tables,">>)),
+    ?assertEqual(nomatch, binary:match(Instr, <<", ets_tables">>)).
+
+initialize_is_silent_when_nothing_is_disabled(Config) ->
+    #{<<"result">> := #{<<"instructions">> := Instr}} =
+        rpc(Config, <<"initialize">>, #{<<"protocolVersion">> => <<"2025-06-18">>}),
+    ?assertEqual(nomatch, binary:match(Instr, <<"Not available in this session">>)),
+    %% only the developer tier is listed (it is off by default)
+    ?assertNotEqual(nomatch, binary:match(Instr, <<"Developer tools not enabled">>)).
 
 allowlist_enforced(Config) ->
     #{<<"result">> := #{<<"tools">> := Tools}} = rpc(Config, <<"tools/list">>, #{}),

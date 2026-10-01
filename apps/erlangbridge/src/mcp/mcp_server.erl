@@ -396,7 +396,7 @@ error_obj(Id, Code, Message) ->
 result_obj(Id, Result) ->
     #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => Id, <<"result">> => Result}.
 
-dispatch(<<"initialize">>, Params, Id, _Config) ->
+dispatch(<<"initialize">>, Params, Id, Config) ->
     case maps:get(<<"protocolVersion">>, Params, undefined) of
         V when is_binary(V) ->
             %% version negotiation: the server answers with the revision it implements
@@ -415,7 +415,8 @@ dispatch(<<"initialize">>, Params, Id, _Config) ->
                                    "keeps answers small; follow nextCursor only if you need the remaining items. Use "
                                    "detail=full only when the user asks for the complete JSON (e.g. to save it to a file). "
                                    "Maps are bounded observation intervals, not atomic snapshots: honour complete/"
-                                   "truncated/omissions. Structural edges are not message traffic.">>});
+                                   "truncated/omissions. Structural edges are not message traffic.",
+                                   (disabled_note(Config))/binary>>});
         _ ->
             error_obj(Id, -32602, <<"protocolVersion is required">>)
     end;
@@ -434,6 +435,23 @@ dispatch(<<"prompts/get">>, Params, Id, Config) ->
     end;
 dispatch(_, _, Id, _) ->
     error_obj(Id, -32601, <<"method not found">>).
+
+%% Tells the agent (and the user reading its explanation) why a tool is missing: the
+%% project policy narrows the default set, or the developer tier is not enabled.
+disabled_note(Config) ->
+    Allowed = fun(T) -> mcp_policy:tool_allowed(T, Config) end,
+    Off = [T || T <- mcp_policy:default_tools(), not Allowed(T)],
+    Dev = [T || T <- mcp_policy:all_tools() -- mcp_policy:default_tools(), not Allowed(T)],
+    Note1 = case Off of
+                [] -> <<>>;
+                _ -> iolist_to_binary([" Not available in this session (disabled by allowed_tools in the project's rebar.config; "
+                                       "use `default` there to follow the built-in set): ", lists:join(", ", Off), "."])
+            end,
+    Note2 = case Dev of
+                [] -> <<>>;
+                _ -> iolist_to_binary([" Developer tools not enabled (name them in allowed_tools): ", lists:join(", ", Dev), "."])
+            end,
+    <<Note1/binary, Note2/binary>>.
 
 tools_call(Params, Id, Config) ->
     Name = maps:get(<<"name">>, Params, undefined),

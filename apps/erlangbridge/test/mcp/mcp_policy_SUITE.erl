@@ -20,6 +20,7 @@ all() ->
      project_cannot_set_activation_or_binding,
      project_limits_cannot_exceed_ceilings,
      developer_tier_is_opt_in_and_ets_all_is_accepted,
+     default_keyword_follows_the_built_in_tool_set,
      non_ascii_workspace_path_still_finds_the_project_policy,
      token_with_trailing_newline_is_rejected,
      invalid_and_duplicate_project_terms,
@@ -161,6 +162,24 @@ developer_tier_is_opt_in_and_ets_all_is_accepted(Config) ->
          write_rebar(Config, Text),
          ?assertMatch({error, _}, mcp_policy:resolve(input(Config, #{})), Text)
      end || Text <- ["{mcp, [{allowed_ets_tables, everything}]}.\n", "{mcp, [{allowed_tools, [<<\"process_dump\">>]}]}.\n"]].
+
+default_keyword_follows_the_built_in_tool_set(Config) ->
+    Default = mcp_policy:default_tools(),
+    Tools = fun(Text) ->
+                    write_rebar(Config, "{mcp, [{allowed_tools, " ++ Text ++ "}]}.\n"),
+                    {ok, C} = mcp_policy:resolve(input(Config, #{})),
+                    maps:get(allowed_tools, C)
+            end,
+    ?assertEqual(Default, Tools("default")),
+    ?assertEqual(Default, Tools("[default]")),
+    %% the built-in set plus a developer tool; an explicit tool is never listed twice
+    ?assertEqual(lists:sort([<<"process_state">> | Default]), lists:sort(Tools("[default, <<\"process_state\">>]"))),
+    ?assertEqual(lists:sort(Default), lists:sort(Tools("[default, <<\"runtime_summary\">>]"))),
+    [begin
+         write_rebar(Config, Text),
+         ?assertMatch({error, _}, mcp_policy:resolve(input(Config, #{})), Text)
+     end || Text <- ["{mcp, [{allowed_tools, [default, default]}]}.\n", "{mcp, [{allowed_tools, [defaults]}]}.\n",
+                     "{mcp, [{allowed_tools, all}]}.\n"]].
 
 non_ascii_workspace_path_still_finds_the_project_policy(Config) ->
     Dir = filename:join(?config(priv_dir, Config), "José_проект"),

@@ -187,6 +187,12 @@ credentials come only from the VS Code settings. The values below are the defaul
 ]}.
 ```
 
+`allowed_tools` is an allowlist: a tool that is not listed is hidden, including tools added in later
+versions of the extension. To follow the built-in set write `{allowed_tools, default}`, or
+`{allowed_tools, [default, <<"process_state">>]}` to add developer tools to it. When the policy
+disables tools, the server says so in its MCP `instructions` (so the agent can tell you why a tool
+is missing instead of silently using a fallback).
+
 A limit can be raised above its default up to a hard ceiling (never beyond): `max_request_bytes` 65536,
 `max_result_bytes` 2097152, `max_items` 5000, `max_depth` 32, `max_binary_bytes` 65536,
 `max_traversal_depth` 16, `max_concurrency` 8, `request_timeout_ms` 15000, `collection_ttl_ms` 600000,
