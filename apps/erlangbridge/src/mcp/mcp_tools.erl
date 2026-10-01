@@ -45,7 +45,7 @@ prompts() ->
 prompt(<<"map_application">>, Args, Config) when is_map(Args) ->
     case maps:get(<<"application">>, Args, undefined) of
         App when is_binary(App), byte_size(App) > 0, byte_size(App) =< 255 ->
-            case re:run(App, "^[A-Za-z0-9_@.-]+$", [{capture, none}]) of
+            case re:run(App, "^[A-Za-z0-9_@.-]+\\z", [{capture, none}]) of
                 match ->
                     {ok, #{<<"description">> => <<"Map the OTP topology of ", App/binary>>,
                            <<"messages">> => [#{<<"role">> => <<"user">>,
@@ -203,6 +203,49 @@ def(<<"changes_since">>) ->
            <<"format">> => format_prop()}, [<<"collectionId">>]),
      graph_output()};
 
+def(<<"process_state">>) ->
+    {<<"Process state (developer tier)">>,
+     <<"The state of one gen_server, gen_statem or gen_event process (sys:get_state with a short timeout), "
+       "by entity id, registered name or pid. Bounded (depth, items, binary size); values of keys named like a secret "
+       "(password, token, ...) and credentials in URLs are replaced, but a record without keys cannot be redacted: "
+       "the result can contain application data. Only enabled when the project lists it in allowed_tools. "
+       "Fails for a process stopped at a breakpoint (reported as such).">>,
+     obj(#{<<"id">> => id_prop(<<"Process entity id.">>),
+           <<"name">> => #{<<"type">> => <<"string">>, <<"maxLength">> => 255,
+                           <<"description">> => <<"Registered name (must be an existing atom).">>},
+           <<"pid">> => #{<<"type">> => <<"string">>, <<"maxLength">> => 64,
+                          <<"description">> => <<"Local pid text such as <0.123.0>.">>}}, []),
+     obj(#{<<"schemaVersion">> => str(), <<"sessionId">> => str(), <<"observedAt">> => str(),
+           <<"process">> => str(), <<"state">> => #{}}, [<<"schemaVersion">>, <<"sessionId">>])};
+
+def(<<"mailbox_sample">>) ->
+    {<<"Mailbox sample (developer tier)">>,
+     <<"The queue length and the oldest few messages (default 5, max 20) of one local process, by entity id, registered "
+       "name or pid. Messages are bounded and encoded like process_state (best-effort redaction); a mailbox of more than "
+       "20000 messages is not copied, only its length is reported. Only enabled when the project lists it in "
+       "allowed_tools.">>,
+     obj(#{<<"id">> => id_prop(<<"Process entity id.">>),
+           <<"name">> => #{<<"type">> => <<"string">>, <<"maxLength">> => 255,
+                           <<"description">> => <<"Registered name (must be an existing atom).">>},
+           <<"pid">> => #{<<"type">> => <<"string">>, <<"maxLength">> => 64,
+                          <<"description">> => <<"Local pid text such as <0.123.0>.">>},
+           <<"limit">> => #{<<"type">> => <<"integer">>, <<"minimum">> => 1, <<"maximum">> => 20}}, []),
+     obj(#{<<"schemaVersion">> => str(), <<"sessionId">> => str(), <<"observedAt">> => str(),
+           <<"process">> => str(), <<"queueLength">> => int(), <<"sample">> => #{<<"type">> => <<"array">>}},
+         [<<"schemaVersion">>, <<"sessionId">>])};
+
+def(<<"ets_sample">>) ->
+    {<<"ETS sample (developer tier)">>,
+     <<"A few objects (default 5, max 20) of one named ETS table approved by the project (allowed_ets_tables: exact "
+       "names, or all). Never a private table. Objects are bounded and encoded like process_state (best-effort "
+       "redaction). Only enabled when the project lists it in allowed_tools.">>,
+     obj(#{<<"table">> => #{<<"type">> => <<"string">>, <<"maxLength">> => 255,
+                            <<"description">> => <<"Name of the table (must be an existing atom).">>},
+           <<"limit">> => #{<<"type">> => <<"integer">>, <<"minimum">> => 1, <<"maximum">> => 20}}, [<<"table">>]),
+     obj(#{<<"schemaVersion">> => str(), <<"sessionId">> => str(), <<"observedAt">> => str(),
+           <<"table">> => str(), <<"size">> => int(), <<"sample">> => #{<<"type">> => <<"array">>}},
+         [<<"schemaVersion">>, <<"sessionId">>])};
+
 def(<<"top_ports">>) ->
     {<<"Top ports">>,
      <<"Rank the local ports of the node (sockets, files, spawned programs) by queue size, bytes in or bytes out and "
@@ -327,7 +370,7 @@ validate_args(Tool, Args) ->
             end
     end.
 
-exclusive(<<"process_info">>, Args) ->
+exclusive(Tool, Args) when Tool =:= <<"process_info">>; Tool =:= <<"process_state">>; Tool =:= <<"mailbox_sample">> ->
     case length([K || K <- [<<"id">>, <<"name">>, <<"pid">>], maps:is_key(K, Args)]) of
         1 -> ok;
         _ -> {error, <<"exactly one of id, name or pid is required">>}

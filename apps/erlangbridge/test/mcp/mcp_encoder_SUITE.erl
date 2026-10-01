@@ -15,7 +15,24 @@ all() ->
      improper_lists_and_unicode,
      never_creates_atoms_and_always_json_encodable,
      text_is_bounded,
+     credentials_are_redacted_in_terms_text_and_urls,
      timestamps_and_hex].
+
+credentials_are_redacted_in_terms_text_and_urls(_) ->
+    L = #{max_depth => 8, max_items => 20, max_binary_bytes => 256},
+    %% key/value pairs (proplists, options) and map entries
+    ?assertEqual(#{<<"tuple">> => [<<"password">>, <<"<redacted>">>]}, mcp_encoder:term({password, "hunter2"}, L)),
+    ?assertEqual(#{<<"tuple">> => [<<"db">>, <<"ok">>]}, mcp_encoder:term({db, ok}, L)),
+    %% printed form (child ids): same rule, nested, and URLs with credentials
+    T = mcp_encoder:text({conn, [{host, "h"}, {api_key, "SENTINEL_KEY"}, {opts, #{secret => "SENTINEL_S"}}]}, L),
+    ?assertEqual(nomatch, binary:match(T, <<"SENTINEL">>)),
+    ?assertNotEqual(nomatch, binary:match(T, <<"redacted">>)),
+    ?assertNotEqual(nomatch, binary:match(T, <<"host">>)),
+    ?assertEqual(<<"postgres://<redacted>@db/app">>, mcp_encoder:scrub(<<"postgres://user:pw@db/app">>)),
+    ?assertEqual(<<"http://example.org/a:b">>, mcp_encoder:scrub(<<"http://example.org/a:b">>)),
+    ?assertEqual(<<"see <redacted> now">>,
+                 binary:replace(mcp_encoder:term(<<"see https://u:p@h now">>, L), <<"https://<redacted>@h">>, <<"<redacted>">>)),
+    ?assertEqual(<<"db: <redacted>">>, binary:replace(mcp_encoder:term("db: ftp://a:b@c", L), <<"ftp://<redacted>@c">>, <<"<redacted>">>)).
 
 limits() -> #{max_depth => 4, max_items => 5, max_binary_bytes => 16}.
 

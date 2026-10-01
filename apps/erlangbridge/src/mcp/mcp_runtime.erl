@@ -27,6 +27,8 @@
 -define(MAX_SCANNED, 200000).
 -define(MAX_TOP, 50).
 -define(MAX_ETS_SCAN, 50000).
+-define(MAX_MAILBOX_COPY, 20000).
+-define(MAX_SAMPLE, 20).
 
 %%------------------------------------------------------------------------------
 %% Entry point
@@ -68,6 +70,9 @@ run(<<"supervision_tree">>, Args, Ctx) -> graph_tool(<<"supervision_tree">>, bui
 run(<<"registered_processes">>, Args, Ctx) -> graph_tool(<<"registered_processes">>, builder(<<"registered_processes">>), Args, Ctx);
 run(<<"process_info">>, Args, Ctx) -> tool_process_info(Args, Ctx);
 run(<<"ets_tables">>, Args, Ctx) -> graph_tool(<<"ets_tables">>, builder(<<"ets_tables">>), Args, Ctx);
+run(<<"process_state">>, Args, Ctx) -> process_state(Args, Ctx);
+run(<<"mailbox_sample">>, Args, Ctx) -> mailbox_sample(Args, Ctx);
+run(<<"ets_sample">>, Args, Ctx) -> ets_sample(Args, Ctx);
 run(<<"top_ports">>, Args, Ctx) -> graph_tool(<<"top_ports">>, builder(<<"top_ports">>), Args, Ctx);
 run(<<"ets_summary">>, Args, Ctx) -> graph_tool(<<"ets_summary">>, builder(<<"ets_summary">>), Args, Ctx);
 run(<<"changes_since">>, Args, Ctx) -> graph_tool(<<"changes_since">>, builder(<<"changes_since">>), Args, Ctx);
@@ -198,11 +203,13 @@ node_text(true) ->
 
 %% Safe debugger metadata only: mode, connection state, interpreted modules and
 %% breakpoint locations (module + line). Source and options are not returned.
-debug_session(#{enc := Enc} = _Ctx) ->
+debug_session(#{enc := Enc} = Ctx) ->
     Max = maps:get(max_items, Enc),
-    {Interpreted, IUnavailable} = debug_call(fun() -> int:interpreted() end, []),
-    {Breaks, BUnavailable} = debug_call(fun() -> int:all_breaks() end, []),
-    {Snapshot, SUnavailable} = debug_call(fun() -> int:snapshot() end, []),
+    %% three debugger calls share the request budget instead of 1.5 s each
+    Budget = max(100, min(1500, remaining(Ctx) div 3)),
+    {Interpreted, IUnavailable} = debug_call(fun() -> int:interpreted() end, [], Budget),
+    {Breaks, BUnavailable} = debug_call(fun() -> int:all_breaks() end, [], Budget),
+    {Snapshot, SUnavailable} = debug_call(fun() -> int:snapshot() end, [], Budget),
     Paused = paused_list(Snapshot),
     Mods = [atom_to_binary(M, utf8) || M <- lists:sublist(lists:sort(Interpreted), Max), is_atom(M)],
     Bps = [#{<<"module">> => atom_to_binary(M, utf8), <<"line">> => L}
@@ -230,8 +237,8 @@ debug_session(#{enc := Enc} = _Ctx) ->
            <<"truncated">> => length(Interpreted) > Max orelse length(Breaks) > Max
                                   orelse length(Paused) > Max}}.
 
-debug_call(Fun, Default) ->
-    case bounded(Fun, 1500) of
+debug_call(Fun, Default, Budget) ->
+    case bounded(Fun, Budget) of
         {ok, R} when is_list(R) -> {R, false};
         _ -> {Default, true}
     end.
@@ -311,7 +318,7 @@ finish_graph(Tool, Args, Scope, B, Started, Ctx) ->
              complete => Oms =:= [], truncated => Truncated, omissions => Oms},
     Items = builder_items(B),
     Hash = args_hash(maps:remove(<<"cursor">>, Args)),
-    {CollId, Meta1, Stored} = mcp_store:put_collection(Tool, Hash, Meta, Items, #{args => Args}),
+    {CollId, Meta1, Stored} = mcp_store:put_collection(Tool, Hash, Meta, Items, #{args => Args, detail => maps:get(detail, Ctx, summary)}),
     render_page(Tool, Hash, CollId, Meta1, Stored, 0, Ctx).
 
 builder_items(B) ->
@@ -489,6 +496,28 @@ bin(B) when is_binary(B) -> B.
 %% Modules that belong to the inspector are flagged, never presented as application processes.
 inspector_name(Name) ->
     lists:member(Name, [mcp_holder, mcp_sup, mcp_server, mcp_store]).
+
+-define(INSPECTOR_MODULES, [mcp_runtime, mcp_server, mcp_store, mcp_sup, mcp_audit, mcp_holder,
+                            mcp_encoder, mcp_policy, mcp_tools]).
+
+%% A process of the inspector itself (registered name, or running one of its modules:
+%% workers and connections are anonymous funs of those modules).
+is_inspector_pid(Pid) ->
+    case erlang:process_info(Pid, [registered_name, initial_call, current_function]) of
+        undefined -> false;
+        Info -> inspector_info(Info)
+    end.
+
+inspector_info(Info) ->
+    Named = case lists:keyfind(registered_name, 1, Info) of
+                {registered_name, N} when is_atom(N) -> inspector_name(N);
+                _ -> false
+            end,
+    Named orelse inspector_module(proplists:get_value(initial_call, Info))
+        orelse inspector_module(proplists:get_value(current_function, Info)).
+
+inspector_module({M, _, _}) -> lists:member(M, ?INSPECTOR_MODULES);
+inspector_module(_) -> false.
 
 %% Safe check that a pid is a supervisor before any supervisor API is called on
 %% it (calling which_children on a plain gen_server would crash it).
@@ -963,7 +992,7 @@ registered_processes_build(Args, #{enc := Enc, config := Config} = Ctx) ->
             Shown = lists:sublist(Sorted, Cap),
             Masters = masters(Ctx),
             {Confirmed, B0} = case Selected of
-                                  {app, App} -> tree_pids(App, Ctx);
+                                  {app, App} -> cached_tree_pids(App, Ctx);
                                   all -> {#{}, new_b()}
                               end,
             {B1, Unknown} = lists:foldl(
@@ -1002,6 +1031,9 @@ masters(Ctx) ->
               end, #{}, Apps);
         _ -> #{}
     end.
+
+cached_tree_pids(_App, #{tree_pids := Known}) -> {Known, new_b()};
+cached_tree_pids(App, Ctx) -> tree_pids(App, Ctx).
 
 %% pids found in an application's supervision tree (confirmed membership)
 tree_pids(App, #{config := Config} = Ctx) ->
@@ -1164,7 +1196,7 @@ resolve_target(#{<<"pid">> := Text}) -> resolve_process(Text).
 
 %% Registered name (existing atoms only) or local pid text. Never creates atoms.
 resolve_process(<<"<", _/binary>> = Text) ->
-    case re:run(Text, "^<0\\.[0-9]{1,10}\\.[0-9]{1,10}>$", [{capture, none}]) of
+    case re:run(Text, "^<0\\.[0-9]{1,10}\\.[0-9]{1,10}>\\z", [{capture, none}]) of
         match ->
             try list_to_pid(binary_to_list(Text)) of
                 Pid when node(Pid) =:= node() -> {ok, Pid}
@@ -1194,16 +1226,21 @@ topology_overview_build(Args, #{config := Config} = Ctx) ->
         {ok, App} ->
             AppId = app_id(App),
             Allowed = fun(Tool) -> mcp_policy:tool_allowed(Tool, Config) end,
-            Part = fun(Tool, Build, PArgs) ->
+            Part = fun(Tool, Build, PArgs, C) ->
                            case Allowed(Tool) of
-                               true -> Build(PArgs, Ctx);
+                               true -> Build(PArgs, C);
                                false -> denied
                            end
                    end,
-            Tree = Part(<<"supervision_tree">>, fun supervision_tree_build/2, #{<<"id">> => AppId}),
-            Over = Part(<<"application_overview">>, fun application_overview_build/2, #{<<"application">> => AppId}),
-            Reg = Part(<<"registered_processes">>, fun registered_processes_build/2, #{<<"application">> => AppId}),
-            Ets = Part(<<"ets_tables">>, fun ets_tables_build/2, #{}),
+            Tree = Part(<<"supervision_tree">>, fun supervision_tree_build/2, #{<<"id">> => AppId}, Ctx),
+            %% the registered-process part reuses the pids of the tree just walked
+            RegCtx = case Tree of
+                         {ok, _, TB} -> Ctx#{tree_pids => maps:map(fun(_, _) -> App end, maps:get(pids, TB))};
+                         _ -> Ctx
+                     end,
+            Over = Part(<<"application_overview">>, fun application_overview_build/2, #{<<"application">> => AppId}, Ctx),
+            Reg = Part(<<"registered_processes">>, fun registered_processes_build/2, #{<<"application">> => AppId}, RegCtx),
+            Ets = Part(<<"ets_tables">>, fun ets_tables_build/2, #{}, Ctx),
             Parts = [{<<"supervision_tree">>, Tree}, {<<"application_overview">>, Over},
                      {<<"registered_processes">>, Reg}, {<<"ets_tables">>, Ets}],
             case [E || {_, {error, _, _} = E} <- Parts] of
@@ -1306,13 +1343,14 @@ changes_since_build(Args, #{config := Config} = Ctx) ->
             {error, <<"baseline_expired">>,
              <<"the baseline collection is unknown or no longer retained (collection_ttl_ms, max_collections); "
                "call the tool again to get a new baseline">>};
-        {ok, #{tool := OldTool, ctx := #{args := OldArgs}, meta := OldMeta, items := OldItems}} ->
+        {ok, #{tool := OldTool, ctx := #{args := OldArgs} = OldCtx, meta := OldMeta, items := OldItems}} ->
             case lists:member(OldTool, ?DIFFABLE) andalso mcp_policy:tool_allowed(OldTool, Config) of
                 false ->
                     {error, <<"invalid_baseline">>, <<"this collection cannot be used as a baseline">>};
                 true ->
                     %% a fresh observation that is compared, not retained: only the diff takes a slot
-                    case (builder(OldTool))(OldArgs, Ctx) of
+                    %% observe again exactly as the baseline was observed (same detail)
+                    case (builder(OldTool))(OldArgs, Ctx#{detail => maps:get(detail, OldCtx, summary)}) of
                         {ok, _Scope, NB} ->
                             Oms = lists:reverse(maps:get(oms, NB)),
                             NewMeta = #{complete => Oms =:= [], omissions => Oms},
@@ -1393,6 +1431,152 @@ change_key(#{<<"kind">> := Kind, <<"childId">> := C}) when is_binary(C) -> {Kind
 change_key(_) -> undefined.
 
 %%------------------------------------------------------------------------------
+%% Developer tier (never enabled by default; the project names them in allowed_tools):
+%% bounded samples of application data. Values go through mcp_encoder: depth/item/size
+%% limits, values of secret-looking keys replaced, credentials in URLs scrubbed.
+%%------------------------------------------------------------------------------
+
+%% A live, local, non-inspector process addressed by id, name or pid.
+dev_target(Args) ->
+    case resolve_target(Args) of
+        {error, _, _} = E -> E;
+        {ok, Pid} ->
+            case is_process_alive(Pid) andalso not is_inspector_pid(Pid) of
+                true -> {ok, Pid};
+                false -> {error, <<"not_found">>, <<"the process does not exist (anymore)">>}
+            end
+    end.
+
+dev_header(Pid) ->
+    #{<<"schemaVersion">> => ?SV,
+      <<"sessionId">> => mcp_store:session_id(),
+      <<"observedAt">> => now_iso(),
+      <<"process">> => pid_id(Pid),
+      <<"pid">> => mcp_encoder:pid_text(Pid),
+      <<"name">> => case erlang:process_info(Pid, registered_name) of
+                        {registered_name, N} -> bin(N);
+                        _ -> null
+                    end}.
+
+%% sys:get_state/2 of a gen_server, gen_statem or gen_event (a system message is only sent to a
+%% process whose callback module declares one of those behaviours; never a supervisor).
+process_state(Args, #{enc := Enc} = Ctx) ->
+    case dev_target(Args) of
+        {error, _, _} = E -> E;
+        {ok, Pid} ->
+            case otp_behaviour(Pid) of
+                undefined ->
+                    {error, <<"not_an_otp_process">>,
+                     <<"the state is only read from gen_server, gen_statem and gen_event processes">>};
+                {supervisor, _} ->
+                    %% the state of a supervisor holds the child specifications, start arguments included
+                    {error, <<"use_supervision_tree">>,
+                     <<"the state of a supervisor contains child start arguments; use supervision_tree">>};
+                {Behaviour, Callback} ->
+                    T = max(100, min(2000, remaining(Ctx))),
+                    case bounded(fun() -> sys:get_state(Pid, T) end, T + 200) of
+                        {ok, State} ->
+                            {ok, (dev_header(Pid))#{<<"behaviour">> => bin(Behaviour),
+                                                    <<"callbackModule">> => bin(Callback),
+                                                    <<"state">> => mcp_encoder:term(State, Enc),
+                                                    <<"redaction">> => <<"best effort: values of keys named like a secret and credentials in URLs are replaced; a record without keys cannot be redacted">>}};
+                        timeout ->
+                            {error, <<"timeout">>,
+                             case paused_at(Pid) of
+                                 {ok, {M, L}} -> <<"the process is stopped at a breakpoint (", (bin(M))/binary, ":",
+                                                   (integer_to_binary(L))/binary, ")">>;
+                                 _ -> <<"the process did not answer in time">>
+                             end};
+                        {error, _} ->
+                            {error, <<"unavailable">>, <<"the process exited or does not answer system messages">>}
+                    end
+            end
+    end.
+
+%% {Behaviour, CallbackModule} | undefined
+otp_behaviour(Pid) ->
+    case catch proc_lib:initial_call(Pid) of
+        {supervisor, Mod, _} when is_atom(Mod) -> {supervisor, Mod};
+        {Mod, _, _} when is_atom(Mod) ->
+            case behaviours(Mod) of
+                L when is_list(L) ->
+                    case [B || B <- [gen_server, gen_statem, gen_event, gen_fsm, supervisor],
+                               lists:member(atom_to_binary(B, utf8), L)] of
+                        [B | _] -> {B, Mod};
+                        [] -> undefined
+                    end;
+                _ -> undefined
+            end;
+        _ -> undefined
+    end.
+
+%% The oldest messages of a mailbox (default 5, max 20), bounded and encoded.
+mailbox_sample(Args, #{enc := Enc} = Ctx) ->
+    case dev_target(Args) of
+        {error, _, _} = E -> E;
+        {ok, Pid} ->
+            Limit = min(maps:get(<<"limit">>, Args, 5), ?MAX_SAMPLE),
+            Len = case erlang:process_info(Pid, message_queue_len) of
+                      {message_queue_len, N} -> N;
+                      _ -> 0
+                  end,
+            Head = (dev_header(Pid))#{<<"queueLength">> => Len, <<"order">> => <<"oldest first">>},
+            case Len > ?MAX_MAILBOX_COPY of
+                true ->
+                    {ok, Head#{<<"sample">> => [], <<"truncated">> => true,
+                               <<"note">> => <<"the mailbox is too large to copy safely; only its length is reported">>}};
+                false ->
+                    T = max(100, min(2000, remaining(Ctx))),
+                    case bounded(fun() -> erlang:process_info(Pid, messages) end, T) of
+                        {ok, {messages, Msgs}} ->
+                            {ok, Head#{<<"sample">> => [mcp_encoder:term(M, Enc) || M <- lists:sublist(Msgs, Limit)],
+                                       <<"truncated">> => length(Msgs) > Limit,
+                                       <<"redaction">> => <<"best effort: values of keys named like a secret and credentials in URLs are replaced">>}};
+                        timeout -> {error, <<"timeout">>, <<"the process did not answer in time">>};
+                        _ -> {error, <<"not_found">>, <<"the process exited during the observation">>}
+                    end
+            end
+    end.
+
+%% A few objects of an approved named table (allowed_ets_tables), never of a private one.
+ets_sample(Args, #{enc := Enc, config := Config} = Ctx) ->
+    Name = maps:get(<<"table">>, Args),
+    Limit = min(maps:get(<<"limit">>, Args, 5), ?MAX_SAMPLE),
+    case mcp_policy:ets_table_allowed(Name, Config) of
+        false -> {error, <<"policy_denied">>, <<"the table is not approved by allowed_ets_tables">>};
+        true ->
+            Atom = try binary_to_existing_atom(Name, utf8) catch _:_ -> undefined end,
+            Prot = case Atom of undefined -> undefined; _ -> catch ets:info(Atom, protection) end,
+            case Prot of
+                P when P =:= public; P =:= protected ->
+                    T = max(100, min(2000, remaining(Ctx))),
+                    case bounded(fun() ->
+                                         Objs = case ets:match_object(Atom, '_', Limit) of
+                                                    {O, _Cont} -> O;
+                                                    '$end_of_table' -> []
+                                                end,
+                                         {Objs, ets:info(Atom, size), ets:info(Atom, type)}
+                                 end, T) of
+                        {ok, {Objects, Size, Type}} ->
+                            {ok, #{<<"schemaVersion">> => ?SV,
+                                   <<"sessionId">> => mcp_store:session_id(),
+                                   <<"observedAt">> => now_iso(),
+                                   <<"table">> => Name,
+                                   <<"protection">> => bin(P),
+                                   <<"type">> => bin(Type),
+                                   <<"size">> => Size,
+                                   <<"sample">> => [mcp_encoder:term(O, Enc) || O <- Objects],
+                                   <<"truncated">> => Size > length(Objects),
+                                   <<"redaction">> => <<"best effort: values of keys named like a secret and credentials in URLs are replaced">>}};
+                        timeout -> {error, <<"timeout">>, <<"the table did not answer in time">>};
+                        _ -> {error, <<"not_found">>, <<"the table does not exist (anymore)">>}
+                    end;
+                private -> {error, <<"policy_denied">>, <<"private tables are never read">>};
+                _ -> {error, <<"not_found">>, <<"no table with this name exists">>}
+            end
+    end.
+
+%%------------------------------------------------------------------------------
 %% top_processes (ranking by queue length / reductions / memory)
 %%------------------------------------------------------------------------------
 
@@ -1469,13 +1653,9 @@ top_entry(Pid, SortBy, Rank, Masters, B) ->
     case erlang:process_info(Pid, Items) of
         undefined -> gone;
         Info ->
-            case lists:keyfind(registered_name, 1, Info) of
-                {registered_name, N} when is_atom(N) ->
-                    case inspector_name(N) of
-                        true -> skip;
-                        false -> top_entity(Pid, Info, SortBy, Rank, Masters, B)
-                    end;
-                _ -> top_entity(Pid, Info, SortBy, Rank, Masters, B)
+            case inspector_info(Info) of
+                true -> skip;
+                false -> top_entity(Pid, Info, SortBy, Rank, Masters, B)
             end
     end.
 
@@ -1520,6 +1700,7 @@ top_ports_build(Args, Ctx) ->
                       fun({_, Port}, {Acc, G, Rank}) ->
                               case port_entry(Port, SortBy, Rank, Acc) of
                                   gone -> {Acc, G + 1, Rank};
+                                  skip -> {Acc, G, Rank};
                                   {ok, Acc1} -> {Acc1, G, Rank + 1}
                               end
                       end, {new_b(), 0, 1}, Ranked),
@@ -1531,7 +1712,7 @@ top_ports_build(Args, Ctx) ->
               <<"limitations">> =>
                   [<<"A point-in-time scan, not an atomic snapshot: ports open and close while it runs.">>,
                    <<"Only the driver name, byte counters, queue size and the owner process are reported; addresses, command lines, paths and data are never read.">>,
-                   <<"driver is <redacted> for ports that are not a plain driver name (for example a spawned program).">>,
+                   <<"driver is <other> for any port that is not a well-known VM driver (for example a spawned program: its name is its command line).">>,
                    <<"owns_port links a port to its connected process; it is not evidence of traffic.">>]},
     {ok, Scope, B2}.
 
@@ -1556,8 +1737,16 @@ port_entry(Port, SortBy, Rank, B) ->
                        <<"output">> => proplists:get_value(output, Info, 0),
                        <<"queueSize">> => proplists:get_value(queue_size, Info, 0),
                        <<"bytesUnit">> => <<"bytes">>},
-            B1 = add_entity(B, PId, Fields),
             case proplists:get_value(connected, Info) of
+                Owner0 when is_pid(Owner0) -> InspectorOwned = is_inspector_pid(Owner0);
+                _ -> InspectorOwned = false
+            end,
+            B1 = case InspectorOwned of
+                     true -> B;
+                     false -> add_entity(B, PId, Fields)
+                 end,
+            case proplists:get_value(connected, Info) of
+                _ when InspectorOwned -> skip;
                 Owner when is_pid(Owner), node(Owner) =:= node() ->
                     {OwnerId, B2} = process_entity(Owner, #{<<"role">> => <<"unknown">>}, B1),
                     {ok, add_rel(B2, <<"owns_port">>, OwnerId, PId, <<"port_info connected">>, <<"confirmed">>)};
@@ -1565,12 +1754,15 @@ port_entry(Port, SortBy, Rank, B) ->
             end
     end.
 
+%% Only well-known VM drivers are named: the "name" of a port opened with spawn/2 is its
+%% command line, which can be any text (and look like a driver name).
 driver_name(Name) when is_list(Name) ->
-    case re:run(Name, "^[a-z][a-z0-9_]{0,31}$", [{capture, none}]) of
-        match -> list_to_binary(Name);
-        nomatch -> <<"<redacted>">>
+    case lists:member(Name, ["tcp_inet", "udp_inet", "sctp_inet", "efile", "tty_sl", "forker", "fd",
+                             "ram_file_drv", "zlib_drv", "inet_gethost", "spawn", "ssl_tls"]) of
+        true -> list_to_binary(Name);
+        false -> <<"<other>">>
     end;
-driver_name(_) -> <<"<redacted>">>.
+driver_name(_) -> <<"<other>">>.
 
 %% omissions shared by the scanning tools
 scan_omissions(B, Gone, Unscanned, Cut, What) ->
@@ -1595,7 +1787,7 @@ scan_omissions(B, Gone, Unscanned, Cut, What) ->
 %% ets_summary: ETS memory per owner process, without any table name, key or value
 %%------------------------------------------------------------------------------
 
-ets_summary_build(Args, Ctx) ->
+ets_summary_build(Args, #{config := Config} = Ctx) ->
     Limit = min(maps:get(<<"limit">>, Args, 10), ?MAX_TOP),
     All = ets:all(),
     Total = length(All),
@@ -1603,7 +1795,7 @@ ets_summary_build(Args, Ctx) ->
                       true -> {lists:sublist(All, ?MAX_ETS_SCAN), Total - ?MAX_ETS_SCAN};
                       false -> {All, 0}
                   end,
-    {Owners, Unscanned} = ets_owners(Scan, Ctx, 0, #{}),
+    {Owners, Unscanned, Excluded} = ets_owners(Scan, Config, Ctx, 0, #{}, 0),
     WordSize = erlang:system_info(wordsize),
     TotalWords = lists:sum([W || {_, W} <- maps:values(Owners)]),
     Ranked = lists:sublist(lists:reverse(lists:sort([{W, C, O} || {O, {C, W}} <- maps:to_list(Owners)])), Limit),
@@ -1621,32 +1813,60 @@ ets_summary_build(Args, Ctx) ->
                         {_, Acc1} = process_entity(Owner, Fields, Acc),
                         {Acc1, Rank + 1}
                 end, {new_b(), 1}, Ranked),
-    B2 = scan_omissions(B1, 0, Unscanned, Cut, <<"tables">>),
+    B2a = scan_omissions(B1, 0, Unscanned, Cut, <<"tables">>),
+    B2 = case Excluded of
+             0 -> B2a;
+             _ -> add_omission(B2a, <<"policy_denied">>, Excluded, undefined,
+                               <<"private tables and tables not approved by allowed_ets_tables are not counted">>, false)
+         end,
     Scope = #{<<"tool">> => <<"ets_summary">>,
               <<"limit">> => Limit,
-              <<"tableCount">> => Total,
+              <<"tableCount">> => Total - Excluded,
               <<"ownerCount">> => maps:size(Owners),
               <<"totalMemory">> => #{<<"words">> => TotalWords, <<"bytes">> => TotalWords * WordSize},
               <<"limitations">> =>
                   [<<"Per-owner aggregates only: no table name, key, object or value is read or returned, and no table inventory is listed.">>,
-                   <<"Private tables are counted in the aggregates (their owner and size, nothing else).">>,
+                   <<"Only tables approved by allowed_ets_tables (exact names, or all) are counted; private tables never are.">>,
                    <<"A point-in-time scan, not an atomic snapshot; tables are created and deleted while it runs.">>,
                    <<"For the metadata of a specific table use ets_tables (approved names only).">>]},
     {ok, Scope, B2}.
 
-%% -> {#{OwnerPid => {Tables, Words}}, NotScanned}
-ets_owners([], _Ctx, _N, Acc) -> {Acc, 0};
-ets_owners([Tab | T] = Tabs, Ctx, N, Acc) ->
+%% -> {#{OwnerPid => {Tables, Words}}, NotScanned, NotCounted}
+ets_owners([], _Config, _Ctx, _N, Acc, Ex) -> {Acc, 0, Ex};
+ets_owners([Tab | T] = Tabs, Config, Ctx, N, Acc, Ex) ->
     case N rem 500 =:= 0 andalso N > 0 andalso remaining(Ctx) =:= 0 of
-        true -> {Acc, length(Tabs)};
+        true -> {Acc, length(Tabs), Ex};
         false ->
-            Acc1 = try {ets:info(Tab, owner), ets:info(Tab, memory)} of
-                       {Owner, Words} when is_pid(Owner), node(Owner) =:= node(), is_integer(Words) ->
-                           maps:update_with(Owner, fun({C, W}) -> {C + 1, W + Words} end, {1, Words}, Acc);
-                       _ -> Acc
-                   catch _:_ -> Acc
-                   end,
-            ets_owners(T, Ctx, N + 1, Acc1)
+            {Acc1, Ex1} = case ets_counted(Tab, Config) of
+                              false -> {Acc, Ex + 1};
+                              true ->
+                                  try {ets:info(Tab, owner), ets:info(Tab, memory)} of
+                                      {Owner, Words} when is_pid(Owner), node(Owner) =:= node(), is_integer(Words) ->
+                                          case is_inspector_pid(Owner) of
+                                              true -> {Acc, Ex};
+                                              false -> {maps:update_with(Owner, fun({C, W}) -> {C + 1, W + Words} end,
+                                                                         {1, Words}, Acc), Ex}
+                                          end;
+                                      _ -> {Acc, Ex}
+                                  catch _:_ -> {Acc, Ex}
+                                  end
+                          end,
+            ets_owners(T, Config, Ctx, N + 1, Acc1, Ex1)
+    end.
+
+%% never a private table; approved by exact name, or every table when allowed_ets_tables is `all`
+ets_counted(Tab, Config) ->
+    try ets:info(Tab, protection) of
+        private -> false;
+        undefined -> false;
+        _ ->
+            case maps:get(allowed_ets_tables, Config) of
+                all -> true;
+                Names ->
+                    ets:info(Tab, named_table) =:= true andalso
+                        lists:member(atom_to_binary(ets:info(Tab, name), utf8), Names)
+            end
+    catch _:_ -> false
     end.
 
 %%------------------------------------------------------------------------------
@@ -1654,7 +1874,11 @@ ets_owners([Tab | T] = Tabs, Ctx, N, Acc) ->
 %%------------------------------------------------------------------------------
 
 ets_tables_build(_Args, #{config := Config}) ->
-    Names = maps:get(allowed_ets_tables, Config),
+    Names = case maps:get(allowed_ets_tables, Config) of
+                all -> [atom_to_binary(N, utf8) || T <- ets:all(), is_atom(T), ets:info(T, named_table) =:= true,
+                                                    N <- [ets:info(T, name)], is_atom(N)];
+                L -> L
+            end,
     {B, Denied, Gone} = lists:foldl(
                           fun(Name, {Acc, D, G}) -> ets_entry(Name, Acc, D, G) end,
                           {new_b(), 0, 0}, Names),

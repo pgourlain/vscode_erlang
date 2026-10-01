@@ -19,6 +19,9 @@ all() ->
      explicit_empty_allowlist_enables_no_tool,
      project_cannot_set_activation_or_binding,
      project_limits_cannot_exceed_ceilings,
+     developer_tier_is_opt_in_and_ets_all_is_accepted,
+     non_ascii_workspace_path_still_finds_the_project_policy,
+     token_with_trailing_newline_is_rejected,
      invalid_and_duplicate_project_terms,
      profile_only_policy_reported,
      malformed_project_file_disables,
@@ -61,9 +64,10 @@ defaults_without_project_file(Config) ->
     {ok, C} = mcp_policy:resolve(input(Config, #{})),
     ?assertEqual("127.0.0.1", maps:get(host, C)),
     ?assertEqual(0, maps:get(port, C)),
-    ?assertEqual(mcp_policy:all_tools(), maps:get(allowed_tools, C)),
+    ?assertEqual(mcp_policy:default_tools(), maps:get(allowed_tools, C)),
+    ?assertEqual([], [T || T <- [<<"process_state">>, <<"mailbox_sample">>, <<"ets_sample">>], lists:member(T, maps:get(allowed_tools, C))]),
     ?assertEqual([], maps:get(allowed_ets_tables, C)),
-    ?assertEqual(mcp_policy:ceilings(), maps:get(limits, C)),
+    ?assertEqual(mcp_policy:default_limits(), maps:get(limits, C)),
     ?assertEqual(12, length(maps:get(allowed_tools, C))),
     %% a project without an mcp term uses the same built-in policy
     write_rebar(Config, "{erl_opts, [debug_info]}.\n{deps, []}.\n"),
@@ -124,14 +128,51 @@ project_limits_cannot_exceed_ceilings(Config) ->
     [begin
          write_rebar(Config, lists:flatten(io_lib:format("{mcp, [{limits, [~s]}]}.\n", [Term]))),
          ?assertMatch({error, _}, mcp_policy:resolve(input(Config, #{})), Term)
-     end || Term <- ["{max_items, 501}", "{max_items, 0}", "{max_items, -1}", "{max_items, 1.5}",
-                     "{max_result_bytes, 262145}", "{request_timeout_ms, 3001}", "{max_concurrency, 3}",
+     end || Term <- ["{max_items, 5001}", "{max_items, 0}", "{max_items, -1}", "{max_items, 1.5}",
+                     "{max_result_bytes, 2097153}", "{request_timeout_ms, 15001}", "{max_concurrency, 9}",
                      "{unknown_limit, 1}", "{max_items, <<\"5\">>}",
                      %% unusable combinations: error envelopes must fit
                      "{max_result_bytes, 100}", "{max_request_bytes, 100}",
                      "{max_result_bytes, 8192}, {max_collection_bytes, 4096}"]],
     write_rebar(Config, "{mcp, [{limits, [{max_items, 1}, {max_result_bytes, 4096}, {max_collection_bytes, 4096}, {max_binary_bytes, 1024}]}]}.\n"),
-    ?assertMatch({ok, _}, mcp_policy:resolve(input(Config, #{}))).
+    ?assertMatch({ok, _}, mcp_policy:resolve(input(Config, #{}))),
+    %% raising a limit above its default is allowed up to the ceiling
+    write_rebar(Config, "{mcp, [{limits, [{max_items, 5000}, {max_result_bytes, 2097152}, {max_collection_bytes, 8388608},"
+                        " {request_timeout_ms, 15000}, {collection_ttl_ms, 600000}, {max_collections, 16}]}]}.\n"),
+    {ok, Raised} = mcp_policy:resolve(input(Config, #{})),
+    ?assertEqual(5000, mcp_policy:limit(max_items, Raised)),
+    ?assertEqual(600000, mcp_policy:limit(collection_ttl_ms, Raised)).
+
+developer_tier_is_opt_in_and_ets_all_is_accepted(Config) ->
+    Dev = [<<"process_state">>, <<"mailbox_sample">>, <<"ets_sample">>],
+    {ok, Default} = mcp_policy:resolve(input(Config, #{})),
+    ?assertEqual([], [T || T <- Dev, mcp_policy:tool_allowed(T, Default)]),
+    ?assert(lists:all(fun(T) -> lists:member(T, mcp_policy:all_tools()) end, Dev)),
+    write_rebar(Config, "{mcp, [{allowed_tools, [<<\"process_state\">>, <<\"ets_sample\">>]}, {allowed_ets_tables, all}]}.\n"),
+    {ok, C} = mcp_policy:resolve(input(Config, #{})),
+    ?assert(mcp_policy:tool_allowed(<<"process_state">>, C)),
+    ?assertNot(mcp_policy:tool_allowed(<<"mailbox_sample">>, C)),
+    ?assertEqual(all, maps:get(allowed_ets_tables, C)),
+    ?assert(mcp_policy:ets_table_allowed(<<"anything">>, C)),
+    %% crosses to the target and back unchanged
+    ?assertEqual({ok, C}, mcp_policy:from_json_map(mcp_policy:to_json_map(C))),
+    ?assertNot(mcp_policy:ets_table_allowed(<<"x">>, Default)),
+    [begin
+         write_rebar(Config, Text),
+         ?assertMatch({error, _}, mcp_policy:resolve(input(Config, #{})), Text)
+     end || Text <- ["{mcp, [{allowed_ets_tables, everything}]}.\n", "{mcp, [{allowed_tools, [<<\"process_dump\">>]}]}.\n"]].
+
+non_ascii_workspace_path_still_finds_the_project_policy(Config) ->
+    Dir = filename:join(?config(priv_dir, Config), "José_проект"),
+    ok = filelib:ensure_dir(filename:join(Dir, "x")),
+    ok = file:write_file(filename:join(Dir, "rebar.config"), "{mcp, [{allowed_tools, [<<\"runtime_summary\">>]}]}.\n"),
+    Bin = unicode:characters_to_binary(Dir),
+    {ok, C} = mcp_policy:resolve(#{<<"enabled">> => true, <<"trusted">> => true, <<"cwd">> => Bin, <<"root">> => Bin}),
+    ?assertEqual([<<"runtime_summary">>], maps:get(allowed_tools, C)).
+
+token_with_trailing_newline_is_rejected(_Config) ->
+    ?assertEqual(ok, mcp_policy:validate_token(<<"abcdefghijklmnop">>)),
+    ?assertMatch({error, _}, mcp_policy:validate_token(<<"abcdefghijklmnop\n">>)).
 
 invalid_and_duplicate_project_terms(Config) ->
     [begin

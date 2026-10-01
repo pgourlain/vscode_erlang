@@ -3,7 +3,7 @@
 %% exposes an executable handle: funs, ports, references and pids become text.
 -module(mcp_encoder).
 
--export([term/2, text/2, safe_binary/2, hex/1, iso8601/1, pid_text/1]).
+-export([term/2, text/2, safe_binary/2, hex/1, iso8601/1, pid_text/1, scrub/1]).
 
 -define(SECRET_WORDS, ["password", "passwd", "secret", "token", "cookie",
                        "credential", "apikey", "api_key", "private_key", "auth"]).
@@ -16,10 +16,34 @@ term(Term, Limits) ->
 text(Term, Limits) ->
     Max = maps:get(max_binary_bytes, Limits, 4096),
     Depth = maps:get(max_depth, Limits, 16),
-    Str = try lists:flatten(io_lib:format("~0P", [Term, Depth]))
+    Str = try lists:flatten(io_lib:format("~0P", [redact(Term, Depth), Depth]))
           catch _:_ -> "<unprintable>"
           end,
-    safe_binary(unicode:characters_to_binary(Str, unicode, utf8), Max).
+    safe_binary(scrub(unicode:characters_to_binary(Str, unicode, utf8)), Max).
+
+%% Best-effort redaction of what looks like a credential: the value of a key/value
+%% pair or map entry whose key names a secret (password, token, ...). Applied to the
+%% printed form of terms (child ids, ...); a record without keys cannot be redacted.
+redact(_, D) when D =< 0 -> '<max depth>';
+redact({K, V}, D) when is_atom(K); is_binary(K) ->
+    case secret_key(K) of
+        true -> {K, '<redacted>'};
+        false -> {K, redact(V, D - 1)}
+    end;
+redact(T, D) when is_tuple(T) -> list_to_tuple([redact(E, D - 1) || E <- lists:sublist(tuple_to_list(T), 64)]);
+redact(M, D) when is_map(M) ->
+    maps:map(fun(K, V) -> case secret_key(K) of true -> '<redacted>'; false -> redact(V, D - 1) end end, M);
+redact([H | T], D) -> [redact(H, D - 1) | redact_tail(T, D - 1, 64)];
+redact(T, _) -> T.
+
+redact_tail(_, _, 0) -> [];
+redact_tail([H | T], D, N) -> [redact(H, D) | redact_tail(T, D, N - 1)];
+redact_tail(Tail, _, _) -> Tail.
+
+%% user:password@ inside a URL-like text
+scrub(Bin) when is_binary(Bin) ->
+    re:replace(Bin, "://[^/@\\s:]+:[^@\\s]+@", "://<redacted>@", [global, {return, binary}]);
+scrub(Other) -> Other.
 
 enc(_, Depth, #{max_depth := Max}) when Depth > Max ->
     <<"<max depth>">>;
@@ -31,7 +55,10 @@ enc(undefined, _, _) -> null;
 enc(T, _, _) when is_atom(T) ->
     safe_binary(atom_to_binary(T, utf8), 255);
 enc(T, _, #{max_binary_bytes := Max}) when is_binary(T) ->
-    binary(T, Max);
+    case binary(T, Max) of
+        B when is_binary(B) -> scrub(B);
+        Other -> Other
+    end;
 enc(T, _, _) when is_pid(T) -> pid_text(T);
 enc(T, _, _) when is_port(T) -> #{<<"port">> => list_bin(erlang:port_to_list(T))};
 enc(T, _, _) when is_reference(T) -> #{<<"ref">> => list_bin(erlang:ref_to_list(T))};
@@ -41,6 +68,9 @@ enc(T, _, _) when is_function(T) ->
         {module, M} -> #{<<"fun">> => safe_binary(atom_to_binary(M, utf8), 255)};
         _ -> #{<<"fun">> => <<"unknown">>}
     end;
+enc({K, V}, Depth, Limits) when is_atom(K); is_binary(K) ->
+    %% {password, "x"} style pairs (proplists, keyword options)
+    #{<<"tuple">> => [enc(K, Depth + 1, Limits), enc_value(K, V, Depth + 1, Limits)]};
 enc(T, Depth, Limits) when is_tuple(T) ->
     #{<<"tuple">> => enc_list(tuple_to_list(T), Depth + 1, Limits)};
 enc(T, Depth, Limits) when is_map(T) ->
@@ -52,7 +82,7 @@ enc(T, Depth, Limits) when is_map(T) ->
 enc([], _, _) -> [];
 enc(T, Depth, Limits) when is_list(T) ->
     case printable(T) of
-        true -> safe_binary(unicode:characters_to_binary(T, unicode, utf8), maps:get(max_binary_bytes, Limits));
+        true -> safe_binary(scrub(unicode:characters_to_binary(T, unicode, utf8)), maps:get(max_binary_bytes, Limits));
         false -> enc_list(T, Depth + 1, Limits)
     end;
 enc(_, _, _) ->

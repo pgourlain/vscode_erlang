@@ -16,7 +16,7 @@ all() ->
      members_are_bounded].
 
 init_per_testcase(Case, Config) ->
-    L = (mcp_policy:ceilings())#{max_items => 2, max_collections => 2, collection_ttl_ms => 400,
+    L = (mcp_policy:default_limits())#{max_items => 2, max_collections => 2, collection_ttl_ms => 400,
                                 max_result_bytes => 4096, max_collection_bytes => 4096,
                                 max_binary_bytes => 512, max_concurrency => 2},
     Cfg = (mcp_policy:defaults())#{limits => L},

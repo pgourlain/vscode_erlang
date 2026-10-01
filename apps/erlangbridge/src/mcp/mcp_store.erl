@@ -14,6 +14,7 @@
 -export([note_member/3, member/1]).
 -export([stats/0, notify/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
+-export([format_status/1, format_status/2]).
 
 -define(SERVER, ?MODULE).
 -define(SWEEP_MS, 1000).
@@ -194,6 +195,14 @@ handle_info(sweep, S) ->
     erlang:send_after(?SWEEP_MS, self(), sweep),
     {noreply, sweep_collections(S)};
 handle_info(_, S) -> {noreply, S}.
+
+%% a crash report or sys:get_status must never print the cursor-signing secret
+format_status(Status) when is_map(Status) ->
+    maps:map(fun(state, #state{} = S) -> S#state{secret = <<"<redacted>">>};
+                (_, V) -> V
+             end, Status).
+format_status(_Opt, [_PDict, #state{} = S]) -> S#state{secret = <<"<redacted>">>};
+format_status(_Opt, [_PDict, S]) -> S.
 
 terminate(_, _) -> ok.
 

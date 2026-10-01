@@ -4,7 +4,7 @@
 %%   * VS Code settings (erlang.mcp.enabled/host/port): activation and binding;
 %%   * the optional top-level `{mcp, [...]}` term of the target project's
 %%     rebar.config: tool/table allowlists and *lower* resource limits.
-%% Neither can relax the built-in ceilings.
+%% Neither can exceed the built-in ceilings.
 %%
 %% The project file is read by a bounded, non-evaluating reader (no
 %% rebar.config.script, no profile merging, no includes). It interns the atoms
@@ -21,7 +21,8 @@
 
 -include_lib("kernel/include/file.hrl").
 
--export([all_tools/0, defaults/0, ceilings/0, limit/2, tool_allowed/2]).
+-export([all_tools/0, default_tools/0, defaults/0, default_limits/0, ceilings/0, limit/2, tool_allowed/2]).
+-export([ets_table_allowed/2]).
 -export([resolve/1, read_project_policy/2, normalize_project_term/1]).
 -export([validate_host/1, validate_config/1, to_json_map/1, from_json_map/1, validate_token/1]).
 -export([cli/0]).
@@ -30,25 +31,32 @@
 -define(MAX_PROJECT_TOKENS, 20000).
 -define(PROJECT_FILE, "rebar.config").
 
--define(TOOLS, [<<"runtime_summary">>, <<"application_overview">>,
-                <<"supervision_tree">>, <<"process_info">>,
-                <<"registered_processes">>, <<"ets_tables">>,
-                <<"debug_session">>, <<"top_processes">>, <<"topology_overview">>, <<"changes_since">>,
-                <<"top_ports">>, <<"ets_summary">>]).
+%% Enabled unless the project policy narrows them (metadata only).
+-define(DEFAULT_TOOLS, [<<"runtime_summary">>, <<"application_overview">>,
+                        <<"supervision_tree">>, <<"process_info">>,
+                        <<"registered_processes">>, <<"ets_tables">>,
+                        <<"debug_session">>, <<"top_processes">>, <<"topology_overview">>, <<"changes_since">>,
+                        <<"top_ports">>, <<"ets_summary">>]).
+%% Developer tier: they return data of the debugged application (a bounded process
+%% state, a few mailbox messages, a few table rows), so a project must name them in
+%% allowed_tools; they are never enabled by default.
+-define(DEV_TOOLS, [<<"process_state">>, <<"mailbox_sample">>, <<"ets_sample">>]).
+-define(TOOLS, (?DEFAULT_TOOLS ++ ?DEV_TOOLS)).
 
-%% {internal key, project key, JSON key, default = ceiling}
+%% {internal key, project key, JSON key, default, ceiling}: a project may raise a
+%% limit above its default up to the ceiling, never above.
 -define(LIMITS,
-        [{max_request_bytes,    max_request_bytes,    <<"maxRequestBytes">>,    16384},
-         {max_result_bytes,     max_result_bytes,     <<"maxResultBytes">>,     262144},
-         {max_items,            max_items,            <<"maxItems">>,           500},
-         {max_depth,            max_depth,            <<"maxDepth">>,           16},
-         {max_binary_bytes,     max_binary_bytes,     <<"maxBinaryBytes">>,     4096},
-         {max_traversal_depth,  max_traversal_depth,  <<"maxTraversalDepth">>,  8},
-         {max_concurrency,      max_concurrency,      <<"maxConcurrency">>,     2},
-         {request_timeout_ms,   request_timeout_ms,   <<"requestTimeoutMs">>,   3000},
-         {collection_ttl_ms,    collection_ttl_ms,    <<"collectionTtlMs">>,    30000},
-         {max_collection_bytes, max_collection_bytes, <<"maxCollectionBytes">>, 1048576},
-         {max_collections,      max_collections,      <<"maxCollections">>,     2}]).
+        [{max_request_bytes,    max_request_bytes,    <<"maxRequestBytes">>,    16384,   65536},
+         {max_result_bytes,     max_result_bytes,     <<"maxResultBytes">>,     262144,  2097152},
+         {max_items,            max_items,            <<"maxItems">>,           500,     5000},
+         {max_depth,            max_depth,            <<"maxDepth">>,           16,      32},
+         {max_binary_bytes,     max_binary_bytes,     <<"maxBinaryBytes">>,     4096,    65536},
+         {max_traversal_depth,  max_traversal_depth,  <<"maxTraversalDepth">>,  8,       16},
+         {max_concurrency,      max_concurrency,      <<"maxConcurrency">>,     2,       8},
+         {request_timeout_ms,   request_timeout_ms,   <<"requestTimeoutMs">>,   3000,    15000},
+         {collection_ttl_ms,    collection_ttl_ms,    <<"collectionTtlMs">>,    30000,   600000},
+         {max_collection_bytes, max_collection_bytes, <<"maxCollectionBytes">>, 1048576, 8388608},
+         {max_collections,      max_collections,      <<"maxCollections">>,     2,       16}]).
 
 %% Keys a project term must never carry (owned by VS Code / the runtime).
 -define(FORBIDDEN_PROJECT_KEYS,
@@ -56,16 +64,24 @@
          credentials, cookie, authorization, bearer]).
 
 all_tools() -> ?TOOLS.
+default_tools() -> ?DEFAULT_TOOLS.
+
+default_limits() ->
+    maps:from_list([{K, D} || {K, _, _, D, _} <- ?LIMITS]).
 
 ceilings() ->
-    maps:from_list([{K, D} || {K, _, _, D} <- ?LIMITS]).
+    maps:from_list([{K, C} || {K, _, _, _, C} <- ?LIMITS]).
 
 defaults() ->
     #{host => "127.0.0.1",
       port => 0,
-      allowed_tools => ?TOOLS,
+      allowed_tools => ?DEFAULT_TOOLS,
       allowed_ets_tables => [],
-      limits => ceilings()}.
+      limits => default_limits()}.
+
+%% Is the named table approved? allowed_ets_tables is a list of exact names, or `all`.
+ets_table_allowed(_Name, #{allowed_ets_tables := all}) -> true;
+ets_table_allowed(Name, #{allowed_ets_tables := Names}) -> lists:member(Name, Names).
 
 limit(Key, #{limits := Limits}) -> maps:get(Key, Limits).
 
@@ -169,7 +185,11 @@ finish(Host, Port, Project) ->
 
 valid_port(P) -> is_integer(P) andalso P >= 0 andalso P =< 65535.
 
-to_list(B) when is_binary(B) -> binary_to_list(B);
+to_list(B) when is_binary(B) ->
+    case unicode:characters_to_list(B) of
+        L when is_list(L) -> L;
+        _ -> binary_to_list(B)
+    end;
 to_list(L) when is_list(L) -> L.
 
 %%------------------------------------------------------------------------------
@@ -322,6 +342,8 @@ project_key({allowed_tools, Tools}, Acc) ->
     length(Names) =:= length(lists:usort(Names)) orelse throw("allowed_tools has duplicates"),
     lists:foreach(fun(N) -> lists:member(N, ?TOOLS) orelse throw("allowed_tools has an unknown tool name") end, Names),
     Acc#{allowed_tools => Names};
+project_key({allowed_ets_tables, all}, Acc) ->
+    Acc#{allowed_ets_tables => all};
 project_key({allowed_ets_tables, Tables}, Acc) ->
     Names = binary_list(Tables, "allowed_ets_tables"),
     length(Names) =:= length(lists:usort(Names)) orelse throw("allowed_ets_tables has duplicates"),
@@ -337,7 +359,7 @@ project_key({limits, Limits}, Acc) ->
             fun({K, V}, M) ->
                     case lists:keyfind(K, 2, ?LIMITS) of
                         false -> throw(io_lib:format("unknown limit '~w'", [K]));
-                        {Internal, _, _, Ceiling} ->
+                        {Internal, _, _, _, Ceiling} ->
                             (is_integer(V) andalso V > 0 andalso V =< Ceiling) orelse
                                 throw(io_lib:format("limit '~w' must be a positive integer <= ~w", [K, Ceiling])),
                             M#{Internal => V}
@@ -365,8 +387,9 @@ validate_config(#{host := Host, port := Port, allowed_tools := Tools,
               fun() -> (is_list(Tools) andalso lists:all(fun(T) -> lists:member(T, ?TOOLS) end, Tools)
                         andalso length(Tools) =:= length(lists:usort(Tools)))
                            orelse {error, "invalid MCP tool allowlist"} end,
-              fun() -> (is_list(Tables) andalso lists:all(fun is_binary/1, Tables)
-                        andalso length(Tables) =:= length(lists:usort(Tables)))
+              fun() -> Tables =:= all orelse
+                           (is_list(Tables) andalso lists:all(fun is_binary/1, Tables)
+                            andalso length(Tables) =:= length(lists:usort(Tables)))
                            orelse {error, "invalid MCP ETS table allowlist"} end,
               fun() -> validate_limits(Limits) end],
     run_checks(Checks);
@@ -389,11 +412,11 @@ literal_loopback(Host) when is_list(Host) ->
 literal_loopback(_) -> false.
 
 validate_limits(Limits) when is_map(Limits) ->
-    Expected = [K || {K, _, _, _} <- ?LIMITS],
+    Expected = [K || {K, _, _, _, _} <- ?LIMITS],
     case lists:sort(maps:keys(Limits)) =:= lists:sort(Expected) of
         false -> {error, "MCP limits are incomplete or unknown"};
         true ->
-            Bad = [K || {K, _, _, Ceiling} <- ?LIMITS,
+            Bad = [K || {K, _, _, _, Ceiling} <- ?LIMITS,
                         V <- [maps:get(K, Limits)],
                         not (is_integer(V) andalso V > 0 andalso V =< Ceiling)],
             case Bad of
@@ -424,8 +447,8 @@ to_json_map(#{host := Host, port := Port, allowed_tools := Tools,
     #{<<"host">> => list_to_binary(Host),
       <<"port">> => Port,
       <<"allowedTools">> => Tools,
-      <<"allowedETSTables">> => Tables,
-      <<"limits">> => maps:from_list([{J, maps:get(K, Limits)} || {K, _, J, _} <- ?LIMITS])}.
+      <<"allowedETSTables">> => case Tables of all -> <<"*">>; _ -> Tables end,
+      <<"limits">> => maps:from_list([{J, maps:get(K, Limits)} || {K, _, J, _, _} <- ?LIMITS])}.
 
 from_json_map(#{<<"host">> := Host, <<"port">> := Port, <<"allowedTools">> := Tools,
                 <<"allowedETSTables">> := Tables, <<"limits">> := Limits} = M)
@@ -437,13 +460,14 @@ from_json_map(#{<<"host">> := Host, <<"port">> := Port, <<"allowedTools">> := To
           case token_of(M) of
            {error, _} = TE -> TE;
            _ ->
-            KnownLimits = [J || {_, _, J, _} <- ?LIMITS],
+            KnownLimits = [J || {_, _, J, _, _} <- ?LIMITS],
             case maps:keys(maps:without(KnownLimits, Limits)) of
                 [] ->
                     Internal = maps:from_list([{K, maps:get(J, Limits)}
-                                               || {K, _, J, _} <- ?LIMITS, maps:is_key(J, Limits)]),
+                                               || {K, _, J, _, _} <- ?LIMITS, maps:is_key(J, Limits)]),
                     Config = #{host => binary_to_list(Host), port => Port,
-                               allowed_tools => Tools, allowed_ets_tables => Tables,
+                               allowed_tools => Tools,
+                               allowed_ets_tables => case Tables of <<"*">> -> all; _ -> Tables end,
                                limits => Internal},
                     case validate_config(Config) of
                         ok -> {ok, Config};
@@ -460,7 +484,7 @@ from_json_map(_) ->
 %% Optional fixed token (development convenience, erlang.mcp.authToken): when
 %% absent the session gets a fresh random token. 16..128 URL-safe characters.
 validate_token(T) when is_binary(T), byte_size(T) >= 16, byte_size(T) =< 128 ->
-    case re:run(T, "^[A-Za-z0-9._~-]+$", [{capture, none}]) of
+    case re:run(T, "^[A-Za-z0-9._~-]+\\z", [{capture, none}]) of
         match -> ok;
         nomatch -> {error, "erlang.mcp.authToken may only contain letters, digits and ._~-"}
     end;
@@ -477,6 +501,7 @@ token_of(_) -> ok.
 
 cli() ->
     Reply = try
+                catch io:setopts(standard_io, [{encoding, unicode}]),
                 case io:get_line("") of
                     Line when is_list(Line), length(Line) < 8192 ->
                         {ok, Input, _} = vscode_jsone_decode:decode(unicode:characters_to_binary(Line)),

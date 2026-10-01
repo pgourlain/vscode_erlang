@@ -36,6 +36,11 @@ all() ->
      changes_since_reports_replaced_and_removed_children,
      top_ports_reports_drivers_and_owners_only,
      ets_summary_aggregates_per_owner_without_names,
+     ets_summary_counts_only_approved_tables,
+     developer_tools_are_off_by_default,
+     process_state_is_bounded_redacted_and_never_for_supervisors,
+     mailbox_sample_returns_the_oldest_messages_redacted,
+     ets_sample_only_for_approved_non_private_tables,
      paused_process_is_reported_from_debugger_evidence,
      restart_changes_identity,
      pagination_cursors_and_retention,
@@ -88,6 +93,12 @@ test_config(Case) ->
     case Case of
         allowlist_enforced ->
             Base1#{allowed_tools => [<<"runtime_summary">>, <<"ets_tables">>]};
+        ets_summary_aggregates_per_owner_without_names ->
+            Base1#{allowed_ets_tables => all};
+        Dev when Dev =:= process_state_is_bounded_redacted_and_never_for_supervisors;
+                 Dev =:= mailbox_sample_returns_the_oldest_messages_redacted;
+                 Dev =:= ets_sample_only_for_approved_non_private_tables ->
+            Base1#{allowed_tools => mcp_policy:all_tools()};
         topology_overview_leaves_out_parts_the_policy_denies ->
             Base1#{allowed_tools => [<<"topology_overview">>, <<"supervision_tree">>, <<"application_overview">>]};
         pagination_cursors_and_retention ->
@@ -320,7 +331,7 @@ initialize_negotiates_and_lists_only_readonly_tools(Config) ->
     ?assertMatch(#{<<"result">> := #{}}, rpc(Config, <<"ping">>, #{})),
     #{<<"result">> := #{<<"tools">> := Tools}} = rpc(Config, <<"tools/list">>, #{}),
     Names = lists:sort([maps:get(<<"name">>, T) || T <- Tools]),
-    ?assertEqual(lists:sort(mcp_policy:all_tools()), Names),
+    ?assertEqual(lists:sort(mcp_policy:default_tools()), Names),
     ?assertEqual(12, length(Tools)),
     [begin
          ?assertMatch(#{<<"inputSchema">> := #{<<"type">> := <<"object">>, <<"additionalProperties">> := false},
@@ -1163,7 +1174,7 @@ top_ports_reports_drivers_and_owners_only(Config) ->
         Drivers = [maps:get(<<"driver">>, E) || E <- Ports],
         ?assert(lists:member(<<"tcp_inet">>, Drivers)),
         %% a spawned program is never named: no command line or path in the result
-        ?assert(lists:member(<<"<redacted>">>, Drivers)),
+        ?assert(lists:member(<<"<other>">>, Drivers)),
         Dump = iolist_to_binary(io_lib:format("~p", [S])),
         [?assertEqual(nomatch, binary:match(Dump, X))
          || X <- [list_to_binary(os:find_executable("cat")), <<"SENTINEL">>, <<"127.0.0.1">>]],
@@ -1216,6 +1227,104 @@ ets_summary_aggregates_per_owner_without_names(Config) ->
     after
         exit(Big, kill)
     end.
+
+ets_summary_counts_only_approved_tables(Config) ->
+    Self = self(),
+    Big = spawn(fun() ->
+                        ets:new(mcp_fx_hidden_big, [named_table, public]),
+                        ets:insert(mcp_fx_hidden_big, {1, "SENTINEL_BIG_VALUE"}),
+                        Self ! ready,
+                        receive stop -> ok end
+                end),
+    receive ready -> ok after 5000 -> ct:fail(no_big_table) end,
+    try
+        S = ok_call(Config, <<"ets_summary">>, #{<<"limit">> => 50}),
+        Ents = maps:get(<<"entities">>, S),
+        %% only the owner of the approved table mcp_fx_orders is counted
+        ?assertEqual([<<"mcp_fx_worker_c">>], [maps:get(<<"name">>, E) || E <- Ents]),
+        ?assertMatch(#{<<"ets">> := #{<<"tables">> := 1}}, hd(Ents)),
+        ?assertNot(lists:any(fun(E) -> maps:get(<<"pid">>, E, undefined) =:= list_to_binary(pid_to_list(Big)) end, Ents)),
+        ?assert(lists:any(fun(#{<<"reason">> := R}) -> R =:= <<"policy_denied">> end, maps:get(<<"omissions">>, S)))
+    after
+        exit(Big, kill)
+    end.
+
+developer_tools_are_off_by_default(Config) ->
+    #{<<"result">> := #{<<"tools">> := Tools}} = rpc(Config, <<"tools/list">>, #{}),
+    Names = [maps:get(<<"name">>, T) || T <- Tools],
+    [?assertEqual(false, lists:member(T, Names)) || T <- [<<"process_state">>, <<"mailbox_sample">>, <<"ets_sample">>]],
+    ?assertMatch({rpc_error, -32602, _}, call(Config, <<"process_state">>, #{<<"name">> => <<"mcp_fx_worker_a">>})),
+    ?assertMatch({rpc_error, -32602, _}, call(Config, <<"mailbox_sample">>, #{<<"name">> => <<"mcp_fx_mailbox">>})),
+    ?assertMatch({rpc_error, -32602, _}, call(Config, <<"ets_sample">>, #{<<"table">> => <<"mcp_fx_orders">>})).
+
+process_state_is_bounded_redacted_and_never_for_supervisors(Config) ->
+    S = ok_call(Config, <<"process_state">>, #{<<"name">> => <<"mcp_fx_worker_a">>}),
+    ?assertMatch(#{<<"behaviour">> := <<"gen_server">>, <<"callbackModule">> := <<"mcp_fixture_worker">>,
+                   <<"name">> := <<"mcp_fx_worker_a">>, <<"process">> := _, <<"state">> := _}, S),
+    %% the state is a map with a `secret` key: its value is replaced, the orphan pid stays visible
+    Dump = iolist_to_binary(io_lib:format("~p", [S])),
+    ?assertEqual(nomatch, binary:match(Dump, <<"SENTINEL">>)),
+    ?assertNotEqual(nomatch, binary:match(Dump, <<"<redacted>">>)),
+    %% by id too; no dictionary, never a supervisor (its state holds child start arguments)
+    Id = maps:get(<<"process">>, S),
+    ?assertMatch(#{<<"state">> := _}, ok_call(Config, <<"process_state">>, #{<<"id">> => Id})),
+    ?assertMatch({tool_error, #{<<"error">> := #{<<"code">> := <<"use_supervision_tree">>}}},
+                 call(Config, <<"process_state">>, #{<<"name">> => <<"mcp_fx_sub_sup">>})),
+    %% a plain process is never sent a system message
+    Orphan = whereis(mcp_fx_orphan),
+    ?assertMatch({tool_error, #{<<"error">> := #{<<"code">> := <<"not_an_otp_process">>}}},
+                 call(Config, <<"process_state">>, #{<<"name">> => <<"mcp_fx_orphan">>})),
+    ?assertEqual({messages, []}, erlang:process_info(Orphan, messages)),
+    %% inspector processes, exited processes, hostile names and strict arguments
+    ?assertMatch({tool_error, #{<<"error">> := #{<<"code">> := <<"not_found">>}}},
+                 call(Config, <<"process_state">>, #{<<"name">> => <<"mcp_server">>})),
+    ?assertMatch({tool_error, #{<<"error">> := #{<<"code">> := <<"not_found">>}}},
+                 call(Config, <<"process_state">>, #{<<"name">> => <<"no_such_name_zz">>})),
+    ?assertMatch({rpc_error, -32602, _}, call(Config, <<"process_state">>, #{})),
+    ?assertMatch({rpc_error, -32602, _}, call(Config, <<"process_state">>, #{<<"name">> => <<"a">>, <<"pid">> => <<"<0.1.0>">>})).
+
+mailbox_sample_returns_the_oldest_messages_redacted(Config) ->
+    Hot = spawn(fun() -> register(mcp_fx_mail, self()), receive never -> ok end end),
+    wait_until(fun() -> whereis(mcp_fx_mail) =:= Hot end),
+    Hot ! {password, "SENTINEL_PW"},
+    Hot ! #{token => "SENTINEL_TOKEN", ok => 1},
+    Hot ! {url, "postgres://user:SENTINEL_URLPW@db/app"},
+    [Hot ! {n, I} || I <- lists:seq(1, 27)],
+    try
+        S = ok_call(Config, <<"mailbox_sample">>, #{<<"name">> => <<"mcp_fx_mail">>, <<"limit">> => 4}),
+        ?assertMatch(#{<<"queueLength">> := 30, <<"truncated">> := true, <<"order">> := <<"oldest first">>}, S),
+        ?assertEqual(4, length(maps:get(<<"sample">>, S))),
+        Dump = iolist_to_binary(io_lib:format("~p", [S])),
+        ?assertEqual(nomatch, binary:match(Dump, <<"SENTINEL">>)),
+        ?assertNotEqual(nomatch, binary:match(Dump, <<"<redacted>">>)),
+        %% the default sample is 5, the maximum 20; the mailbox itself is unchanged
+        ?assertEqual(5, length(maps:get(<<"sample">>, ok_call(Config, <<"mailbox_sample">>, #{<<"name">> => <<"mcp_fx_mail">>})))),
+        ?assertMatch({rpc_error, -32602, _}, call(Config, <<"mailbox_sample">>, #{<<"name">> => <<"mcp_fx_mail">>, <<"limit">> => 21})),
+        ?assertEqual({message_queue_len, 30}, erlang:process_info(Hot, message_queue_len)),
+        %% a quiet mailbox of the fixture holds its message
+        M = ok_call(Config, <<"mailbox_sample">>, #{<<"name">> => <<"mcp_fx_mailbox">>}),
+        ?assertMatch(#{<<"queueLength">> := 1, <<"sample">> := [<<"SENTINEL_MAILBOX">>], <<"truncated">> := false}, M)
+    after
+        exit(Hot, kill)
+    end.
+
+ets_sample_only_for_approved_non_private_tables(Config) ->
+    S = ok_call(Config, <<"ets_sample">>, #{<<"table">> => <<"mcp_fx_orders">>}),
+    ?assertMatch(#{<<"table">> := <<"mcp_fx_orders">>, <<"protection">> := <<"public">>, <<"size">> := 1,
+                   <<"truncated">> := false}, S),
+    ?assertEqual(1, length(maps:get(<<"sample">>, S))),
+    ?assertMatch({tool_error, #{<<"error">> := #{<<"code">> := <<"policy_denied">>}}},
+                 call(Config, <<"ets_sample">>, #{<<"table">> => <<"mcp_fx_private">>})),
+    ?assertMatch({tool_error, #{<<"error">> := #{<<"code">> := <<"not_found">>}}},
+                 call(Config, <<"ets_sample">>, #{<<"table">> => <<"mcp_fx_missing_table_zzz">>})),
+    %% a table that is not approved is denied before any atom lookup: no atom is created
+    Atoms = erlang:system_info(atom_count),
+    [?assertMatch({tool_error, #{<<"error">> := #{<<"code">> := <<"policy_denied">>}}},
+                  call(Config, <<"ets_sample">>, #{<<"table">> => <<"hostile_table_", (integer_to_binary(I))/binary>>}))
+     || I <- lists:seq(1, 30)],
+    ?assertEqual(Atoms, erlang:system_info(atom_count)),
+    ?assertMatch({rpc_error, -32602, _}, call(Config, <<"ets_sample">>, #{})),
+    ?assertMatch({rpc_error, -32602, _}, call(Config, <<"ets_sample">>, #{<<"table">> => <<"mcp_fx_orders">>, <<"limit">> => 0})).
 
 prompt_guides_an_agent_and_checks_its_argument(Config) ->
     #{<<"result">> := #{<<"prompts">> := [P]}} = rpc(Config, <<"prompts/list">>, #{}),

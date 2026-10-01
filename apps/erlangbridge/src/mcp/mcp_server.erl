@@ -14,6 +14,7 @@
 -behaviour(gen_server).
 
 -export([start_link/2, info/0, renew/0]).
+-export([format_status/1, format_status/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 %% spawned processes
 -export([acceptor/3, conn_main/2]).
@@ -99,6 +100,14 @@ handle_info({'EXIT', _Acceptor, Reason}, S) ->
     {stop, {acceptor_exit, Reason}, S};
 handle_info(_, S) ->
     {noreply, S}.
+
+%% a crash report or sys:get_status must never print the bearer token
+format_status(Status) when is_map(Status) ->
+    maps:map(fun(state, #state{} = S) -> S#state{token = <<"<redacted>">>};
+                (_, V) -> V
+             end, Status).
+format_status(_Opt, [_PDict, #state{} = S]) -> S#state{token = <<"<redacted>">>};
+format_status(_Opt, [_PDict, S]) -> S.
 
 terminate(_, #state{listen = L, conns = Conns}) ->
     catch gen_tcp:close(L),
