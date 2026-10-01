@@ -15,6 +15,7 @@
   - Graph tools accept `format: "mermaid"`: the page is also returned as a ready-to-render Mermaid `graph TD`, built from the reported edges
   - New tool `topology_overview`: the application, its supervision tree, registered processes and owned approved ETS tables of one application in a single call (each part still subject to the project policy)
   - New tool `changes_since`: compares a retained collection with a fresh observation and reports added, removed and replaced (restarted) entities; removals from partial collections are marked unconfirmed
+  - New tools `top_ports` (local ports by queue size or traffic counters: driver name and owner only, never addresses or command lines) and `ets_summary` (ETS memory per owner process, no table names or contents); `runtime_summary` lists the connected nodes (host redacted by default); new edge type `owns_port`
   - MCP prompt `map_application`: the sample prompt served by the inspector itself (argument-checked, grants nothing)
   - A ready-to-use prompt to map an application with an agent: [HELP.MD](./HELP.MD#mcp-topology-inspector-ai-agents-debug-sessions-only) (*Sample prompt*)
 

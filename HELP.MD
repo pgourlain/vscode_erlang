@@ -178,7 +178,8 @@ ceilings:
 {mcp, [
     {allowed_tools, [<<"runtime_summary">>, <<"application_overview">>, <<"supervision_tree">>,
                      <<"process_info">>, <<"registered_processes">>, <<"ets_tables">>,
-                     <<"debug_session">>, <<"top_processes">>, <<"topology_overview">>, <<"changes_since">>]},
+                     <<"debug_session">>, <<"top_processes">>, <<"topology_overview">>, <<"changes_since">>,
+                     <<"top_ports">>, <<"ets_summary">>]},
     {allowed_ets_tables, []},          %% exact names, e.g. [<<"orders_index">>]; private tables never
     {limits, [{max_request_bytes, 16384}, {max_result_bytes, 262144}, {max_items, 500},
               {max_depth, 16}, {max_binary_bytes, 4096}, {max_traversal_depth, 8},
@@ -194,7 +195,7 @@ A malformed or duplicated term, an `mcp` term only inside a profile, or keys suc
 
 | Tool | Purpose |
 | --- | --- |
-| `runtime_summary` | OTP/ERTS versions, node (host redacted by default), uptime, schedulers, run queue, process/atom/port/ETS counts against their VM limits (`resources`), memory, session id |
+| `runtime_summary` | OTP/ERTS versions, node (host redacted by default), uptime, schedulers, run queue, process/atom/port/ETS counts against their VM limits (`resources`), connected node names (host redacted by default), memory, session id |
 | `application_overview` | started applications, versions, declared dependencies, root supervisor ids, optional module names/behaviours; `application`, `includeModules`, `cursor` |
 | `supervision_tree` | typed `supervises` edges from an application/supervisor id or a named supervisor; child role, modules, restart/shutdown; `id`/`supervisor`, `maxDepth`, `includeModules`, `cursor` |
 | `registered_processes` | locally registered names with status/queue length and membership (`confirmed`/`inferred`/`unknown`); `application`, `cursor` |
@@ -202,6 +203,8 @@ A malformed or duplicated term, an `mcp` term only inside a profile, or keys suc
 | `ets_tables` | metadata of the approved named tables (protection, type, owner, size, memory in words and bytes) - never keys or values |
 | `topology_overview` | one call for one application (`name` or `application` id): the application, its supervision tree with child counts, registered processes and the approved ETS tables they own, as one collection. Parts whose own tool is not allowed by the policy are left out (`policy_denied` omission) |
 | `changes_since` | what changed since an earlier collection (`collectionId`): added, removed and replaced (restarted: same child, new id) entities, with `absence: unconfirmed` for removals from a partial collection. The baseline is only retained for `collection_ttl_ms` (30 s by default) and 2 collections: compare soon after the first call, else `baseline_expired` |
+| `top_ports` | local ports ranked by queue size, bytes in or bytes out (`sortBy`, `limit` up to 50): driver name, counters, queue size and the owner process (`owns_port` edge). Never addresses, command lines, paths or data; a non-driver port (e.g. a spawned program) is `<redacted>` |
+| `ets_summary` | ETS memory per owner process, largest first (`limit` up to 50): table count and memory in words/bytes, plus node totals. No table name, key or value, no table inventory (use `ets_tables` for approved tables) |
 | `top_processes` | the hottest local processes ranked by message queue length, reductions or memory (`sortBy`, `limit` up to 50): status, current function, initial call, name, membership. Bounded point-in-time scan, never mailbox/state |
 | `debug_session` | launch/attach, interpreted modules, breakpoint locations (module and line), processes currently stopped at a breakpoint (`pausedProcesses`: process id, module, line) |
 
@@ -216,7 +219,7 @@ Graph tools return a versioned envelope: `schemaVersion`, `sessionId`, `collecti
 `startedAt`, `finishedAt`, `scope` (with `limitations`), `entities`, `relationships`,
 `complete`, `truncated`, `omissions`, `nextCursor`. Entity kinds: `application`, `process`,
 `module`, `ets_table` (a supervisor is a process with `role: supervisor`). Edge types:
-`depends_on`, `supervises`, `owns_table`, `linked_to`, `monitors`, `belongs_to`, `uses_module`, each
+`depends_on`, `supervises`, `owns_table`, `owns_port`, `linked_to`, `monitors`, `belongs_to`, `uses_module`, each
 with `evidence`, `observedAt` and `confidence` (`confirmed`/`inferred`/`unknown`). Links and
 monitors never imply supervision or message traffic. IDs are opaque, valid only within the session
 and change when a process restarts or a table is recreated. A collection is an observation

@@ -26,6 +26,7 @@
 -define(SUMMARY_PAGE, 100).
 -define(MAX_SCANNED, 200000).
 -define(MAX_TOP, 50).
+-define(MAX_ETS_SCAN, 50000).
 
 %%------------------------------------------------------------------------------
 %% Entry point
@@ -67,6 +68,8 @@ run(<<"supervision_tree">>, Args, Ctx) -> graph_tool(<<"supervision_tree">>, bui
 run(<<"registered_processes">>, Args, Ctx) -> graph_tool(<<"registered_processes">>, builder(<<"registered_processes">>), Args, Ctx);
 run(<<"process_info">>, Args, Ctx) -> tool_process_info(Args, Ctx);
 run(<<"ets_tables">>, Args, Ctx) -> graph_tool(<<"ets_tables">>, builder(<<"ets_tables">>), Args, Ctx);
+run(<<"top_ports">>, Args, Ctx) -> graph_tool(<<"top_ports">>, builder(<<"top_ports">>), Args, Ctx);
+run(<<"ets_summary">>, Args, Ctx) -> graph_tool(<<"ets_summary">>, builder(<<"ets_summary">>), Args, Ctx);
 run(<<"changes_since">>, Args, Ctx) -> graph_tool(<<"changes_since">>, builder(<<"changes_since">>), Args, Ctx);
 run(<<"topology_overview">>, Args, Ctx) -> graph_tool(<<"topology_overview">>, builder(<<"topology_overview">>), Args, Ctx);
 run(<<"top_processes">>, Args, Ctx) -> graph_tool(<<"top_processes">>, builder(<<"top_processes">>), Args, Ctx);
@@ -78,7 +81,9 @@ builder(<<"registered_processes">>) -> fun registered_processes_build/2;
 builder(<<"ets_tables">>) -> fun ets_tables_build/2;
 builder(<<"top_processes">>) -> fun top_processes_build/2;
 builder(<<"topology_overview">>) -> fun topology_overview_build/2;
-builder(<<"changes_since">>) -> fun changes_since_build/2.
+builder(<<"changes_since">>) -> fun changes_since_build/2;
+builder(<<"top_ports">>) -> fun top_ports_build/2;
+builder(<<"ets_summary">>) -> fun ets_summary_build/2.
 
 %% Graph tools build a Builder (entities, relationships, omissions) and a scope;
 %% finish_graph retains it as a collection and renders the first page.
@@ -144,6 +149,7 @@ runtime_summary(Args, _Ctx) ->
            <<"uptimeMs">> => Uptime,
            <<"schedulers">> => erlang:system_info(schedulers),
            <<"processCount">> => erlang:system_info(process_count),
+           <<"connectedNodes">> => connected_nodes(Redact),
            <<"schedulersOnline">> => erlang:system_info(schedulers_online),
            <<"runQueue">> => erlang:statistics(run_queue),
            <<"resources">> => #{<<"processes">> => resource(process_count, process_limit),
@@ -158,6 +164,20 @@ runtime_summary(Args, _Ctx) ->
                              <<"atom">> => proplists:get_value(atom, Mem),
                              <<"binary">> => proplists:get_value(binary, Mem),
                              <<"ets">> => proplists:get_value(ets, Mem)}}}.
+
+%% Names of the visible connected nodes (hidden nodes such as the debugger helper are
+%% not listed by nodes/0); the host part is redacted like the node's own name.
+connected_nodes(Redact) ->
+    Nodes = nodes(),
+    #{<<"count">> => length(Nodes),
+      <<"names">> => [peer_text(N, Redact) || N <- lists:sublist(lists:sort(Nodes), 50)]}.
+
+peer_text(Node, false) -> atom_to_binary(Node, utf8);
+peer_text(Node, true) ->
+    case binary:split(atom_to_binary(Node, utf8), <<"@">>) of
+        [Name, _Host] -> <<Name/binary, "@<redacted>">>;
+        [Name] -> Name
+    end.
 
 %% {count, limit, usedPercent}: how close the node is to a VM limit; absent
 %% (null) on an OTP release that does not report it.
@@ -403,7 +423,7 @@ mermaid_edge(#{<<"type">> := Type, <<"from">> := F, <<"to">> := T}) ->
     [<<"    ">>, mermaid_id(F), <<" ">>, Arrow, <<"|">>, mermaid_text(Type), <<"| ">>, mermaid_id(T), <<"\n">>].
 
 mermaid_label(E) ->
-    first_binary([maps:get(K, E, null) || K <- [<<"name">>, <<"childId">>, <<"pid">>, <<"id">>]]).
+    first_binary([maps:get(K, E, null) || K <- [<<"name">>, <<"driver">>, <<"childId">>, <<"pid">>, <<"id">>]]).
 
 mermaid_detail(E) ->
     Parts = [V || K <- [<<"role">>, <<"restart">>, <<"childState">>], V <- [maps:get(K, E, null)],
@@ -1434,12 +1454,15 @@ rank_keys([Pid | T] = Pids, Item, Self, Ctx, N, Acc) ->
     case N rem 1000 =:= 0 andalso N > 0 andalso remaining(Ctx) =:= 0 of
         true -> {Acc, length(Pids)};
         false ->
-            Acc1 = case Pid =/= Self andalso erlang:process_info(Pid, Item) of
+            Acc1 = case Pid =/= Self andalso rank_value(Pid, Item) of
                        {Item, V} when is_integer(V) -> [{V, Pid} | Acc];
                        _ -> Acc
                    end,
             rank_keys(T, Item, Self, Ctx, N + 1, Acc1)
     end.
+
+rank_value(Port, Item) when is_port(Port) -> erlang:port_info(Port, Item);
+rank_value(Pid, Item) -> erlang:process_info(Pid, Item).
 
 top_entry(Pid, SortBy, Rank, Masters, B) ->
     Items = [registered_name, status, current_function, initial_call, reductions, memory, message_queue_len],
@@ -1472,6 +1495,159 @@ top_entity(Pid, Info, SortBy, Rank, Masters, B) ->
                <<"membership">> => #{<<"confidence">> => Conf, <<"evidence">> => Evidence}},
     {_, B1} = process_entity(Pid, Fields, B),
     {ok, B1}.
+
+%%------------------------------------------------------------------------------
+%% top_ports: local ports ranked by queue size / bytes in / bytes out. Only the
+%% driver name (never an address, command line or path), counters and the owner.
+%%------------------------------------------------------------------------------
+
+top_ports_build(Args, Ctx) ->
+    SortBy = case maps:get(<<"sortBy">>, Args, <<"queue_size">>) of
+                 <<"input">> -> input;
+                 <<"output">> -> output;
+                 _ -> queue_size
+             end,
+    Limit = min(maps:get(<<"limit">>, Args, 10), ?MAX_TOP),
+    All = erlang:ports(),
+    Total = length(All),
+    {Scan, Cut} = case Total > ?MAX_SCANNED of
+                      true -> {lists:sublist(All, ?MAX_SCANNED), Total - ?MAX_SCANNED};
+                      false -> {All, 0}
+                  end,
+    {Keyed, Unscanned} = rank_keys(Scan, SortBy, self(), Ctx, 0, []),
+    Ranked = lists:sublist(lists:reverse(lists:sort(Keyed)), Limit),
+    {B1, Gone, _} = lists:foldl(
+                      fun({_, Port}, {Acc, G, Rank}) ->
+                              case port_entry(Port, SortBy, Rank, Acc) of
+                                  gone -> {Acc, G + 1, Rank};
+                                  {ok, Acc1} -> {Acc1, G, Rank + 1}
+                              end
+                      end, {new_b(), 0, 1}, Ranked),
+    B2 = scan_omissions(B1, Gone, Unscanned, Cut, <<"ports">>),
+    Scope = #{<<"tool">> => <<"top_ports">>,
+              <<"sortBy">> => atom_to_binary(SortBy, utf8),
+              <<"limit">> => Limit,
+              <<"portCount">> => Total,
+              <<"limitations">> =>
+                  [<<"A point-in-time scan, not an atomic snapshot: ports open and close while it runs.">>,
+                   <<"Only the driver name, byte counters, queue size and the owner process are reported; addresses, command lines, paths and data are never read.">>,
+                   <<"driver is <redacted> for ports that are not a plain driver name (for example a spawned program).">>,
+                   <<"owns_port links a port to its connected process; it is not evidence of traffic.">>]},
+    {ok, Scope, B2}.
+
+port_entry(Port, SortBy, Rank, B) ->
+    Items = [name, connected, input, output, queue_size, registered_name],
+    %% port_info/2 takes one item at a time; a closed port answers undefined
+    Info = [I || Item <- Items, I <- [erlang:port_info(Port, Item)], I =/= undefined],
+    case erlang:port_info(Port, name) of
+        undefined -> gone;
+        _ ->
+            PId = mcp_store:entity_id(process, {port, Port}),
+            Fields = #{<<"kind">> => <<"process">>, <<"role">> => <<"port">>, <<"pid">> => null,
+                       <<"name">> => case lists:keyfind(registered_name, 1, Info) of
+                                         {registered_name, N} when is_atom(N) -> bin(N);
+                                         _ -> null
+                                     end,
+                       <<"alive">> => true,
+                       <<"rank">> => Rank,
+                       <<"rankedBy">> => atom_to_binary(SortBy, utf8),
+                       <<"driver">> => driver_name(proplists:get_value(name, Info)),
+                       <<"input">> => proplists:get_value(input, Info, 0),
+                       <<"output">> => proplists:get_value(output, Info, 0),
+                       <<"queueSize">> => proplists:get_value(queue_size, Info, 0),
+                       <<"bytesUnit">> => <<"bytes">>},
+            B1 = add_entity(B, PId, Fields),
+            case proplists:get_value(connected, Info) of
+                Owner when is_pid(Owner), node(Owner) =:= node() ->
+                    {OwnerId, B2} = process_entity(Owner, #{<<"role">> => <<"unknown">>}, B1),
+                    {ok, add_rel(B2, <<"owns_port">>, OwnerId, PId, <<"port_info connected">>, <<"confirmed">>)};
+                _ -> {ok, B1}
+            end
+    end.
+
+driver_name(Name) when is_list(Name) ->
+    case re:run(Name, "^[a-z][a-z0-9_]{0,31}$", [{capture, none}]) of
+        match -> list_to_binary(Name);
+        nomatch -> <<"<redacted>">>
+    end;
+driver_name(_) -> <<"<redacted>">>.
+
+%% omissions shared by the scanning tools
+scan_omissions(B, Gone, Unscanned, Cut, What) ->
+    B1 = case Gone of
+             0 -> B;
+             _ -> add_omission(B, <<"disappeared">>, Gone, undefined,
+                               <<"ranked ", What/binary, " that ended before they could be described">>, false)
+         end,
+    B2 = case Unscanned of
+             0 -> B1;
+             _ -> add_omission(B1, <<"timeout">>, Unscanned, undefined,
+                               <<"the time budget ended the scan; the ranking only covers the ", What/binary,
+                                 " scanned so far">>, false)
+         end,
+    case Cut of
+        0 -> B2;
+        _ -> add_omission(B2, <<"limit_reached">>, Cut, undefined,
+                          <<"more ", What/binary, " than the scan limit; the ranking only covers the first ones">>, false)
+    end.
+
+%%------------------------------------------------------------------------------
+%% ets_summary: ETS memory per owner process, without any table name, key or value
+%%------------------------------------------------------------------------------
+
+ets_summary_build(Args, Ctx) ->
+    Limit = min(maps:get(<<"limit">>, Args, 10), ?MAX_TOP),
+    All = ets:all(),
+    Total = length(All),
+    {Scan, Cut} = case Total > ?MAX_ETS_SCAN of
+                      true -> {lists:sublist(All, ?MAX_ETS_SCAN), Total - ?MAX_ETS_SCAN};
+                      false -> {All, 0}
+                  end,
+    {Owners, Unscanned} = ets_owners(Scan, Ctx, 0, #{}),
+    WordSize = erlang:system_info(wordsize),
+    TotalWords = lists:sum([W || {_, W} <- maps:values(Owners)]),
+    Ranked = lists:sublist(lists:reverse(lists:sort([{W, C, O} || {O, {C, W}} <- maps:to_list(Owners)])), Limit),
+    Masters = masters(Ctx),
+    {B1, _} = lists:foldl(
+                fun({Words, Count, Owner}, {Acc, Rank}) ->
+                        {Conf, App, Evidence} = membership(Owner, #{}, Masters),
+                        Fields = #{<<"role">> => <<"unknown">>,
+                                   <<"rank">> => Rank,
+                                   <<"application">> => case App of undefined -> null; _ -> bin(App) end,
+                                   <<"membership">> => #{<<"confidence">> => Conf, <<"evidence">> => Evidence},
+                                   <<"ets">> => #{<<"tables">> => Count, <<"memory">> => Words,
+                                                  <<"memoryUnit">> => <<"words">>,
+                                                  <<"memoryBytes">> => Words * WordSize}},
+                        {_, Acc1} = process_entity(Owner, Fields, Acc),
+                        {Acc1, Rank + 1}
+                end, {new_b(), 1}, Ranked),
+    B2 = scan_omissions(B1, 0, Unscanned, Cut, <<"tables">>),
+    Scope = #{<<"tool">> => <<"ets_summary">>,
+              <<"limit">> => Limit,
+              <<"tableCount">> => Total,
+              <<"ownerCount">> => maps:size(Owners),
+              <<"totalMemory">> => #{<<"words">> => TotalWords, <<"bytes">> => TotalWords * WordSize},
+              <<"limitations">> =>
+                  [<<"Per-owner aggregates only: no table name, key, object or value is read or returned, and no table inventory is listed.">>,
+                   <<"Private tables are counted in the aggregates (their owner and size, nothing else).">>,
+                   <<"A point-in-time scan, not an atomic snapshot; tables are created and deleted while it runs.">>,
+                   <<"For the metadata of a specific table use ets_tables (approved names only).">>]},
+    {ok, Scope, B2}.
+
+%% -> {#{OwnerPid => {Tables, Words}}, NotScanned}
+ets_owners([], _Ctx, _N, Acc) -> {Acc, 0};
+ets_owners([Tab | T] = Tabs, Ctx, N, Acc) ->
+    case N rem 500 =:= 0 andalso N > 0 andalso remaining(Ctx) =:= 0 of
+        true -> {Acc, length(Tabs)};
+        false ->
+            Acc1 = try {ets:info(Tab, owner), ets:info(Tab, memory)} of
+                       {Owner, Words} when is_pid(Owner), node(Owner) =:= node(), is_integer(Words) ->
+                           maps:update_with(Owner, fun({C, W}) -> {C + 1, W + Words} end, {1, Words}, Acc);
+                       _ -> Acc
+                   catch _:_ -> Acc
+                   end,
+            ets_owners(T, Ctx, N + 1, Acc1)
+    end.
 
 %%------------------------------------------------------------------------------
 %% ets_tables (metadata of approved named tables only)

@@ -34,6 +34,8 @@ all() ->
      topology_overview_leaves_out_parts_the_policy_denies,
      prompt_guides_an_agent_and_checks_its_argument,
      changes_since_reports_replaced_and_removed_children,
+     top_ports_reports_drivers_and_owners_only,
+     ets_summary_aggregates_per_owner_without_names,
      paused_process_is_reported_from_debugger_evidence,
      restart_changes_identity,
      pagination_cursors_and_retention,
@@ -163,7 +165,7 @@ decode(Bin) ->
 %% unless the case chooses the detail itself (see agent_summary_is_compact).
 call(Config, Tool, Args0) when is_map(Args0) ->
     Graph = [<<"application_overview">>, <<"supervision_tree">>, <<"registered_processes">>,
-             <<"process_info">>, <<"ets_tables">>, <<"top_processes">>, <<"topology_overview">>, <<"changes_since">>],
+             <<"process_info">>, <<"ets_tables">>, <<"top_processes">>, <<"topology_overview">>, <<"changes_since">>, <<"top_ports">>, <<"ets_summary">>],
     Args = case lists:member(Tool, Graph) andalso not maps:is_key(<<"detail">>, Args0) of
                true -> Args0#{<<"detail">> => <<"full">>};
                false -> Args0
@@ -319,7 +321,7 @@ initialize_negotiates_and_lists_only_readonly_tools(Config) ->
     #{<<"result">> := #{<<"tools">> := Tools}} = rpc(Config, <<"tools/list">>, #{}),
     Names = lists:sort([maps:get(<<"name">>, T) || T <- Tools]),
     ?assertEqual(lists:sort(mcp_policy:all_tools()), Names),
-    ?assertEqual(10, length(Tools)),
+    ?assertEqual(12, length(Tools)),
     [begin
          ?assertMatch(#{<<"inputSchema">> := #{<<"type">> := <<"object">>, <<"additionalProperties">> := false},
                         <<"outputSchema">> := #{<<"type">> := <<"object">>},
@@ -378,6 +380,7 @@ runtime_summary_redacts_node_host(Config) ->
     ?assert(maps:get(<<"processCount">>, S) > 10),
     ?assert(maps:get(<<"uptimeMs">>, S) >= 0),
     ?assert(maps:get(<<"runQueue">>, S) >= 0),
+    ?assertMatch(#{<<"count">> := N, <<"names">> := L} when is_integer(N) andalso is_list(L), maps:get(<<"connectedNodes">>, S)),
     ?assertEqual(erlang:system_info(schedulers_online), maps:get(<<"schedulersOnline">>, S)),
     #{<<"processes">> := #{<<"count">> := PC, <<"limit">> := PL, <<"usedPercent">> := PP},
       <<"atoms">> := #{<<"count">> := AC, <<"limit">> := AL}} = maps:get(<<"resources">>, S),
@@ -1141,6 +1144,78 @@ changes_since_reports_replaced_and_removed_children(Config) ->
                  call(Config, <<"changes_since">>, #{<<"collectionId">> => maps:get(<<"collectionId">>, D)})),
     lists:foreach(fun({_, P, _, _}) -> supervisor:terminate_child(mcp_fx_dyn_sup, P) end,
                   supervisor:which_children(mcp_fx_dyn_sup)).
+
+top_ports_reports_drivers_and_owners_only(Config) ->
+    {ok, L} = gen_tcp:listen(0, [binary, {active, false}, {ip, {127, 0, 0, 1}}]),
+    {ok, LPort} = inet:port(L),
+    {ok, C} = gen_tcp:connect({127, 0, 0, 1}, LPort, [binary, {active, false}]),
+    {ok, A} = gen_tcp:accept(L, 2000),
+    ok = gen_tcp:send(C, binary:copy(<<"SENTINEL_PORT_DATA">>, 2000)),
+    Cat = open_port({spawn_executable, os:find_executable("cat")}, [binary]),
+    try
+        S = ok_call(Config, <<"top_ports">>, #{<<"sortBy">> => <<"output">>, <<"limit">> => 50}),
+        Ents = maps:get(<<"entities">>, S),
+        Ports = [E || #{<<"role">> := <<"port">>} = E <- Ents],
+        ?assert(length(Ports) >= 3),
+        ?assertEqual(lists:seq(1, length(Ports)), [maps:get(<<"rank">>, E) || E <- Ports]),
+        Outs = [maps:get(<<"output">>, E) || E <- Ports],
+        ?assertEqual(lists:reverse(lists:sort(Outs)), Outs),
+        Drivers = [maps:get(<<"driver">>, E) || E <- Ports],
+        ?assert(lists:member(<<"tcp_inet">>, Drivers)),
+        %% a spawned program is never named: no command line or path in the result
+        ?assert(lists:member(<<"<redacted>">>, Drivers)),
+        Dump = iolist_to_binary(io_lib:format("~p", [S])),
+        [?assertEqual(nomatch, binary:match(Dump, X))
+         || X <- [list_to_binary(os:find_executable("cat")), <<"SENTINEL">>, <<"127.0.0.1">>]],
+        %% owner edge: the test process owns the sockets and the program port
+        Owns = [R || #{<<"type">> := <<"owns_port">>} = R <- maps:get(<<"relationships">>, S)],
+        ?assert(length(Owns) >= 3),
+        [?assertMatch(#{<<"evidence">> := <<"port_info connected">>, <<"confidence">> := <<"confirmed">>}, R) || R <- Owns],
+        Allowed = [<<"id">>, <<"kind">>, <<"role">>, <<"pid">>, <<"name">>, <<"alive">>, <<"rank">>, <<"rankedBy">>,
+                   <<"driver">>, <<"input">>, <<"output">>, <<"queueSize">>, <<"bytesUnit">>],
+        [?assertEqual([], maps:keys(E) -- Allowed) || E <- Ports],
+        ?assertMatch({rpc_error, -32602, _}, call(Config, <<"top_ports">>, #{<<"sortBy">> => <<"peer">>})),
+        ?assertMatch({rpc_error, -32602, _}, call(Config, <<"top_ports">>, #{<<"limit">> => 99}))
+    after
+        catch port_close(Cat),
+        [catch gen_tcp:close(X) || X <- [A, C, L]]
+    end.
+
+ets_summary_aggregates_per_owner_without_names(Config) ->
+    Self = self(),
+    Big = spawn(fun() ->
+                        ets:new(mcp_fx_hidden_big, [named_table, public]),
+                        [ets:insert(mcp_fx_hidden_big, {I, "SENTINEL_BIG_VALUE", lists:seq(1, 20)}) || I <- lists:seq(1, 5000)],
+                        Self ! ready,
+                        receive stop -> ok end
+                end),
+    receive ready -> ok after 5000 -> ct:fail(no_big_table) end,
+    try
+        S = ok_call(Config, <<"ets_summary">>, #{<<"limit">> => 5}),
+        Ents = maps:get(<<"entities">>, S),
+        [First | _] = Ents,
+        ?assertEqual(5, length(Ents)),
+        %% the biggest owner is first, with one table
+        ?assertEqual(list_to_binary(pid_to_list(Big)), maps:get(<<"pid">>, First)),
+        #{<<"tables">> := 1, <<"memory">> := W, <<"memoryUnit">> := <<"words">>, <<"memoryBytes">> := Bytes} =
+            maps:get(<<"ets">>, First),
+        ?assert(W > 1000),
+        ?assertEqual(W * erlang:system_info(wordsize), Bytes),
+        ?assertEqual(1, maps:get(<<"rank">>, First)),
+        Mems = [maps:get(<<"memory">>, maps:get(<<"ets">>, E)) || E <- Ents],
+        ?assertEqual(lists:reverse(lists:sort(Mems)), Mems),
+        #{<<"tableCount">> := T, <<"ownerCount">> := O, <<"totalMemory">> := #{<<"words">> := TW, <<"bytes">> := _}} =
+            maps:get(<<"scope">>, S),
+        ?assert(T >= 3 andalso O >= 2 andalso TW >= W),
+        %% aggregates only: no table name (named, private or hidden), key or value anywhere
+        Dump = iolist_to_binary(io_lib:format("~p", [S])),
+        [?assertEqual(nomatch, binary:match(Dump, X))
+         || X <- [<<"mcp_fx_hidden_big">>, <<"mcp_fx_orders">>, <<"mcp_fx_private">>, <<"SENTINEL">>]],
+        ?assertMatch({rpc_error, -32602, _}, call(Config, <<"ets_summary">>, #{<<"limit">> => 51})),
+        ?assertMatch({rpc_error, -32602, _}, call(Config, <<"ets_summary">>, #{<<"table">> => <<"x">>}))
+    after
+        exit(Big, kill)
+    end.
 
 prompt_guides_an_agent_and_checks_its_argument(Config) ->
     #{<<"result">> := #{<<"prompts">> := [P]}} = rpc(Config, <<"prompts/list">>, #{}),

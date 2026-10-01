@@ -104,6 +104,7 @@ def(<<"runtime_summary">>) ->
            <<"otpRelease">> => str(), <<"ertsVersion">> => str(), <<"node">> => str(),
            <<"uptimeMs">> => int(), <<"schedulers">> => int(), <<"processCount">> => int(),
            <<"schedulersOnline">> => int(), <<"runQueue">> => int(),
+           <<"connectedNodes">> => #{<<"type">> => <<"object">>},
            <<"resources">> => #{<<"type">> => <<"object">>},
            <<"memory">> => #{<<"type">> => <<"object">>}},
          [<<"schemaVersion">>, <<"sessionId">>])};
@@ -200,6 +201,35 @@ def(<<"changes_since">>) ->
            <<"cursor">> => cursor_prop(),
            <<"detail">> => detail_prop(), <<"pageSize">> => page_size_prop(),
            <<"format">> => format_prop()}, [<<"collectionId">>]),
+     graph_output()};
+
+def(<<"top_ports">>) ->
+    {<<"Top ports">>,
+     <<"Rank the local ports of the node (sockets, files, spawned programs) by queue size, bytes in or bytes out and "
+       "return the top ones (default 10, max 50) with their driver name, byte counters, queue size and the owner "
+       "process (owns_port edge). Addresses, command lines, paths and data are never read; a port that is not a plain "
+       "driver name is reported as <redacted>. Point-in-time scan.">>,
+     obj(#{<<"sortBy">> => #{<<"type">> => <<"string">>,
+                             <<"enum">> => [<<"queue_size">>, <<"input">>, <<"output">>],
+                             <<"description">> => <<"Ranking criterion. Default queue_size.">>},
+           <<"limit">> => #{<<"type">> => <<"integer">>, <<"minimum">> => 1, <<"maximum">> => 50,
+                            <<"description">> => <<"Number of ports to return. Default 10.">>},
+           <<"cursor">> => cursor_prop(),
+           <<"detail">> => detail_prop(), <<"pageSize">> => page_size_prop(),
+           <<"format">> => format_prop()}, []),
+     graph_output()};
+
+def(<<"ets_summary">>) ->
+    {<<"ETS summary">>,
+     <<"ETS memory aggregated per owner process, largest first (default 10 owners, max 50): number of tables and "
+       "memory in words and bytes, with application membership evidence, plus node totals in the scope. No table "
+       "name, key, object or value is read and no table inventory is listed; use ets_tables for the metadata of a "
+       "specific approved table.">>,
+     obj(#{<<"limit">> => #{<<"type">> => <<"integer">>, <<"minimum">> => 1, <<"maximum">> => 50,
+                            <<"description">> => <<"Number of owners to return. Default 10.">>},
+           <<"cursor">> => cursor_prop(),
+           <<"detail">> => detail_prop(), <<"pageSize">> => page_size_prop(),
+           <<"format">> => format_prop()}, []),
      graph_output()};
 
 def(<<"top_processes">>) ->
