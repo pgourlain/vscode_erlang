@@ -16,6 +16,8 @@
   - New tool `topology_overview`: the application, its supervision tree, registered processes and owned approved ETS tables of one application in a single call (each part still subject to the project policy)
   - New tool `changes_since`: compares a retained collection with a fresh observation and reports added, removed and replaced (restarted) entities; removals from partial collections are marked unconfirmed
   - New tools `top_ports` (local ports by queue size or traffic counters: driver name and owner only, never addresses or command lines) and `ets_summary` (ETS memory per owner process, no table names or contents); `runtime_summary` lists the connected nodes (host redacted by default); new edge type `owns_port`
+  - Developer tier (opt-in, named in the project's `allowed_tools`): `process_state` (bounded `sys:get_state` of a gen_server/gen_statem/gen_event, never a supervisor), `mailbox_sample` (oldest messages) and `ets_sample` (a few rows of an approved table), with best-effort redaction of secret-like keys and URL credentials; `allowed_ets_tables` accepts `all`; limits can be raised above their defaults up to higher ceilings (e.g. `collection_ttl_ms` up to 10 min)
+  - Hardening: the bearer token and cursor secret no longer appear in crash reports, non-ASCII workspace paths find the project policy, `ets_summary` only counts approved tables, `top_ports` only names well-known drivers, inspector processes are excluded from the rankings, child ids are redacted
   - MCP prompt `map_application`: the sample prompt served by the inspector itself (argument-checked, grants nothing)
   - A ready-to-use prompt to map an application with an agent: [HELP.MD](./HELP.MD#mcp-topology-inspector-ai-agents-debug-sessions-only) (*Sample prompt*)
 

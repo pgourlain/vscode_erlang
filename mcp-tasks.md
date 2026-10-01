@@ -586,8 +586,10 @@ Decided with the user after the V1 work order, all within the read-only/metadata
 - `top_processes` (queue length / reductions / memory ranking), `top_ports` (queue size / traffic counters; driver name and owner only, never addresses or command lines), `ets_summary` (ETS memory per owner, no table names), `topology_overview` (one application in one collection; each part obeys its own tool's allowlist entry), `changes_since` (diff against a retained collection; baseline limited by `collection_ttl_ms` / `max_collections`).
 - Additive fields: `children` counts on supervisors (`supervisor:count_children`), `pausedProcesses` in `debug_session` and a `debugger` field in `process_info` (from `int:snapshot/0`; a supervisor that is itself stopped at a breakpoint is reported as `unavailable_while_paused`), run queue / VM resource usage / connected node names in `runtime_summary`, `format: "mermaid"` on graph tools.
 - New edge type `owns_port` (MAP-03 extension). New MCP prompt `map_application` (the only exception to "no prompts"; static text, argument-checked, grants nothing).
+- Developer tier (opt-in, only when named in the project's `allowed_tools`; returns a bounded, best-effort-redacted sample of application data, so it is outside the metadata-only V1 guardrail by design): `process_state` (`sys:get_state` of gen_server/gen_statem/gen_event, never a supervisor or a plain process), `mailbox_sample`, `ets_sample` (approved non-private tables). `allowed_ets_tables` may be `all`. Limits can be raised above their defaults up to fixed ceilings. See [mcp_security.md](./mcp_security.md).
+- Review fixes: `ets_summary` counts only approved tables, `top_ports` names only well-known drivers, `changes_since` observes with the baseline's detail, one time budget for `debug_session`, one tree walk in `topology_overview`, inspector processes excluded by module, redaction of child ids, token/secret hidden from crash reports, non-ASCII workspace paths, `\z` anchors.
 - Not added: restart intensity/period (no safe API), distributed traversal, tracing, any mutation.
-- Tests: `./rebar3 ct --dir apps/erlangbridge/test/mcp` (74 cases). Plain `./rebar3 ct` does not include this directory.
+- Tests: `./rebar3 ct --dir apps/erlangbridge/test/mcp` (83 cases). Plain `./rebar3 ct` does not include this directory.
 
 ## Acceptance Criteria
 

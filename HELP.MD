@@ -170,9 +170,8 @@ messages or business flows. Security model and residual risks: [mcp_security.md]
 
 **Project policy (optional)** - a literal top-level term in the *target project's* `rebar.config`
 (nearest file from the debug `cwd`, never above the workspace folder; no `rebar.config.script`,
-no profiles). It controls tools, tables and *lower* limits only; activation, host, port and
-credentials come only from the VS Code settings. The values below are the defaults and the hard
-ceilings:
+no profiles). It controls tools, tables and limits only; activation, host, port and
+credentials come only from the VS Code settings. The values below are the defaults:
 
 ```erlang
 {mcp, [
@@ -180,13 +179,45 @@ ceilings:
                      <<"process_info">>, <<"registered_processes">>, <<"ets_tables">>,
                      <<"debug_session">>, <<"top_processes">>, <<"topology_overview">>, <<"changes_since">>,
                      <<"top_ports">>, <<"ets_summary">>]},
-    {allowed_ets_tables, []},          %% exact names, e.g. [<<"orders_index">>]; private tables never
+    {allowed_ets_tables, []},          %% exact names, e.g. [<<"orders_index">>], or `all`; private tables never
     {limits, [{max_request_bytes, 16384}, {max_result_bytes, 262144}, {max_items, 500},
               {max_depth, 16}, {max_binary_bytes, 4096}, {max_traversal_depth, 8},
               {max_concurrency, 2}, {request_timeout_ms, 3000}, {collection_ttl_ms, 30000},
               {max_collection_bytes, 1048576}, {max_collections, 2}]}
 ]}.
 ```
+
+A limit can be raised above its default up to a hard ceiling (never beyond): `max_request_bytes` 65536,
+`max_result_bytes` 2097152, `max_items` 5000, `max_depth` 32, `max_binary_bytes` 65536,
+`max_traversal_depth` 16, `max_concurrency` 8, `request_timeout_ms` 15000, `collection_ttl_ms` 600000,
+`max_collection_bytes` 8388608, `max_collections` 16. Raising `collection_ttl_ms` and `max_collections`
+is what makes `changes_since` useful over a longer debugging session.
+
+**Developer tier (opt-in)** - on your own machine, with your own code, metadata alone is often not
+enough ("why is this process stuck?"). Three more tools return a *bounded sample of application
+data*; they are never enabled by default and must be named in `allowed_tools`. Remember that
+whatever a tool returns goes into the agent's context, i.e. to the model provider:
+
+```erlang
+{mcp, [
+    {allowed_tools, [<<"runtime_summary">>, <<"application_overview">>, <<"supervision_tree">>,
+                     <<"process_info">>, <<"top_processes">>, <<"topology_overview">>,
+                     <<"process_state">>, <<"mailbox_sample">>, <<"ets_sample">>]},
+    {allowed_ets_tables, all},          %% or exact names; also lets ets_summary count every non-private table
+    {limits, [{max_items, 2000}, {max_result_bytes, 1048576}, {request_timeout_ms, 10000},
+              {collection_ttl_ms, 300000}, {max_collections, 8}]}
+]}.
+```
+
+| Tool | Returns |
+| --- | --- |
+| `process_state` | `sys:get_state` of one gen_server / gen_statem / gen_event process (never a supervisor: its state holds the child start arguments; never a plain process: it is never sent a system message), bounded by depth, items and binary size. A process stopped at a breakpoint is reported as such |
+| `mailbox_sample` | queue length and the oldest few messages (default 5, max 20) of one process; a mailbox of more than 20000 messages is not copied |
+| `ets_sample` | a few objects (default 5, max 20) of one approved, non-private named table |
+
+Redaction is best effort: values of keys or map entries named like a secret (`password`, `token`,
+`secret`, `api_key`, `cookie`, `auth`...) and credentials in URLs (`scheme://user:pw@host`) are replaced,
+but a record without keys, or a secret in an unlabelled term, cannot be recognised.
 
 A malformed or duplicated term, an `mcp` term only inside a profile, or keys such as `enabled`,
 `host`, `port`, `required` or a token disable MCP for that session with an explanation.
@@ -204,9 +235,11 @@ A malformed or duplicated term, an `mcp` term only inside a profile, or keys suc
 | `topology_overview` | one call for one application (`name` or `application` id): the application, its supervision tree with child counts, registered processes and the approved ETS tables they own, as one collection. Parts whose own tool is not allowed by the policy are left out (`policy_denied` omission) |
 | `changes_since` | what changed since an earlier collection (`collectionId`): added, removed and replaced (restarted: same child, new id) entities, with `absence: unconfirmed` for removals from a partial collection. The baseline is only retained for `collection_ttl_ms` (30 s by default) and 2 collections: compare soon after the first call, else `baseline_expired` |
 | `top_ports` | local ports ranked by queue size, bytes in or bytes out (`sortBy`, `limit` up to 50): driver name, counters, queue size and the owner process (`owns_port` edge). Never addresses, command lines, paths or data; a non-driver port (e.g. a spawned program) is `<redacted>` |
-| `ets_summary` | ETS memory per owner process, largest first (`limit` up to 50): table count and memory in words/bytes, plus node totals. No table name, key or value, no table inventory (use `ets_tables` for approved tables) |
+| `ets_summary` | ETS memory per owner process, largest first (`limit` up to 50): table count and memory in words/bytes, plus node totals. Counts only tables approved by `allowed_ets_tables` (exact names or `all`), never private ones; no table name, key or value, no table inventory (use `ets_tables` for approved tables) |
 | `top_processes` | the hottest local processes ranked by message queue length, reductions or memory (`sortBy`, `limit` up to 50): status, current function, initial call, name, membership. Bounded point-in-time scan, never mailbox/state |
 | `debug_session` | launch/attach, interpreted modules, breakpoint locations (module and line), processes currently stopped at a breakpoint (`pausedProcesses`: process id, module, line) |
+
+The developer-tier tools above (`process_state`, `mailbox_sample`, `ets_sample`) are only listed when the project enables them.
 
 Graph tools also take `detail`, `pageSize` and `format`. `format: "mermaid"` adds a `mermaid` field (a `graph TD`
 of the returned page, built from the returned edges only) so that an agent can render the diagram without redrawing it. `detail: "summary"` (default) is meant for agents:
