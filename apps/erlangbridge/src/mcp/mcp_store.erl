@@ -9,7 +9,7 @@
 -export([start_link/2, start_link/3, stop/0]).
 -export([session_id/0, mode/0, config/0, started_at/0, now_ms/0]).
 -export([entity_id/2, resolve_id/1]).
--export([put_collection/5, fetch_collection/3, make_cursor/4, parse_cursor/3]).
+-export([put_collection/5, fetch_collection/3, fetch_collection_by_id/1, make_cursor/4, parse_cursor/3]).
 -export([acquire_slot/1, release_slot/1]).
 -export([note_member/3, member/1]).
 -export([stats/0, notify/1]).
@@ -74,6 +74,11 @@ put_collection(Tool, ArgsHash, Meta, Items, Ctx) ->
 fetch_collection(CollId, Tool, ArgsHash) ->
     gen_server:call(?SERVER, {fetch_collection, CollId, Tool, ArgsHash}).
 
+%% A retained collection by its id alone (used to diff against a baseline). The id is
+%% an unguessable per-session value; an expired or unknown id is {error, cursor_expired}.
+fetch_collection_by_id(CollId) when is_binary(CollId) -> gen_server:call(?SERVER, {fetch_by_id, CollId});
+fetch_collection_by_id(_) -> {error, cursor_expired}.
+
 make_cursor(CollId, Tool, ArgsHash, Offset) ->
     gen_server:call(?SERVER, {make_cursor, CollId, Tool, ArgsHash, Offset}).
 
@@ -133,6 +138,13 @@ handle_call({fetch_collection, CollId, Tool, ArgsHash}, _, S0) ->
             end,
     {reply, Reply, S};
 
+handle_call({fetch_by_id, CollId}, _, S0) ->
+    S = sweep_collections(S0),
+    Reply = case maps:find(CollId, S#state.collections) of
+                {ok, C} -> {ok, C};
+                error -> {error, cursor_expired}
+            end,
+    {reply, Reply, S};
 handle_call({make_cursor, CollId, Tool, ArgsHash, Offset}, _, S) ->
     {reply, sign_cursor(CollId, Tool, ArgsHash, Offset, S), S};
 handle_call({parse_cursor, Cursor, Tool, ArgsHash}, _, S) ->

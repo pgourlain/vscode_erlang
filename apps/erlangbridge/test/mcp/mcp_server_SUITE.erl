@@ -33,6 +33,7 @@ all() ->
      topology_overview_maps_one_application_in_one_call,
      topology_overview_leaves_out_parts_the_policy_denies,
      prompt_guides_an_agent_and_checks_its_argument,
+     changes_since_reports_replaced_and_removed_children,
      paused_process_is_reported_from_debugger_evidence,
      restart_changes_identity,
      pagination_cursors_and_retention,
@@ -162,7 +163,7 @@ decode(Bin) ->
 %% unless the case chooses the detail itself (see agent_summary_is_compact).
 call(Config, Tool, Args0) when is_map(Args0) ->
     Graph = [<<"application_overview">>, <<"supervision_tree">>, <<"registered_processes">>,
-             <<"process_info">>, <<"ets_tables">>, <<"top_processes">>, <<"topology_overview">>],
+             <<"process_info">>, <<"ets_tables">>, <<"top_processes">>, <<"topology_overview">>, <<"changes_since">>],
     Args = case lists:member(Tool, Graph) andalso not maps:is_key(<<"detail">>, Args0) of
                true -> Args0#{<<"detail">> => <<"full">>};
                false -> Args0
@@ -318,7 +319,7 @@ initialize_negotiates_and_lists_only_readonly_tools(Config) ->
     #{<<"result">> := #{<<"tools">> := Tools}} = rpc(Config, <<"tools/list">>, #{}),
     Names = lists:sort([maps:get(<<"name">>, T) || T <- Tools]),
     ?assertEqual(lists:sort(mcp_policy:all_tools()), Names),
-    ?assertEqual(9, length(Tools)),
+    ?assertEqual(10, length(Tools)),
     [begin
          ?assertMatch(#{<<"inputSchema">> := #{<<"type">> := <<"object">>, <<"additionalProperties">> := false},
                         <<"outputSchema">> := #{<<"type">> := <<"object">>},
@@ -1102,6 +1103,44 @@ topology_overview_leaves_out_parts_the_policy_denies(Config) ->
     ?assertEqual(2, length(Denied)),
     ?assertEqual([], [E || #{<<"kind">> := <<"ets_table">>} = E <- maps:get(<<"entities">>, S)]),
     ?assertEqual(false, maps:get(<<"complete">>, S)).
+
+changes_since_reports_replaced_and_removed_children(Config) ->
+    ok = mcp_fixture_sup:add_dynamic(2),
+    RootId = fixture_root_id(Config),
+    Args = #{<<"id">> => RootId},
+    Base = ok_call(Config, <<"supervision_tree">>, Args),
+    BaseId = maps:get(<<"collectionId">>, Base),
+    BaseEnts = entities([Base]),
+    OldB = hd([E || #{<<"childId">> := <<"worker_b">>} = E <- BaseEnts]),
+    %% nothing happened: no change, and the diff itself is complete
+    Same = ok_call(Config, <<"changes_since">>, #{<<"collectionId">> => BaseId}),
+    ?assertMatch(#{<<"summary">> := #{<<"added">> := 0, <<"removed">> := 0, <<"replaced">> := 0}}, maps:get(<<"scope">>, Same)),
+    ?assertEqual([], maps:get(<<"entities">>, Same)),
+    %% a restarted worker is `replaced` (new id), a terminated dynamic worker is `removed`
+    exit(hd([P || {worker_b, P, _, _} <- supervisor:which_children(mcp_fx_sub_sup), is_pid(P)]), kill),
+    wait_until(fun() -> [P || {worker_b, P, _, _} <- supervisor:which_children(mcp_fx_sub_sup), is_pid(P)] =/= [] end),
+    [{_, Dyn, _, _} | _] = supervisor:which_children(mcp_fx_dyn_sup),
+    ok = supervisor:terminate_child(mcp_fx_dyn_sup, Dyn),
+    D = ok_call(Config, <<"changes_since">>, #{<<"collectionId">> => BaseId}),
+    ?assertMatch(#{<<"summary">> := #{<<"replaced">> := 1, <<"removed">> := 1, <<"added">> := 0}}, maps:get(<<"scope">>, D)),
+    Ents = maps:get(<<"entities">>, D),
+    [Replaced] = [E || #{<<"change">> := <<"replaced">>} = E <- Ents],
+    ?assertMatch(#{<<"childId">> := <<"worker_b">>, <<"previousId">> := _}, Replaced),
+    ?assertEqual(id_of(OldB), maps:get(<<"previousId">>, Replaced)),
+    ?assertNotEqual(id_of(OldB), id_of(Replaced)),
+    [Removed] = [E || #{<<"change">> := <<"removed">>} = E <- Ents],
+    ?assertMatch(#{<<"absence">> := <<"observed">>}, Removed),
+    %% the edge that leads to the replacement is included; unchanged children are not listed
+    ?assertEqual([<<"worker_b">>], [maps:get(<<"childId">>, E) || #{<<"childId">> := C} = E <- Ents, C =:= <<"worker_b">>]),
+    ?assertEqual(nomatch, re:run(iolist_to_binary(io_lib:format("~p", [D])), "SENTINEL")),
+    %% unknown baselines, strict arguments, and a changes_since collection is not a baseline
+    ?assertMatch({tool_error, #{<<"error">> := #{<<"code">> := <<"baseline_expired">>}}},
+                 call(Config, <<"changes_since">>, #{<<"collectionId">> => <<"c_000000000000">>})),
+    ?assertMatch({rpc_error, -32602, _}, call(Config, <<"changes_since">>, #{})),
+    ?assertMatch({tool_error, #{<<"error">> := #{<<"code">> := C}}} when C =:= <<"invalid_baseline">> orelse C =:= <<"baseline_expired">>,
+                 call(Config, <<"changes_since">>, #{<<"collectionId">> => maps:get(<<"collectionId">>, D)})),
+    lists:foreach(fun({_, P, _, _}) -> supervisor:terminate_child(mcp_fx_dyn_sup, P) end,
+                  supervisor:which_children(mcp_fx_dyn_sup)).
 
 prompt_guides_an_agent_and_checks_its_argument(Config) ->
     #{<<"result">> := #{<<"prompts">> := [P]}} = rpc(Config, <<"prompts/list">>, #{}),

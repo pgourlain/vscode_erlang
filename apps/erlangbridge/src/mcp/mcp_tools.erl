@@ -188,6 +188,20 @@ def(<<"topology_overview">>) ->
            <<"format">> => format_prop()}, []),
      graph_output()};
 
+def(<<"changes_since">>) ->
+    {<<"Changes since a collection">>,
+     <<"Observe again the tool and arguments of an earlier collection (collectionId of a previous graph result) and "
+       "return only what changed: added, removed and replaced entities (replaced = the same logical child with a new "
+       "id, i.e. restarted or recreated; previousId names the old one), plus the edges leading to new entities. "
+       "A removal from a partial collection is marked absence=unconfirmed. The baseline is only retained for a short "
+       "time (collection_ttl_ms, few collections): compare soon after the first call, otherwise baseline_expired.">>,
+     obj(#{<<"collectionId">> => #{<<"type">> => <<"string">>, <<"maxLength">> => 64,
+                                   <<"description">> => <<"collectionId of the baseline (from a previous graph result).">>},
+           <<"cursor">> => cursor_prop(),
+           <<"detail">> => detail_prop(), <<"pageSize">> => page_size_prop(),
+           <<"format">> => format_prop()}, [<<"collectionId">>]),
+     graph_output()};
+
 def(<<"top_processes">>) ->
     {<<"Top processes">>,
      <<"Rank the local processes of the node by message queue length, reductions or memory and return the top ones "

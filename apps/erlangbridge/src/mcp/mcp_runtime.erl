@@ -62,14 +62,23 @@ call(Tool, Args, Ctx0) ->
 
 run(<<"runtime_summary">>, Args, Ctx) -> runtime_summary(Args, Ctx);
 run(<<"debug_session">>, _Args, Ctx) -> debug_session(Ctx);
-run(<<"application_overview">>, Args, Ctx) -> graph_tool(<<"application_overview">>, fun application_overview_build/2, Args, Ctx);
-run(<<"supervision_tree">>, Args, Ctx) -> graph_tool(<<"supervision_tree">>, fun supervision_tree_build/2, Args, Ctx);
-run(<<"registered_processes">>, Args, Ctx) -> graph_tool(<<"registered_processes">>, fun registered_processes_build/2, Args, Ctx);
+run(<<"application_overview">>, Args, Ctx) -> graph_tool(<<"application_overview">>, builder(<<"application_overview">>), Args, Ctx);
+run(<<"supervision_tree">>, Args, Ctx) -> graph_tool(<<"supervision_tree">>, builder(<<"supervision_tree">>), Args, Ctx);
+run(<<"registered_processes">>, Args, Ctx) -> graph_tool(<<"registered_processes">>, builder(<<"registered_processes">>), Args, Ctx);
 run(<<"process_info">>, Args, Ctx) -> tool_process_info(Args, Ctx);
-run(<<"ets_tables">>, Args, Ctx) -> graph_tool(<<"ets_tables">>, fun ets_tables_build/2, Args, Ctx);
-run(<<"topology_overview">>, Args, Ctx) -> graph_tool(<<"topology_overview">>, fun topology_overview_build/2, Args, Ctx);
-run(<<"top_processes">>, Args, Ctx) -> top_processes(Args, Ctx);
+run(<<"ets_tables">>, Args, Ctx) -> graph_tool(<<"ets_tables">>, builder(<<"ets_tables">>), Args, Ctx);
+run(<<"changes_since">>, Args, Ctx) -> graph_tool(<<"changes_since">>, builder(<<"changes_since">>), Args, Ctx);
+run(<<"topology_overview">>, Args, Ctx) -> graph_tool(<<"topology_overview">>, builder(<<"topology_overview">>), Args, Ctx);
+run(<<"top_processes">>, Args, Ctx) -> graph_tool(<<"top_processes">>, builder(<<"top_processes">>), Args, Ctx);
 run(_, _, _) -> {error, <<"unknown_tool">>, <<"unknown tool">>}.
+
+builder(<<"application_overview">>) -> fun application_overview_build/2;
+builder(<<"supervision_tree">>) -> fun supervision_tree_build/2;
+builder(<<"registered_processes">>) -> fun registered_processes_build/2;
+builder(<<"ets_tables">>) -> fun ets_tables_build/2;
+builder(<<"top_processes">>) -> fun top_processes_build/2;
+builder(<<"topology_overview">>) -> fun topology_overview_build/2;
+builder(<<"changes_since">>) -> fun changes_since_build/2.
 
 %% Graph tools build a Builder (entities, relationships, omissions) and a scope;
 %% finish_graph retains it as a collection and renders the first page.
@@ -280,11 +289,14 @@ finish_graph(Tool, Args, Scope, B, Started, Ctx) ->
     Truncated = lists:any(fun(#{<<"reason">> := R}) -> R =:= <<"limit_reached">> end, Oms),
     Meta = #{scope => Scope, started_at => Started, finished_at => mcp_store:now_ms(),
              complete => Oms =:= [], truncated => Truncated, omissions => Oms},
-    Items = [{entity, E} || E <- lists:reverse(maps:get(ents, B))]
-        ++ [{relationship, R} || R <- lists:reverse(maps:get(rels, B))],
+    Items = builder_items(B),
     Hash = args_hash(maps:remove(<<"cursor">>, Args)),
-    {CollId, Meta1, Stored} = mcp_store:put_collection(Tool, Hash, Meta, Items, #{}),
+    {CollId, Meta1, Stored} = mcp_store:put_collection(Tool, Hash, Meta, Items, #{args => Args}),
     render_page(Tool, Hash, CollId, Meta1, Stored, 0, Ctx).
+
+builder_items(B) ->
+    [{entity, E} || E <- lists:reverse(maps:get(ents, B))]
+        ++ [{relationship, R} || R <- lists:reverse(maps:get(rels, B))].
 
 page_from_cursor(Tool, Args, Cursor, Ctx) ->
     Hash = args_hash(maps:remove(<<"cursor">>, Args)),
@@ -1258,11 +1270,113 @@ merge_owned_tables(B, EtsB) ->
                 end, B, Owned).
 
 %%------------------------------------------------------------------------------
+%% changes_since: what differs between a retained collection (the baseline) and a
+%% fresh observation of the same tool and arguments. Identity is the entity id, so a
+%% restarted process is `replaced` (same logical child, new id), never "the same".
+%% Absence from a partial collection is not proof of termination: such removals are
+%% marked `unconfirmed`. The baseline must still be retained (collection_ttl_ms).
+%%------------------------------------------------------------------------------
+
+-define(DIFFABLE, [<<"application_overview">>, <<"supervision_tree">>, <<"registered_processes">>,
+                   <<"ets_tables">>, <<"top_processes">>, <<"topology_overview">>]).
+
+changes_since_build(Args, #{config := Config} = Ctx) ->
+    case mcp_store:fetch_collection_by_id(maps:get(<<"collectionId">>, Args)) of
+        {error, _} ->
+            {error, <<"baseline_expired">>,
+             <<"the baseline collection is unknown or no longer retained (collection_ttl_ms, max_collections); "
+               "call the tool again to get a new baseline">>};
+        {ok, #{tool := OldTool, ctx := #{args := OldArgs}, meta := OldMeta, items := OldItems}} ->
+            case lists:member(OldTool, ?DIFFABLE) andalso mcp_policy:tool_allowed(OldTool, Config) of
+                false ->
+                    {error, <<"invalid_baseline">>, <<"this collection cannot be used as a baseline">>};
+                true ->
+                    %% a fresh observation that is compared, not retained: only the diff takes a slot
+                    case (builder(OldTool))(OldArgs, Ctx) of
+                        {ok, _Scope, NB} ->
+                            Oms = lists:reverse(maps:get(oms, NB)),
+                            NewMeta = #{complete => Oms =:= [], omissions => Oms},
+                            diff_collections(OldTool, maps:get(<<"collectionId">>, Args),
+                                             OldMeta, OldItems, NewMeta, builder_items(NB));
+                        {error, _, _} = E -> E
+                    end
+            end;
+        {ok, _} ->
+            {error, <<"invalid_baseline">>, <<"this collection cannot be used as a baseline">>}
+    end.
+
+diff_collections(Tool, BaseId, OldMeta, OldItems, NewMeta, NewItems) ->
+    Old = [E || {entity, E} <- OldItems],
+    New = [E || {entity, E} <- NewItems],
+    OldIds = maps:from_list([{maps:get(<<"id">>, E), true} || E <- Old]),
+    NewIds = maps:from_list([{maps:get(<<"id">>, E), true} || E <- New]),
+    Removed0 = [E || E <- Old, not maps:is_key(maps:get(<<"id">>, E), NewIds)],
+    Added0 = [E || E <- New, not maps:is_key(maps:get(<<"id">>, E), OldIds)],
+    RemByKey = by_key(Removed0),
+    AddByKey = by_key(Added0),
+    %% a logical child that vanished once and appeared once under a new id was replaced
+    Pairs = [{R, A} || {Key, [R]} <- maps:to_list(RemByKey), {ok, [A]} <- [maps:find(Key, AddByKey)]],
+    ReplacedOld = maps:from_list([{maps:get(<<"id">>, R), true} || {R, _} <- Pairs]),
+    ReplacedNew = maps:from_list([{maps:get(<<"id">>, A), maps:get(<<"id">>, R)} || {R, A} <- Pairs]),
+    Removed = [E || E <- Removed0, not maps:is_key(maps:get(<<"id">>, E), ReplacedOld)],
+    Added = [E || E <- Added0, not maps:is_key(maps:get(<<"id">>, E), ReplacedNew)],
+    Absence = case maps:get(complete, NewMeta) of
+                  true -> <<"observed">>;
+                  false -> <<"unconfirmed">>
+              end,
+    Changed = [{A, #{<<"change">> => <<"added">>}} || A <- Added]
+        ++ [{A, #{<<"change">> => <<"replaced">>, <<"previousId">> => maps:get(maps:get(<<"id">>, A), ReplacedNew)}}
+            || {_, A} <- Pairs]
+        ++ [{R, #{<<"change">> => <<"removed">>, <<"absence">> => Absence}} || R <- Removed],
+    B0 = lists:foldl(fun({E, Mark}, Acc) ->
+                             add_entity(Acc, maps:get(<<"id">>, E), maps:merge(maps:remove(<<"id">>, E), Mark))
+                     end, new_b(), Changed),
+    %% the edges of the fresh observation that lead to a new or replaced entity
+    Fresh = maps:from_list([{maps:get(<<"id">>, A), true} || A <- Added] ++ [{I, true} || I <- maps:keys(ReplacedNew)]),
+    B1 = lists:foldl(
+           fun({relationship, #{<<"type">> := T, <<"from">> := F, <<"to">> := To} = R}, Acc) ->
+                   case maps:is_key(To, Fresh) of
+                       true -> add_rel(Acc, T, F, To, maps:get(<<"evidence">>, R), maps:get(<<"confidence">>, R));
+                       false -> Acc
+                   end;
+              (_, Acc) -> Acc
+           end, B0, NewItems),
+    Unchanged = length([E || E <- New, maps:is_key(maps:get(<<"id">>, E), OldIds)]),
+    B2 = B1#{oms := lists:reverse(maps:get(omissions, NewMeta, [])) ++ maps:get(oms, B1)},
+    B3 = case maps:get(complete, OldMeta) of
+             true -> B2;
+             false -> add_omission(B2, <<"limit_reached">>, 1, undefined,
+                                   <<"the baseline collection was partial: entities reported as added may already have existed">>,
+                                   false)
+         end,
+    Scope = #{<<"tool">> => <<"changes_since">>,
+              <<"baselineCollectionId">> => BaseId,
+              <<"baselineTool">> => Tool,
+              <<"baselineFinishedAt">> => mcp_encoder:iso8601(maps:get(finished_at, OldMeta)),
+              <<"summary">> => #{<<"added">> => length(Added), <<"removed">> => length(Removed),
+                                 <<"replaced">> => length(Pairs), <<"unchanged">> => Unchanged},
+              <<"limitations">> =>
+                  [<<"Compares two observation intervals, not atomic snapshots; the entities of this answer are only those that changed.">>,
+                   <<"replaced = the same logical child (name or child id) now has a new id, i.e. it was restarted or recreated.">>,
+                   <<"A removal from a partial collection is marked absence=unconfirmed: absence is not proof of termination.">>,
+                   <<"The baseline must still be retained (collection_ttl_ms, max_collections).">>]},
+    {ok, Scope, B3}.
+
+%% logical identity of a child across restarts: its registered name, else its child id;
+%% only keys that are unique on their side can identify a replacement
+by_key(Ents) ->
+    Keyed = [{K, E} || E <- Ents, K <- [change_key(E)], K =/= undefined],
+    lists:foldl(fun({K, E}, Acc) -> maps:update_with(K, fun(L) -> L ++ [E] end, [E], Acc) end, #{}, Keyed).
+
+change_key(#{<<"kind">> := Kind, <<"name">> := N}) when is_binary(N) -> {Kind, name, N};
+change_key(#{<<"kind">> := Kind, <<"childId">> := C}) when is_binary(C) -> {Kind, child, C};
+change_key(_) -> undefined.
+
+%%------------------------------------------------------------------------------
 %% top_processes (ranking by queue length / reductions / memory)
 %%------------------------------------------------------------------------------
 
-top_processes(Args, Ctx) ->
-    Started = mcp_store:now_ms(),
+top_processes_build(Args, Ctx) ->
     SortBy = sort_item(maps:get(<<"sortBy">>, Args, <<"message_queue_len">>)),
     Limit = min(maps:get(<<"limit">>, Args, 10), ?MAX_TOP),
     All = erlang:processes(),
@@ -1308,7 +1422,7 @@ top_processes(Args, Ctx) ->
                    <<"reductions are cumulative since the process started, not a rate; memory is in bytes.">>,
                    <<"Only metadata is returned: never mailbox, dictionary, stack or state.">>,
                    <<"Inspector processes are excluded.">>]},
-    finish_graph(<<"top_processes">>, Args, Scope, B4, Started, Ctx).
+    {ok, Scope, B4}.
 
 sort_item(<<"reductions">>) -> reductions;
 sort_item(<<"memory">>) -> memory;
