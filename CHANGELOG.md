@@ -1,6 +1,7 @@
 # Change log
 
-## Unreleased
+
+## Version 1.2.6 (October 1, 2026)
 
 * MCP topology inspector for debug sessions (opt-in)
   - New settings `erlang.mcp.enabled` (default `false`), `erlang.mcp.host` (loopback only) and `erlang.mcp.port` (`0` = any free port). When enabled, a debug session (launch or attach, not *Run without debugging*) starts a read-only, token-authenticated [MCP](https://modelcontextprotocol.io) server inside the debugged Erlang node, so that an AI agent can map its OTP topology: `runtime_summary`, `application_overview`, `supervision_tree`, `registered_processes`, `process_info`, `top_processes` (hottest processes by queue length, reductions or memory), `ets_tables` (approved tables, metadata only) and `debug_session`. Results are bounded, paginated, with typed edges, evidence, confidence and explicit coverage limitations
@@ -22,6 +23,8 @@
   - New tool `process_groups`: all local processes aggregated by initial call (count, memory, reductions, queue, registered vs unregistered, sample ids) in an answer of fixed size, to find fan-out and leaks of anonymous processes
   - MCP prompt `map_application`: the sample prompt served by the inspector itself (argument-checked, grants nothing)
   - A ready-to-use prompt to map an application with an agent: [HELP.MD](./HELP.MD#mcp-topology-inspector-ai-agents-debug-sessions-only) (*Sample prompt*)
+
+* Update  erlang.plist to latest
 
 ---
 
