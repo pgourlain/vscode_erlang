@@ -2,6 +2,7 @@ import { ChildProcess, spawn } from 'child_process';
 import { EventEmitter } from 'events';
 import { GenericShell, ILogOutput } from './GenericShell';
 import { DebugProtocol } from '@vscode/debugprotocol';
+import { ErlangMcpSettings } from './erlangSettings';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
@@ -17,6 +18,7 @@ export interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArgum
     addEbinsToCodepath: boolean;
     erlangPath : string; // path of erlang if specified in configuration
     useShell: boolean; // resolved from erlang.useShell (see ErlangConfigurationProvider)
+    mcpSettings?: ErlangMcpSettings; // internal, resolved from erlang.mcp.* (see ErlangConfigurationProvider)
 }
 
 /** `attach` request: debug a node that is already running on this machine. */
@@ -28,6 +30,7 @@ export interface AttachRequestArguments extends DebugProtocol.AttachRequestArgum
     verbose: boolean;
     erlangPath : string;
     useShell: boolean;
+    mcpSettings?: ErlangMcpSettings;
 }
 
 // Values end up on a shell command line when this shell is spawned through
@@ -127,10 +130,53 @@ export class ErlangShellForDebugging extends GenericShell {
             "-pa", this.shellQuote(bridgePath),
             "-vscode_port", listen_port.toString(),
             "-vscode_attach_node", args.node,
-            "-compiled_args_file", this.shellQuote(this.argsPrecompiledFileName),
-            "-s", "vscode_connection", "attach");
+            "-compiled_args_file", this.shellQuote(this.argsPrecompiledFileName));
+        if (args.mcpSettings?.enabled) {
+            // makes the helper push the MCP inspector modules to the target (only then)
+            processArgs.push("-vscode_mcp", "1");
+        }
+        processArgs.push("-s", "vscode_connection", "attach");
         this.started = true;
         return this.LaunchProcess(erlPath, startDir, processArgs, !args.verbose);
+    }
+
+    /**
+     * Resolve `erlang.mcp.*` + the project's rebar.config policy in a short-lived
+     * helper VM (the policy reader interns atoms, so it never runs in the LSP or
+     * target VM). Erlang (mcp_policy) is authoritative; only its normalized,
+     * non-secret result comes back.
+     */
+    public ResolveMcpPolicy(erlPath: string, cwd: string, bridgePath: string, mcp: ErlangMcpSettings): Promise<{ status: string, config?: any, message?: string }> {
+        return new Promise((resolve) => {
+            const fail = (message: string) => resolve({ status: 'error', message });
+            try {
+                let env = process.env;
+                if (this.erlangPath) {
+                    env = { ...process.env, PATH: this.erlangPath + (process.platform == 'win32' ? ";" : ":") + process.env.PATH };
+                }
+                const child = spawn(erlPath, ["-noshell", "-pa", this.shellQuote(bridgePath), "-s", "mcp_policy", "cli"],
+                    { cwd: cwd, shell: this.useShell, stdio: 'pipe', env });
+                let out = "";
+                const timer = setTimeout(() => { child.kill(); fail("MCP policy resolution timed out"); }, 20000);
+                child.stdout.on('data', d => { out += d.toString('utf8'); });
+                child.on('error', () => { clearTimeout(timer); fail("MCP policy helper cannot be started"); });
+                child.on('close', () => {
+                    clearTimeout(timer);
+                    const line = out.split(/\r?\n/).reverse().find(l => l.startsWith('{'));
+                    try {
+                        resolve(line ? JSON.parse(line) : { status: 'error', message: "MCP policy could not be resolved" });
+                    } catch {
+                        fail("MCP policy could not be resolved");
+                    }
+                });
+                child.stdin.end(JSON.stringify({
+                    enabled: mcp.enabled, host: mcp.host, port: mcp.port, trusted: mcp.trusted,
+                    root: mcp.root, cwd: cwd
+                }) + "\n");
+            } catch {
+                fail("MCP policy helper cannot be started");
+            }
+        });
     }
 
     /** The helper node halts when its stdin closes; the attached node keeps running. */

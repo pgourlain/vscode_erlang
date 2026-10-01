@@ -121,6 +121,135 @@ Restart the language server after changing it.
   the same machine, with the `debugger` and `inets` applications available - see
   [Attach to a running node](./README.md#attach-to-a-running-node).
 
+## MCP topology inspector (AI agents, debug sessions only)
+
+An opt-in, **read-only** [MCP](https://modelcontextprotocol.io) server that lets an AI agent
+discover and explain the OTP topology (applications, supervisors, processes, modules, approved
+ETS metadata) of the Erlang node you are debugging. It is a structural map, not a trace of
+messages or business flows. Security model and residual risks: [mcp_security.md](./mcp_security.md).
+
+**Turn it on** (folder-scoped, default `false`) and start a *debug session* (launch or attach):
+
+```json
+{
+    "erlang.mcp.enabled": true,
+    "erlang.mcp.host": "127.0.0.1",
+    "erlang.mcp.port": 0
+}
+```
+
+- It starts only inside the debugged node, only for a real debug session (never in a normal
+  editor session, with *Run without debugging*, or from rebar/eunit) and stops with the session.
+  Settings are read per debug folder when the session starts; changing them does not affect a
+  running session.
+- `host` must be loopback (`127.0.0.1`, `::1`, ...); `0.0.0.0`, LAN and public addresses are
+  rejected. `port: 0` (default) lets the OS choose.
+- Any MCP problem (bad policy, busy port, untrusted workspace) is reported and disables **only** the
+  inspector; debugging continues. There is no "required" option.
+- Same machine only: the client must reach the node's loopback; no port forwarding is supported.
+  Attach needs the `crypto` application in the target in addition to `debugger` and `inets`.
+
+**Connect a client**
+
+- *VS Code* (1.101+, MCP provider API): the running session appears as an MCP server named
+  `Erlang debug: <session>` in the MCP server list (*MCP: List Servers*); the per-session token is
+  handed to VS Code automatically and never printed. It disappears when the session ends.
+- *Claude Code (and other static clients)*: Claude Code does not read VS Code's MCP list. For a
+  one-time setup, set the **user** setting `erlang.mcp.authToken` to a fixed development token
+  (16-128 chars `A-Za-z0-9._~-`, not read from workspace settings) and a fixed `erlang.mcp.port`, then once:
+  `claude mcp add --transport http erlang-debug http://127.0.0.1:<port>/mcp --header "Authorization: Bearer <token>"`.
+  The server is only reachable during a debug session. A fixed token is a convenience that trades
+  away the per-session credential: anyone knowing it who can reach the loopback port can read the
+  inspector's metadata. Leave it empty (default) for a fresh random token per session.
+- *Any other client*: run **Erlang MCP: Show Connection Details** (select the session if several)
+  and choose *Copy URL* / *Copy Authorization header* (explicit action; nothing is copied
+  automatically). Set a fixed `erlang.mcp.port` if the client needs a stable URL: the token
+  still changes at every session and must be supplied as `Authorization: Bearer <token>`. If the
+  fixed port is busy MCP is disabled for the session (no silent rebinding).
+- Protocol: MCP `2025-06-18`, Streamable HTTP with JSON responses (no SSE, no prompts, no resources).
+
+**Project policy (optional)** - a literal top-level term in the *target project's* `rebar.config`
+(nearest file from the debug `cwd`, never above the workspace folder; no `rebar.config.script`,
+no profiles). It controls tools, tables and *lower* limits only; activation, host, port and
+credentials come only from the VS Code settings. The values below are the defaults and the hard
+ceilings:
+
+```erlang
+{mcp, [
+    {allowed_tools, [<<"runtime_summary">>, <<"application_overview">>, <<"supervision_tree">>,
+                     <<"process_info">>, <<"registered_processes">>, <<"ets_tables">>,
+                     <<"debug_session">>]},
+    {allowed_ets_tables, []},          %% exact names, e.g. [<<"orders_index">>]; private tables never
+    {limits, [{max_request_bytes, 16384}, {max_result_bytes, 262144}, {max_items, 500},
+              {max_depth, 16}, {max_binary_bytes, 4096}, {max_traversal_depth, 8},
+              {max_concurrency, 2}, {request_timeout_ms, 3000}, {collection_ttl_ms, 30000},
+              {max_collection_bytes, 1048576}, {max_collections, 2}]}
+]}.
+```
+
+A malformed or duplicated term, an `mcp` term only inside a profile, or keys such as `enabled`,
+`host`, `port`, `required` or a token disable MCP for that session with an explanation.
+
+**Tools** (all read-only, strict input schemas, discoverable through `tools/list`)
+
+| Tool | Purpose |
+| --- | --- |
+| `runtime_summary` | OTP/ERTS versions, node (host redacted by default), uptime, schedulers, process count, memory, session id |
+| `application_overview` | started applications, versions, declared dependencies, root supervisor ids, optional module names/behaviours; `application`, `includeModules`, `cursor` |
+| `supervision_tree` | typed `supervises` edges from an application/supervisor id or a named supervisor; child role, modules, restart/shutdown; `id`/`supervisor`, `maxDepth`, `includeModules`, `cursor` |
+| `registered_processes` | locally registered names with status/queue length and membership (`confirmed`/`inferred`/`unknown`); `application`, `cursor` |
+| `process_info` | allowlisted fields of one process (by `id`, `name` or `pid`), links/monitors as ids; never dictionary, stack, mailbox or state |
+| `ets_tables` | metadata of the approved named tables (protection, type, owner, size, memory in words and bytes) - never keys or values |
+| `debug_session` | launch/attach, interpreted modules, breakpoint locations (module and line) |
+
+Graph tools also take `detail` and `pageSize`. `detail: "summary"` (default) is meant for agents:
+same entities, ids and edges, without rarely needed fields (pids, descriptions, per-edge
+`observedAt`, coverage limitations after the first page), 100 items per page, and module lists only
+for one selected application. `detail: "full"` returns every field in the largest pages (policy
+`max_items`): ask the agent for it when you want the complete JSON, e.g. to save it to a file.
+
+Graph tools return a versioned envelope: `schemaVersion`, `sessionId`, `collectionId`,
+`startedAt`, `finishedAt`, `scope` (with `limitations`), `entities`, `relationships`,
+`complete`, `truncated`, `omissions`, `nextCursor`. Entity kinds: `application`, `process`,
+`module`, `ets_table` (a supervisor is a process with `role: supervisor`). Edge types:
+`depends_on`, `supervises`, `owns_table`, `linked_to`, `monitors`, `belongs_to`, `uses_module`, each
+with `evidence`, `observedAt` and `confidence` (`confirmed`/`inferred`/`unknown`). Links and
+monitors never imply supervision or message traffic. IDs are opaque, valid only within the session
+and change when a process restarts or a table is recreated. A collection is an observation
+interval, not an atomic snapshot: absence from a partial collection is not proof of termination.
+Units: timestamps are UTC ISO-8601, `memory` of a process is bytes, of a table words
+(`memoryBytes` is derived), `uptimeMs` is milliseconds.
+
+`omissions` (`policy_denied`, `disappeared`, `timeout`, `unavailable_while_paused`, `limit_reached`,
+`unknown_membership`) explain what is missing and whether it is resumable; cursors are bound to
+the session, the collection, the tool and the arguments, and return `cursor_expired` after the
+retention time - a traversal is never silently restarted. Partial example (a supervisor blocked at
+a breakpoint or busy):
+
+```json
+{ "complete": false, "truncated": false, "nextCursor": null,
+  "omissions": [ { "reason": "timeout", "count": 1, "scope": "p_51ad...",
+                   "resumable": false, "message": "the supervisor did not answer in time; its children are missing from this map" } ],
+  "relationships": [ { "type": "supervises", "from": "p_0a1...", "to": "p_51ad...", "confidence": "confirmed",
+                       "evidence": "supervisor:which_children/1", "observedAt": "2026-01-01T10:00:00.000Z" } ] }
+```
+
+**Agent workflow**: `runtime_summary` + `application_overview` -> pick an application, follow its
+root ids into `supervision_tree` (expand subtrees with the ids in `limit_reached` omissions) ->
+enrich with `process_info`, `registered_processes`, `ets_tables`, `debug_session` -> join by ids,
+keep confirmed edges apart from inferences, and report the omissions. Module names can then be
+correlated with the workspace/LSP tools; the inspector never returns source or code paths.
+
+**Request journal**: every MCP request of the session is written to the **Output > Erlang MCP**
+channel - request number, tool, status, time spent in the inspector, response size, entities /
+relationships, page and cursor use, and the delay since the previous request (time spent by the
+agent) - with a summary when the session ends. Arguments, results and the token are never written.
+
+**Breakpoints**: inspection never resumes, suspends or alters application processes. A process
+stopped at a breakpoint still answers `process_info`; a supervisor that cannot answer in time
+yields a `timeout` omission (never a guess that it is paused). The target stops the inspector
+within ~10 seconds if the debug adapter stops renewing its lease.
+
 ## Changing the debugger mode has no effect
 
 `erlang.debuggerRunMode` is read at extension startup: restart VS Code after

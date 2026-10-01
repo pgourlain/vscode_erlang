@@ -1,13 +1,14 @@
 import {
 	DebugSession, InitializedEvent, TerminatedEvent, StoppedEvent,
 	OutputEvent, Thread, ThreadEvent, StackFrame, Scope, Source, Handles
-	, Breakpoint, ModuleEvent, Module, ContinuedEvent, Variable, BreakpointEvent
+	, Breakpoint, ModuleEvent, Module, ContinuedEvent, Variable, BreakpointEvent, Event
 } from '@vscode/debugadapter';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import { ErlangShellForDebugging, LaunchRequestArguments, AttachRequestArguments, FunctionBreakpoint, validateAttachArguments } from './ErlangShellDebugger';
 import { ILogOutput } from './GenericShell';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import { erlangBridgePath, setExtensionPath } from './erlangConnection';
 import { ErlangDebugConnection } from './erlangDebugConnection';
 
@@ -18,6 +19,17 @@ interface DebugVariable {
 	type?: string;
 	variablesReference: number,
 	children: Variable[];
+}
+
+// Launch/attach arguments are logged in verbose mode: never print secrets.
+const SECRET_KEY = /token|secret|password|cookie|authorization|credential/i;
+export function sanitizeArguments(args: any): any {
+	const copy: any = {};
+	Object.keys(args ?? {}).forEach(k => {
+		copy[k] = SECRET_KEY.test(k) ? '<redacted>'
+			: (args[k] && typeof args[k] === 'object' && !Array.isArray(args[k])) ? sanitizeArguments(args[k]) : args[k];
+	});
+	return copy;
 }
 
 class ConditionalBreakpoint {
@@ -50,6 +62,12 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 	// set by an attach request: the debuggee is a running node we must not stop
 	private _AttachArguments: AttachRequestArguments;
 	private _port: number;
+	// embedded MCP inspector (debug sessions only): lease renewal + secret descriptor
+	private _mcpRenewTimer: NodeJS.Timeout;
+	private _mcpDescriptorDir: string;
+	private _mcpStarted = false;
+	private _mcpCalls = 0;
+	private _mcpServerMs = 0;
 
 	public constructor(verbose: boolean) {
 		super();
@@ -115,6 +133,7 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 		this.erlangConnection.on("new_process", (arg) => this.onNewProcess(arg));
 		this.erlangConnection.on("new_status", (pid, status, reason, moduleName, line) => this.onNewStatus(pid, status, reason, moduleName, line));
 		this.erlangConnection.on("on_break", (pid, moduleName, line, stacktrace) => this.onBreak(pid, moduleName, line, stacktrace));
+		this.erlangConnection.on("mcp_call", (meta) => this.onMcpCall(meta));
 		this.erlangConnection.on("fbp_verified", (moduleName, functionName, arity) => this.onFbpVerified(moduleName, functionName, arity));
 
 		response.body.supportsConfigurationDoneRequest = true;
@@ -150,7 +169,7 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 		}
 		this._LaunchArguments = args;
 		if (this._LaunchArguments.verbose) {
-			this.log(`debugger launchRequest arguments : ${JSON.stringify(args)}`);
+			this.log(`debugger launchRequest arguments : ${JSON.stringify(sanitizeArguments(args))}`);
 		}
 		// Based on JS output path, not TS path
 		this.erlangConnection.Start(this._LaunchArguments.verbose, this._LaunchArguments.erlangPath).then(port => {
@@ -183,7 +202,7 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 			arguments: "", addEbinsToCodepath: false, noDebug: false
 		};
 		if (args.verbose) {
-			this.log(`debugger attachRequest arguments : ${JSON.stringify(args)}`);
+			this.log(`debugger attachRequest arguments : ${JSON.stringify(sanitizeArguments(args))}`);
 		}
 		this.erlangConnection.Start(args.verbose, args.erlangPath).then(port => {
 			this._port = port;
@@ -232,6 +251,7 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 
 	protected disconnectRequest(response: DebugProtocol.DisconnectResponse, args: DebugProtocol.DisconnectArguments): void {
 		//this.debug("disconnectRequest");
+		this.stopMcp();
 		if (this._AttachArguments) {
 			// Detach unless asked to stop the node: stopping a node someone
 			// else started must be an explicit choice.
@@ -254,6 +274,7 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 
 	protected quitEvent(exitCode: number) {
 		this.log(`erl exit with code ${exitCode}`);
+		this.stopMcp(false);
 		this.quit = true;
 		this.sendEvent(new TerminatedEvent());
 		this.erlDebugger.CleanupAfterStart();
@@ -606,6 +627,79 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 	private onStartListening(message: string): void {
 		if (this._LaunchArguments.verbose)
 			this.debug(message);
+		this.startMcp();
+	}
+
+	/**
+	 * Start the embedded MCP inspector in the debugged node when (and only when)
+	 * this is a real debug session and erlang.mcp.enabled is true for the folder.
+	 * Every failure is non-fatal: it is reported and debugging goes on.
+	 * The session token never travels in a DAP event: the extension host reads it
+	 * from a 0600 descriptor that it deletes right away.
+	 */
+	private async startMcp(): Promise<void> {
+		const mcp = this._AttachArguments?.mcpSettings ?? this._LaunchArguments?.mcpSettings;
+		if (!mcp?.enabled || this._LaunchArguments.noDebug || this._mcpStarted) {
+			return;
+		}
+		this._mcpStarted = true;
+		try {
+			const bridgeBinPath = path.normalize(path.join(erlangBridgePath, "..", "ebin"));
+			const policy = await this.erlDebugger.ResolveMcpPolicy(this._LaunchArguments.erlpath, this._LaunchArguments.cwd, bridgeBinPath, mcp);
+			if (policy.status !== 'ok') {
+				if (policy.status === 'error') {
+					this.mcpFailed(policy.message);
+				}
+				return;
+			}
+			const mode = this._AttachArguments ? 'attach' : 'launch';
+			const started = await this.erlangConnection.mcpStart({ ...policy.config, ...(mcp.authToken ? { authToken: mcp.authToken } : {}) }, mode);
+			if (!started.ok) {
+				this.mcpFailed(started.error);
+				return;
+			}
+			const url = `http://${started.host!.includes(':') ? '[' + started.host + ']' : started.host}:${started.port}${started.path}`;
+			this._mcpDescriptorDir = fs.mkdtempSync(path.join(os.tmpdir(), 'erlang-mcp-'));
+			const descriptor = path.join(this._mcpDescriptorDir, 'endpoint.json');
+			fs.writeFileSync(descriptor, JSON.stringify({ url: url, token: started.token, sessionId: started.sessionId }), { mode: 0o600 });
+			this._mcpRenewTimer = setInterval(() => {
+				this.erlangConnection.mcpRenew();
+			}, 2000);
+			this.sendEvent(new Event('erlangMcp', { status: 'started', url: url, sessionId: started.sessionId, descriptor: descriptor }));
+			this.log(`MCP inspector listening on ${url} (session ${started.sessionId}); the credential is delivered to VS Code only`);
+		} catch (e) {
+			this.mcpFailed("the MCP inspector could not be started");
+		}
+	}
+
+	/** One MCP request handled by the inspector: forwarded to the extension host's "Erlang MCP" channel. */
+	private onMcpCall(meta: any): void {
+		this._mcpCalls++;
+		this._mcpServerMs += typeof meta?.durationMs === 'number' ? meta.durationMs : 0;
+		this.sendEvent(new Event('erlangMcpCall', meta));
+	}
+
+	private mcpFailed(message: string): void {
+		this.log(`MCP is disabled for this debug session: ${message}`);
+		this.sendEvent(new Event('erlangMcp', { status: 'error', message: message }));
+		this.stopMcp(true);
+	}
+
+	private stopMcp(notifyTarget: boolean = true): void {
+		if (this._mcpRenewTimer) {
+			clearInterval(this._mcpRenewTimer);
+			this._mcpRenewTimer = undefined;
+		}
+		if (this._mcpDescriptorDir) {
+			try { fs.rmSync(this._mcpDescriptorDir, { recursive: true, force: true }); } catch { /* best effort */ }
+			this._mcpDescriptorDir = undefined;
+		}
+		if (this._mcpStarted) {
+			if (notifyTarget && this.erlangConnection?.isConnected) {
+				this.erlangConnection.mcpStop();
+			}
+			this.sendEvent(new Event('erlangMcp', { status: 'stopped', calls: this._mcpCalls, serverMs: this._mcpServerMs }));
+		}
 	}
 
 	private onNewModule(moduleName: string): void {
@@ -741,7 +835,8 @@ export class ErlangDebugSession extends DebugSession implements ILogOutput {
 			setTimeout(function () {
 				var currentThread = that.threadIDs[processName];
 				delete that.threadIDs[processName];
-				if (currentThread.vscode) {
+				// an exit can be reported for a process never announced (or already removed)
+				if (currentThread && currentThread.vscode) {
 					that.sendEvent(new ThreadEvent("exited", currentThread.thid));
 				}
 				var thCount = that.threadCount();

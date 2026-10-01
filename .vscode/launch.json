@@ -48,6 +48,22 @@
 			"preLaunchTask": "npm: compile"
 		},
 		{
+			// Only the extension under development + what is installed in the dedicated
+			// extensions dir (your normal extensions are not loaded). Install Claude Code there once:
+			//   code --extensions-dir ~/.vscode-erlang-dev/extensions --install-extension anthropic.claude-code
+			"name": "Launch Extension (sample-mcp, Claude only)",
+			"type": "extensionHost",
+			"request": "launch",
+			"runtimeExecutable": "${execPath}",
+			"args": [
+				"${workspaceFolder}/../../erlang/sample-mcp",
+				"--extensionDevelopmentPath=${workspaceFolder}"
+			],
+			"sourceMaps": true,
+			"outFiles": ["${workspaceFolder}/out"],
+			"preLaunchTask": "npm: compile"
+		},
+		{
 			"name": "Launch Tests",
 			"type": "extensionHost",
 			"request": "launch",

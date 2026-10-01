@@ -1,5 +1,18 @@
 # Change log
 
+## Unreleased
+
+* MCP topology inspector for debug sessions (opt-in)
+  - New settings `erlang.mcp.enabled` (default `false`), `erlang.mcp.host` (loopback only) and `erlang.mcp.port` (`0` = any free port). When enabled, a debug session (launch or attach, not *Run without debugging*) starts a read-only, token-authenticated [MCP](https://modelcontextprotocol.io) server inside the debugged Erlang node, so that an AI agent can map its OTP topology: `runtime_summary`, `application_overview`, `supervision_tree`, `registered_processes`, `process_info`, `ets_tables` (approved tables, metadata only) and `debug_session`. Results are bounded, paginated, with typed edges, evidence, confidence and explicit coverage limitations
+  - VS Code registers the live endpoint automatically (MCP server list) and **Erlang MCP: Show Connection Details** helps configure other clients. The session token never appears in logs, DAP events or settings
+  - An optional top-level `{mcp, [...]}` term in the project's `rebar.config` restricts tools, ETS tables and limits. Nothing changes when the setting is off. See [HELP.MD](./HELP.MD#mcp-topology-inspector-ai-agents-debug-sessions-only) and [mcp_security.md](./mcp_security.md)
+  - Agent-sized answers: graph tools default to `detail: "summary"` (compact entities and edges, 100 items per page, modules listed per application only); `detail: "full"` returns the complete JSON (e.g. to save it to a file), `pageSize` tunes the pages
+  - **Output > Erlang MCP** journals every MCP request (tool, status, inspector time, size, pages, delay since the previous request) and summarizes the session, to see how an agent uses the inspector; arguments, results and token are never written
+  - Optional user setting `erlang.mcp.authToken` (development convenience): a fixed token so that a static client such as Claude Code (`claude mcp add`) is configured once; default empty = random token per session
+  - The verbose debug log no longer prints the Erlang cookie passed to an attach helper
+
+---
+
 ## Version 1.2.5 (September 27, 2026)
 
 * [358](https://github.com/pgourlain/vscode_erlang/issues/358) : Launch (Run / Debug) broken on Linux and macOS since 1.2.4

@@ -5,7 +5,11 @@ import { FunctionBreakpoint } from './ErlangShellDebugger';
 
 export class ErlangDebugConnection extends ErlangConnection {
     protected get_ErlangFiles(): string[] {
-        return ["gen_connection.erl", "vscode_connection.erl", "vscode_jsone.erl"];
+        // mcp/* is the embedded MCP inspector: compiled here (debugger bridge beams),
+        // never loaded by the LSP node, only started on request for an enabled debug session
+        return ["gen_connection.erl", "vscode_connection.erl", "vscode_jsone.erl", "vscode_jsone_decode.erl",
+            "mcp/mcp_policy.erl", "mcp/mcp_encoder.erl", "mcp/mcp_audit.erl", "mcp/mcp_store.erl",
+            "mcp/mcp_tools.erl", "mcp/mcp_runtime.erl", "mcp/mcp_server.erl", "mcp/mcp_sup.erl"];
     }
 
     protected handle_erlang_event(url: string, body : any) : void {
@@ -31,6 +35,10 @@ export class ErlangDebugConnection extends ErlangConnection {
                 this.emit("on_break", body.process, body.module, body.line, body.stacktrace);
             break;
             case "/delete_break":
+            break;
+            case "/mcp_call":
+                // journal of the MCP inspector: request metadata only (no arguments, results or token)
+                this.emit("mcp_call", body);
             break;
             case "/fbp_verified":
                 this.emit("fbp_verified", body.module, body.name, body.arity);
@@ -169,6 +177,22 @@ export class ErlangDebugConnection extends ErlangConnection {
 			this.debug(`debugger_detach error : ${err}`);
 			return [];
 		});
+	}
+
+	/** Start the MCP inspector in the target; the reply (with the session token) goes to the adapter only. */
+	public mcpStart(config: any, mode: string): Promise<{ ok: boolean, error?: string, host?: string, port?: number, path?: string, sessionId?: string, token?: string }> {
+		return this.post("mcp_start", JSON.stringify({ ...config, mode })).catch(err => {
+			return { ok: false, error: "the MCP inspector could not be started" };
+		});
+	}
+
+	/** Lease renewal: without it the target stops the inspector within ~10 seconds. */
+	public mcpRenew(): Promise<boolean> {
+		return this.post("mcp_renew", "").then(r => !!r?.ok, () => false);
+	}
+
+	public mcpStop(): Promise<void> {
+		return this.post("mcp_stop", "").then(() => undefined, () => undefined);
 	}
 
 	public closeEventsReceiver(): void {
