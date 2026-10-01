@@ -202,7 +202,12 @@ suite('MCP: debug adapter end-to-end (real erl target)', function () {
         assert.strictEqual(top.entities.length, 3);
         assert.ok(top.mermaid.startsWith('graph TD'));
         assert.ok((await ok('top_ports', { limit: 3 })).entities.length > 0);
-        assert.ok((await ok('ets_summary', { limit: 3 })).entities.length > 0);
+        // no table is approved by default: nothing is counted, and that is reported
+        const ets = await ok('ets_summary', { limit: 3 });
+        assert.strictEqual(ets.entities.length, 0);
+        assert.ok(ets.omissions.some((o: any) => o.reason === 'policy_denied'));
+        const denied = await call(started.url, token, 'process_state', { name: 'init' });
+        assert.strictEqual(denied.json.error.code, -32602, 'developer tools are off by default');
         const topo = await ok('topology_overview', { name: 'kernel', format: 'mermaid' });
         assert.ok(topo.relationships.some((r: any) => r.type === 'supervises'), 'kernel supervision tree');
         assert.ok(topo.mermaid.includes('-->'));
