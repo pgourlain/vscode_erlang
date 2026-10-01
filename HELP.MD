@@ -240,6 +240,43 @@ enrich with `process_info`, `registered_processes`, `ets_tables`, `debug_session
 keep confirmed edges apart from inferences, and report the omissions. Module names can then be
 correlated with the workspace/LSP tools; the inspector never returns source or code paths.
 
+**Sample prompt**: once the client is connected and the node is paused or running under the
+debugger, paste this into the agent chat (Copilot agent mode, Claude Code...), replacing `<app>` with
+your application name. It follows the workflow above and asks for a diagram, a table and the
+coverage gaps, without guessing beyond what the tools return:
+
+```text
+Using the erlang-otp-topology-inspector MCP server, map the OTP topology of application <app>
+in the node I am debugging.
+
+Steps:
+1. runtime_summary, then application_overview to find <app>'s id and its root supervisors.
+2. supervision_tree from each root. If an omission says limit_reached or timeout, expand that
+   subtree with the id it gives.
+3. registered_processes(application=<app id>) to catch registered workers outside the tree.
+4. process_info only for processes that matter: supervisors, registered workers, anything with
+   a non-zero message queue or many links/monitors.
+5. ets_tables and debug_session only if they relate to <app>.
+
+Output:
+- A Mermaid `graph TD` of the supervision tree (edge = supervises; label children with kind
+  and restart type).
+- A table: name/pid, module, kind, restart, msg queue len, membership (confirmed/inferred).
+- "Coverage gaps": every truncated/omission/timeout reported by the tools.
+- 3–5 observations (single points of failure, deep trees, hot queues, temporary children).
+
+Rules: use only what the tools returned. Structural edges are not message traffic, so do not
+describe runtime call flows. Keep detail=summary unless I ask for the full JSON.
+```
+
+Example of the agent's answer (supervision tree diagram, then the process table):
+
+![MCP inspector result](images/vscode-erlang-mcp-results.png)
+
+Narrower questions work too, e.g. *"Why is `<process>` slow? Use process_info on it and compare
+its queue length and reductions with its siblings in the supervision tree"*, or *"Where are my
+breakpoints in the supervision tree? Use debug_session and supervision_tree with includeModules"*.
+
 **Request journal**: every MCP request of the session is written to the **Output > Erlang MCP**
 channel - request number, tool, status, time spent in the inspector, response size, entities /
 relationships, page and cursor use, and the delay since the previous request (time spent by the

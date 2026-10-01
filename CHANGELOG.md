@@ -10,6 +10,7 @@
   - **Output > Erlang MCP** journals every MCP request (tool, status, inspector time, size, pages, delay since the previous request) and summarizes the session, to see how an agent uses the inspector; arguments, results and token are never written
   - Optional user setting `erlang.mcp.authToken` (development convenience): a fixed token so that a static client such as Claude Code (`claude mcp add`) is configured once; default empty = random token per session
   - The verbose debug log no longer prints the Erlang cookie passed to an attach helper
+  - A ready-to-use prompt to map an application with an agent: [HELP.MD](./HELP.MD#mcp-topology-inspector-ai-agents-debug-sessions-only) (*Sample prompt*)
 
 ---
 
