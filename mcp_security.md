@@ -19,7 +19,7 @@ port. All requests, parameters and identifiers are untrusted.
 | Per-session credential | 32 random bytes (`crypto:strong_rand_bytes/1`) per session; bearer token required on **every** request, checked (constant time) before the body is read; never accepted from the environment or workspace files; an explicit user-level `erlang.mcp.authToken` is the only opt-in override |
 | Host / Origin | `Host` must be the bound endpoint; an `Origin` is refused unless it is that endpoint; no CORS headers |
 | Transport limits | POST `/mcp` only, `application/json` only, body cap before reading, header/body/connection timeouts, bounded connections, no chunked bodies, no batches, no SSE |
-| Least privilege | Seven fixed read-only tools; the project policy can only narrow them; unknown tools are never turned into atoms or function names |
+| Least privilege | Eight fixed read-only tools; the project policy can only narrow them; unknown tools are never turned into atoms or function names |
 | No execution | No eval, `rpc:call`, shell, code loading, message sending, `sys` calls, tracing, breakpoint changes, ETS writes or reads |
 | Data minimisation | No process dictionary, stack, mailbox, state, child start arguments, application environment, source, code paths, cookies; ETS: metadata of approved, non-private named tables only; node host redacted by default; child identifiers are printed with a depth/size bound |
 | Safe identifiers | Registered names are resolved with `binary_to_existing_atom/2` only; pids must be local (`<0.N.M>`); no `binary_to_term/1` on input |

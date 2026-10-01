@@ -64,7 +64,7 @@ defaults_without_project_file(Config) ->
     ?assertEqual(mcp_policy:all_tools(), maps:get(allowed_tools, C)),
     ?assertEqual([], maps:get(allowed_ets_tables, C)),
     ?assertEqual(mcp_policy:ceilings(), maps:get(limits, C)),
-    ?assertEqual(7, length(maps:get(allowed_tools, C))),
+    ?assertEqual(8, length(maps:get(allowed_tools, C))),
     %% a project without an mcp term uses the same built-in policy
     write_rebar(Config, "{erl_opts, [debug_info]}.\n{deps, []}.\n"),
     ?assertEqual({ok, C}, mcp_policy:resolve(input(Config, #{}))).

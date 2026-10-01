@@ -27,6 +27,9 @@ all() ->
      process_info_inputs_are_safe,
      registered_processes_membership_evidence,
      ets_tables_metadata_only_for_approved_tables,
+     top_processes_ranks_and_is_bounded,
+     supervision_tree_reports_child_counts,
+     paused_process_is_reported_from_debugger_evidence,
      restart_changes_identity,
      pagination_cursors_and_retention,
      collection_byte_budget_is_partial_and_non_resumable,
@@ -153,7 +156,7 @@ decode(Bin) ->
 %% unless the case chooses the detail itself (see agent_summary_is_compact).
 call(Config, Tool, Args0) when is_map(Args0) ->
     Graph = [<<"application_overview">>, <<"supervision_tree">>, <<"registered_processes">>,
-             <<"process_info">>, <<"ets_tables">>],
+             <<"process_info">>, <<"ets_tables">>, <<"top_processes">>],
     Args = case lists:member(Tool, Graph) andalso not maps:is_key(<<"detail">>, Args0) of
                true -> Args0#{<<"detail">> => <<"full">>};
                false -> Args0
@@ -309,7 +312,7 @@ initialize_negotiates_and_lists_only_readonly_tools(Config) ->
     #{<<"result">> := #{<<"tools">> := Tools}} = rpc(Config, <<"tools/list">>, #{}),
     Names = lists:sort([maps:get(<<"name">>, T) || T <- Tools]),
     ?assertEqual(lists:sort(mcp_policy:all_tools()), Names),
-    ?assertEqual(7, length(Tools)),
+    ?assertEqual(8, length(Tools)),
     [begin
          ?assertMatch(#{<<"inputSchema">> := #{<<"type">> := <<"object">>, <<"additionalProperties">> := false},
                         <<"outputSchema">> := #{<<"type">> := <<"object">>},
@@ -987,6 +990,103 @@ agent_summary_is_compact(Config) ->
     ?assertMatch({rpc_error, -32602, _}, call(Config, <<"supervision_tree">>, Args#{<<"pageSize">> => 0})),
     lists:foreach(fun({_, P, _, _}) -> supervisor:terminate_child(mcp_fx_dyn_sup, P) end,
                   supervisor:which_children(mcp_fx_dyn_sup)).
+
+top_processes_ranks_and_is_bounded(Config) ->
+    Hot = spawn(fun() -> register(mcp_fx_hot, self()), receive never -> ok end end),
+    wait_until(fun() -> whereis(mcp_fx_hot) =:= Hot end),
+    [Hot ! {msg, I} || I <- lists:seq(1, 600)],
+    S = ok_call(Config, <<"top_processes">>, #{<<"limit">> => 3}),
+    Ents = maps:get(<<"entities">>, S),
+    ?assertEqual(3, length(Ents)),
+    ?assertEqual([1, 2, 3], [maps:get(<<"rank">>, E) || E <- Ents]),
+    [First | _] = Ents,
+    ?assertMatch(#{<<"name">> := <<"mcp_fx_hot">>, <<"messageQueueLen">> := Q, <<"rankedBy">> := <<"message_queue_len">>}
+                   when Q >= 600, First),
+    Qs = [maps:get(<<"messageQueueLen">>, E) || E <- Ents],
+    ?assertEqual(lists:reverse(lists:sort(Qs)), Qs),
+    ?assertMatch(#{<<"sortBy">> := <<"message_queue_len">>, <<"limit">> := 3, <<"processCount">> := _},
+                 maps:get(<<"scope">>, S)),
+    %% metadata only: no mailbox content, no relationships, no inspector processes
+    ?assertEqual([], maps:get(<<"relationships">>, S)),
+    ?assertEqual(nomatch, re:run(iolist_to_binary(io_lib:format("~p", [S])), "SENTINEL|\\{msg")),
+    [?assertEqual(false, lists:member(maps:get(<<"name">>, E), [<<"mcp_server">>, <<"mcp_store">>, <<"mcp_sup">>]))
+     || E <- Ents],
+    %% the other criteria rank by their own value
+    lists:foreach(fun({By, Field}) ->
+                          R = ok_call(Config, <<"top_processes">>, #{<<"sortBy">> => By, <<"limit">> => 5}),
+                          Es = maps:get(<<"entities">>, R),
+                          ?assertEqual(5, length(Es)),
+                          Vs = [maps:get(Field, E) || E <- Es],
+                          ?assertEqual(lists:reverse(lists:sort(Vs)), Vs),
+                          [?assertEqual(By, maps:get(<<"rankedBy">>, E)) || E <- Es]
+                  end, [{<<"reductions">>, <<"reductions">>}, {<<"memory">>, <<"memory">>}]),
+    %% a default call is bounded to 10 and the ids join with other tools
+    D = ok_call(Config, <<"top_processes">>, #{}),
+    ?assertEqual(10, length(maps:get(<<"entities">>, D))),
+    HotId = id_of(ent(<<"mcp_fx_hot">>, maps:get(<<"entities">>, D))),
+    ?assertEqual(HotId, id_of(ent(<<"mcp_fx_hot">>, maps:get(<<"entities">>,
+                                  ok_call(Config, <<"process_info">>, #{<<"id">> => HotId}))))),
+    %% strict arguments
+    ?assertMatch({rpc_error, -32602, _}, call(Config, <<"top_processes">>, #{<<"limit">> => 51})),
+    ?assertMatch({rpc_error, -32602, _}, call(Config, <<"top_processes">>, #{<<"limit">> => 0})),
+    ?assertMatch({rpc_error, -32602, _}, call(Config, <<"top_processes">>, #{<<"sortBy">> => <<"links">>})),
+    ?assertMatch({rpc_error, -32602, _}, call(Config, <<"top_processes">>, #{<<"mailbox">> => true})),
+    exit(Hot, kill).
+
+supervision_tree_reports_child_counts(Config) ->
+    Pages = all_pages(Config, <<"supervision_tree">>, #{<<"id">> => fixture_root_id(Config)}),
+    Ents = entities(Pages),
+    Sub = hd([E || #{<<"childId">> := <<"mcp_fx_sub_sup">>} = E <- Ents]),
+    ?assertMatch(#{<<"children">> := #{<<"specs">> := 2, <<"active">> := 2,
+                                       <<"supervisors">> := 0, <<"workers">> := 2}}, Sub),
+    Root = hd([E || #{<<"name">> := <<"mcp_fx_root">>} = E <- Ents]),
+    ?assertMatch(#{<<"children">> := #{<<"specs">> := 3, <<"active">> := 3,
+                                       <<"supervisors">> := 2, <<"workers">> := 1}}, Root),
+    %% workers carry no counts
+    ?assertEqual([], [E || #{<<"role">> := <<"worker">>} = E <- Ents, maps:is_key(<<"children">>, E)]).
+
+paused_process_is_reported_from_debugger_evidence(Config) ->
+    Quiet = ok_call(Config, <<"debug_session">>, #{}),
+    ?assertEqual([], maps:get(<<"pausedProcesses">>, Quiet)),
+    Mod = mcp_fixture_paused,
+    {module, Mod} = code:ensure_loaded(Mod),
+    case catch int:i(Mod) of
+        {module, Mod} ->
+            try
+                ok = int:auto_attach([break], {Mod, handler, []}),
+                ok = int:break(Mod, Mod:break_line()),
+                Pid = spawn(fun() -> Mod:run() end),
+                Line = Mod:break_line(),
+                wait_until(fun() ->
+                                   case ok_call(Config, <<"debug_session">>, #{}) of
+                                       #{<<"pausedProcesses">> := [_ | _]} -> true;
+                                       _ -> false
+                                   end
+                           end),
+                #{<<"pausedProcesses">> := [Paused]} = ok_call(Config, <<"debug_session">>, #{}),
+                ?assertMatch(#{<<"status">> := <<"break">>, <<"module">> := <<"mcp_fixture_paused">>,
+                               <<"line">> := Line, <<"id">> := _}, Paused),
+                %% the same process id joins with process_info, which names the breakpoint
+                Info = ok_call(Config, <<"process_info">>,
+                               #{<<"pid">> => list_to_binary(pid_to_list(Pid))}),
+                PidText = list_to_binary(pid_to_list(Pid)),
+                [E] = [X || #{<<"pid">> := T} = X <- maps:get(<<"entities">>, Info), T =:= PidText],
+                ?assertEqual(maps:get(<<"id">>, Paused), id_of(E)),
+                ?assertMatch(#{<<"debugger">> := #{<<"status">> := <<"break">>,
+                                                   <<"module">> := <<"mcp_fixture_paused">>,
+                                                   <<"line">> := Line}}, E),
+                %% an ordinary process has no debugger field
+                Other = ok_call(Config, <<"process_info">>, #{<<"name">> => <<"mcp_fx_worker_c">>}),
+                ?assertEqual(false, maps:is_key(<<"debugger">>, ent(<<"mcp_fx_worker_c">>, maps:get(<<"entities">>, Other)))),
+                exit(Pid, kill)
+            after
+                catch int:auto_attach(false),
+                catch int:no_break(Mod),
+                catch int:n(Mod)
+            end;
+        Other2 ->
+            {skip, {debugger_unavailable, Other2}}
+    end.
 
 collect_journal(0) -> [];
 collect_journal(N) ->

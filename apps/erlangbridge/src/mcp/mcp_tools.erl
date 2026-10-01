@@ -1,4 +1,4 @@
-%% The seven read-only tools: descriptions, strict input schemas, output
+%% The eight read-only tools: descriptions, strict input schemas, output
 %% schemas and the argument validator. Unknown arguments are rejected.
 -module(mcp_tools).
 
@@ -102,15 +102,33 @@ def(<<"ets_tables">>) ->
            <<"detail">> => detail_prop(), <<"pageSize">> => page_size_prop()}, []),
      graph_output()};
 
+def(<<"top_processes">>) ->
+    {<<"Top processes">>,
+     <<"Rank the local processes of the node by message queue length, reductions or memory and return the top ones "
+       "(default 10, max 50) with status, current function, initial call, registered name and application membership "
+       "evidence. Use it to find hot, stuck or heavy processes without calling process_info on each one. A bounded "
+       "point-in-time scan: processes start and exit during it, reductions are cumulative since process start. "
+       "Never reads mailbox, dictionary, stack or state.">>,
+     obj(#{<<"sortBy">> => #{<<"type">> => <<"string">>,
+                             <<"enum">> => [<<"message_queue_len">>, <<"reductions">>, <<"memory">>],
+                             <<"description">> => <<"Ranking criterion. Default message_queue_len.">>},
+           <<"limit">> => #{<<"type">> => <<"integer">>, <<"minimum">> => 1, <<"maximum">> => 50,
+                            <<"description">> => <<"Number of processes to return. Default 10.">>},
+           <<"cursor">> => cursor_prop(),
+           <<"detail">> => detail_prop(), <<"pageSize">> => page_size_prop()}, []),
+     graph_output()};
+
 def(<<"debug_session">>) ->
     {<<"Debug session">>,
      <<"Safe metadata of the current debug session: launch or attach, node connection, interpreted modules and "
-       "active breakpoint locations (module and line). No source, environment or credentials.">>,
+       "active breakpoint locations (module and line), and the processes currently stopped at a breakpoint (process id, "
+       "module and line). No source, environment or credentials.">>,
      obj(#{}, []),
      obj(#{<<"schemaVersion">> => str(), <<"sessionId">> => str(), <<"observedAt">> => str(),
            <<"mode">> => str(), <<"nodeConnected">> => #{<<"type">> => <<"boolean">>},
            <<"interpretedModules">> => #{<<"type">> => <<"array">>},
-           <<"breakpoints">> => #{<<"type">> => <<"array">>}},
+           <<"breakpoints">> => #{<<"type">> => <<"array">>},
+           <<"pausedProcesses">> => #{<<"type">> => <<"array">>}},
          [<<"schemaVersion">>, <<"sessionId">>])}.
 
 structured_error_schema() ->

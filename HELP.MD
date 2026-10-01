@@ -178,7 +178,7 @@ ceilings:
 {mcp, [
     {allowed_tools, [<<"runtime_summary">>, <<"application_overview">>, <<"supervision_tree">>,
                      <<"process_info">>, <<"registered_processes">>, <<"ets_tables">>,
-                     <<"debug_session">>]},
+                     <<"debug_session">>, <<"top_processes">>]},
     {allowed_ets_tables, []},          %% exact names, e.g. [<<"orders_index">>]; private tables never
     {limits, [{max_request_bytes, 16384}, {max_result_bytes, 262144}, {max_items, 500},
               {max_depth, 16}, {max_binary_bytes, 4096}, {max_traversal_depth, 8},
@@ -200,7 +200,8 @@ A malformed or duplicated term, an `mcp` term only inside a profile, or keys suc
 | `registered_processes` | locally registered names with status/queue length and membership (`confirmed`/`inferred`/`unknown`); `application`, `cursor` |
 | `process_info` | allowlisted fields of one process (by `id`, `name` or `pid`), links/monitors as ids; never dictionary, stack, mailbox or state |
 | `ets_tables` | metadata of the approved named tables (protection, type, owner, size, memory in words and bytes) - never keys or values |
-| `debug_session` | launch/attach, interpreted modules, breakpoint locations (module and line) |
+| `top_processes` | the hottest local processes ranked by message queue length, reductions or memory (`sortBy`, `limit` up to 50): status, current function, initial call, name, membership. Bounded point-in-time scan, never mailbox/state |
+| `debug_session` | launch/attach, interpreted modules, breakpoint locations (module and line), processes currently stopped at a breakpoint (`pausedProcesses`: process id, module, line) |
 
 Graph tools also take `detail` and `pageSize`. `detail: "summary"` (default) is meant for agents:
 same entities, ids and edges, without rarely needed fields (pids, descriptions, per-edge
@@ -236,7 +237,7 @@ a breakpoint or busy):
 
 **Agent workflow**: `runtime_summary` + `application_overview` -> pick an application, follow its
 root ids into `supervision_tree` (expand subtrees with the ids in `limit_reached` omissions) ->
-enrich with `process_info`, `registered_processes`, `ets_tables`, `debug_session` -> join by ids,
+enrich with `process_info`, `registered_processes`, `top_processes`, `ets_tables`, `debug_session` -> join by ids,
 keep confirmed edges apart from inferences, and report the omissions. Module names can then be
 correlated with the workspace/LSP tools; the inspector never returns source or code paths.
 

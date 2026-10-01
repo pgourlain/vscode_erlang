@@ -12,7 +12,7 @@
 %% atomic snapshot.
 %%
 %% Cost notes (documented residual risk): application:which_applications/1,
-%% registered/0, supervisor:which_children/1 and supervisor:count_children/1
+%% erlang:processes/0 (top_processes, capped at ?MAX_SCANNED entries), registered/0, supervisor:which_children/1 and supervisor:count_children/1
 %% materialize lists in the target VM and cannot be interrupted once started;
 %% killing the worker only discards the late reply.
 -module(mcp_runtime).
@@ -24,6 +24,8 @@
 -define(MAX_SPEC_LOOKUPS, 200).
 %% default page size for agents (detail=summary); detail=full pages use max_items
 -define(SUMMARY_PAGE, 100).
+-define(MAX_SCANNED, 200000).
+-define(MAX_TOP, 50).
 
 %%------------------------------------------------------------------------------
 %% Entry point
@@ -60,6 +62,7 @@ run(<<"supervision_tree">>, Args, Ctx) -> supervision_tree(Args, Ctx);
 run(<<"registered_processes">>, Args, Ctx) -> registered_processes(Args, Ctx);
 run(<<"process_info">>, Args, Ctx) -> tool_process_info(Args, Ctx);
 run(<<"ets_tables">>, Args, Ctx) -> ets_tables(Args, Ctx);
+run(<<"top_processes">>, Args, Ctx) -> top_processes(Args, Ctx);
 run(_, _, _) -> {error, <<"unknown_tool">>, <<"unknown tool">>}.
 
 %% A deadline-bounded call in a monitored worker. On timeout the worker is
@@ -138,6 +141,8 @@ debug_session(#{enc := Enc} = _Ctx) ->
     Max = maps:get(max_items, Enc),
     {Interpreted, IUnavailable} = debug_call(fun() -> int:interpreted() end, []),
     {Breaks, BUnavailable} = debug_call(fun() -> int:all_breaks() end, []),
+    {Snapshot, SUnavailable} = debug_call(fun() -> int:snapshot() end, []),
+    Paused = paused_list(Snapshot),
     Mods = [atom_to_binary(M, utf8) || M <- lists:sublist(lists:sort(Interpreted), Max), is_atom(M)],
     Bps = [#{<<"module">> => atom_to_binary(M, utf8), <<"line">> => L}
            || {{M, L}, _} <- lists:sublist(lists:sort(Breaks), Max), is_atom(M), is_integer(L)],
@@ -148,16 +153,45 @@ debug_session(#{enc := Enc} = _Ctx) ->
            <<"nodeConnected">> => true,
            <<"interpretedModules">> => Mods,
            <<"breakpoints">> => Bps,
-           <<"debuggerMetadata">> => case IUnavailable orelse BUnavailable of
+           <<"pausedProcesses">> => [#{<<"id">> => pid_id(P),
+                                       <<"name">> => case erlang:process_info(P, registered_name) of
+                                                         {registered_name, N} -> bin(N);
+                                                         _ -> null
+                                                     end,
+                                       <<"status">> => <<"break">>,
+                                       <<"module">> => atom_to_binary(M, utf8),
+                                       <<"line">> => L}
+                                     || {P, M, L} <- lists:sublist(Paused, Max)],
+           <<"debuggerMetadata">> => case IUnavailable orelse BUnavailable orelse SUnavailable of
                                          true -> <<"unavailable">>;
                                          false -> <<"available">>
                                      end,
-           <<"truncated">> => length(Interpreted) > Max orelse length(Breaks) > Max}}.
+           <<"truncated">> => length(Interpreted) > Max orelse length(Breaks) > Max
+                                  orelse length(Paused) > Max}}.
 
 debug_call(Fun, Default) ->
     case bounded(Fun, 1500) of
         {ok, R} when is_list(R) -> {R, false};
         _ -> {Default, true}
+    end.
+
+%% int:snapshot/0 -> [{Pid, Mod, Line}] of the interpreted processes stopped at a
+%% breakpoint (status `break`). Only local pids and module/line are kept.
+paused_list(Snapshot) ->
+    lists:sort([{P, M, L} || {P, _Init, break, {M, L}} <- Snapshot,
+                             is_pid(P), node(P) =:= node(), is_atom(M), is_integer(L)]).
+
+%% -> {ok, #{Pid => {Mod, Line}}} | unavailable   (debugger evidence only)
+paused_map() ->
+    case bounded(fun() -> int:snapshot() end, 500) of
+        {ok, L} when is_list(L) -> {ok, maps:from_list([{P, {M, Line}} || {P, M, Line} <- paused_list(L)])};
+        _ -> unavailable
+    end.
+
+paused_at(Pid) ->
+    case paused_map() of
+        {ok, M} -> maps:find(Pid, M);
+        unavailable -> error
     end.
 
 mode_text(launch) -> <<"launch">>;
@@ -175,6 +209,13 @@ add_entity(#{ent_ids := Ids, ents := Es} = B, Id, Entity) ->
         true -> B;
         false -> B#{ents := [Entity#{<<"id">> => Id} | Es], ent_ids := Ids#{Id => true}}
     end.
+
+%% add fields to an entity already in the builder (add_entity keeps the first one)
+merge_entity(#{ents := Es} = B, Id, Fields) ->
+    B#{ents := [case E of
+                    #{<<"id">> := Id} -> maps:merge(E, Fields);
+                    _ -> E
+                end || E <- Es]}.
 
 add_rel(#{rel_keys := Keys, rels := Rs} = B, Type, From, To, Evidence, Confidence) ->
     Key = {Type, From, To},
@@ -614,18 +655,30 @@ walk([{Sup, Depth} | Rest], #{ctx := Ctx} = Cfg, Visited, B) ->
             {SupId, B1} = process_entity(Sup, #{<<"role">> => <<"supervisor">>,
                                                 <<"application">> => app_text(Cfg)}, B),
             case children_of(Sup, Ctx) of
-                {ok, Children} ->
+                {ok, Children, Counts} ->
+                    B1c = merge_entity(B1, SupId, #{<<"children">> => counts_map(Counts)}),
                     {B2, Next} = lists:foldl(
                                    fun(C, {Acc, Q}) -> child(C, Sup, SupId, Depth, Cfg, Acc, Q) end,
-                                   {B1, []}, Children),
+                                   {B1c, []}, Children),
                     walk(Rest ++ lists:reverse(Next), Cfg, Visited#{Sup => true}, B2);
-                {too_many, N} ->
-                    B2 = add_omission(B1, <<"limit_reached">>, N, SupId,
+                {too_many, N, Counts} ->
+                    B1c = merge_entity(B1, SupId, #{<<"children">> => counts_map(Counts)}),
+                    B2 = add_omission(B1c, <<"limit_reached">>, N, SupId,
                                       <<"too many children to list safely; children not listed">>, false),
                     walk(Rest, Cfg, Visited#{Sup => true}, B2);
                 timeout ->
-                    B2 = add_omission(B1, <<"timeout">>, 1, SupId,
-                                      <<"the supervisor did not answer in time; its children are missing from this map">>, false),
+                    B2 = case paused_at(Sup) of
+                             {ok, {PM, PL}} ->
+                                 add_omission(B1, <<"unavailable_while_paused">>, 1, SupId,
+                                              iolist_to_binary(
+                                                [<<"the supervisor is stopped at a breakpoint (">>, bin(PM), $:,
+                                                 integer_to_binary(PL),
+                                                 <<"); its children are missing from this map until it is resumed">>]),
+                                              false);
+                             _ ->
+                                 add_omission(B1, <<"timeout">>, 1, SupId,
+                                              <<"the supervisor did not answer in time; its children are missing from this map">>, false)
+                         end,
                     walk(Rest, Cfg, Visited#{Sup => true}, B2);
                 gone ->
                     B2 = add_omission(B1, <<"disappeared">>, 1, SupId,
@@ -637,16 +690,16 @@ walk([{Sup, Depth} | Rest], #{ctx := Ctx} = Cfg, Visited, B) ->
 app_text(#{app := undefined}) -> null;
 app_text(#{app := App}) -> bin(App).
 
-%% -> {ok, [{ChildId, Child, Type, Modules, SpecMeta}]} | {too_many, N} | timeout | gone
+%% -> {ok, [{ChildId, Child, Type, Modules, SpecMeta}], Counts} | {too_many, N, Counts} | timeout | gone
 children_of(Sup, Ctx) ->
     Fun = fun() ->
                   Counts = supervisor:count_children(Sup),
                   Total = proplists:get_value(specs, Counts, 0),
                   case Total > ?MAX_LISTED_CHILDREN of
-                      true -> {too_many, Total};
+                      true -> {too_many, Total, Counts};
                       false ->
                           Cs = supervisor:which_children(Sup),
-                          {ok, with_specs(Sup, Cs, 0, [])}
+                          {ok, with_specs(Sup, Cs, 0, []), Counts}
                   end
           end,
     %% one third of the request budget per supervisor: a blocked supervisor
@@ -657,6 +710,13 @@ children_of(Sup, Ctx) ->
         timeout -> timeout;
         {error, _} -> gone
     end.
+
+%% supervisor:count_children/1 as an entity field: how many child specs, running
+%% children, supervisors and workers (never child arguments).
+counts_map(Counts) ->
+    maps:from_list([{atom_to_binary(K, utf8), V}
+                    || K <- [specs, active, supervisors, workers],
+                       {K2, V} <- Counts, K2 =:= K, is_integer(V)]).
 
 with_specs(_Sup, [], _N, Acc) -> lists:reverse(Acc);
 with_specs(Sup, [{Id, Child, Type, Mods} | T], N, Acc) ->
@@ -930,7 +990,13 @@ build_process_info(Pid, Info, Started, Args, #{enc := Enc} = Ctx, Config) ->
                <<"membership">> => #{<<"confidence">> => Conf, <<"evidence">> => Evidence},
                <<"callbackModule">> => <<"unknown">>,
                <<"behaviour">> => <<"unknown">>},
-    {Id, B1} = process_entity(Pid, Fields, new_b()),
+    Fields1 = case paused_at(Pid) of
+                  {ok, {PM, PL}} ->
+                      Fields#{<<"debugger">> => #{<<"status">> => <<"break">>,
+                                                  <<"module">> => bin(PM), <<"line">> => PL}};
+                  _ -> Fields
+              end,
+    {Id, B1} = process_entity(Pid, Fields1, new_b()),
     Links = [L || L <- proplists:get_value(links, Info, []), is_pid(L) orelse is_port(L)],
     Mons = [M || {process, M} <- proplists:get_value(monitors, Info, []), is_pid(M)],
     {B2, Omitted1} = peers(Links, <<"linked_to">>, <<"process_info links">>, Id, Max, B1),
@@ -945,7 +1011,8 @@ build_process_info(Pid, Info, Started, Args, #{enc := Enc} = Ctx, Config) ->
               <<"limitations">> =>
                   [<<"Links and monitors do not imply supervision or message traffic.">>,
                    <<"Callback module and behaviour are only reported when supervisor child metadata is available (see supervision_tree).">>,
-                   <<"Process dictionary, stack, mailbox and state are never read.">>]},
+                   <<"Process dictionary, stack, mailbox and state are never read.">>,
+                   <<"The debugger field is only present for a process the debugger reports stopped at a breakpoint.">>]},
     finish_graph(<<"process_info">>, Args, Scope, B4, Started, Ctx).
 
 peers(Peers, Type, Evidence, FromId, Max, B) ->
@@ -1002,6 +1069,108 @@ resolve_process(Name) when is_binary(Name) ->
             end
     catch _:_ -> {error, <<"not_found">>, <<"no process is registered under this name">>}
     end.
+
+%%------------------------------------------------------------------------------
+%% top_processes (ranking by queue length / reductions / memory)
+%%------------------------------------------------------------------------------
+
+top_processes(Args, Ctx) ->
+    Started = mcp_store:now_ms(),
+    SortBy = sort_item(maps:get(<<"sortBy">>, Args, <<"message_queue_len">>)),
+    Limit = min(maps:get(<<"limit">>, Args, 10), ?MAX_TOP),
+    All = erlang:processes(),
+    Total = length(All),
+    {Scan, Cut} = case Total > ?MAX_SCANNED of
+                      true -> {lists:sublist(All, ?MAX_SCANNED), Total - ?MAX_SCANNED};
+                      false -> {All, 0}
+                  end,
+    {Keyed, Unscanned} = rank_keys(Scan, SortBy, self(), Ctx, 0, []),
+    %% a few spare candidates: inspector processes are filtered out below
+    Ranked = lists:sublist(lists:reverse(lists:sort(Keyed)), Limit + 8),
+    Masters = masters(Ctx),
+    {B1, Gone, _} = lists:foldl(
+                      fun({_, Pid}, {Acc, G, Rank}) when Rank =< Limit ->
+                              case top_entry(Pid, SortBy, Rank, Masters, Acc) of
+                                  skip -> {Acc, G, Rank};
+                                  gone -> {Acc, G + 1, Rank};
+                                  {ok, Acc1} -> {Acc1, G, Rank + 1}
+                              end;
+                         (_, Done) -> Done
+                      end, {new_b(), 0, 1}, Ranked),
+    B2 = case Gone of
+             0 -> B1;
+             _ -> add_omission(B1, <<"disappeared">>, Gone, undefined,
+                               <<"ranked processes that exited before they could be described">>, false)
+         end,
+    B3 = case Unscanned of
+             0 -> B2;
+             _ -> add_omission(B2, <<"timeout">>, Unscanned, undefined,
+                               <<"the time budget ended the scan; the ranking only covers the processes scanned so far">>, false)
+         end,
+    B4 = case Cut of
+             0 -> B3;
+             _ -> add_omission(B3, <<"limit_reached">>, Cut, undefined,
+                               <<"more processes than the scan limit; the ranking only covers the first ones">>, false)
+         end,
+    Scope = #{<<"tool">> => <<"top_processes">>,
+              <<"sortBy">> => atom_to_binary(SortBy, utf8),
+              <<"limit">> => Limit,
+              <<"processCount">> => Total,
+              <<"limitations">> =>
+                  [<<"A point-in-time scan, not an atomic snapshot: processes start and exit while it runs.">>,
+                   <<"reductions are cumulative since the process started, not a rate; memory is in bytes.">>,
+                   <<"Only metadata is returned: never mailbox, dictionary, stack or state.">>,
+                   <<"Inspector processes are excluded.">>]},
+    finish_graph(<<"top_processes">>, Args, Scope, B4, Started, Ctx).
+
+sort_item(<<"reductions">>) -> reductions;
+sort_item(<<"memory">>) -> memory;
+sort_item(_) -> message_queue_len.
+
+%% -> {[{Value, Pid}], NotScanned}: stops early when the time budget is used up
+rank_keys([], _Item, _Self, _Ctx, _N, Acc) -> {Acc, 0};
+rank_keys([Pid | T] = Pids, Item, Self, Ctx, N, Acc) ->
+    case N rem 1000 =:= 0 andalso N > 0 andalso remaining(Ctx) =:= 0 of
+        true -> {Acc, length(Pids)};
+        false ->
+            Acc1 = case Pid =/= Self andalso erlang:process_info(Pid, Item) of
+                       {Item, V} when is_integer(V) -> [{V, Pid} | Acc];
+                       _ -> Acc
+                   end,
+            rank_keys(T, Item, Self, Ctx, N + 1, Acc1)
+    end.
+
+top_entry(Pid, SortBy, Rank, Masters, B) ->
+    Items = [registered_name, status, current_function, initial_call, reductions, memory, message_queue_len],
+    case erlang:process_info(Pid, Items) of
+        undefined -> gone;
+        Info ->
+            case lists:keyfind(registered_name, 1, Info) of
+                {registered_name, N} when is_atom(N) ->
+                    case inspector_name(N) of
+                        true -> skip;
+                        false -> top_entity(Pid, Info, SortBy, Rank, Masters, B)
+                    end;
+                _ -> top_entity(Pid, Info, SortBy, Rank, Masters, B)
+            end
+    end.
+
+top_entity(Pid, Info, SortBy, Rank, Masters, B) ->
+    {Conf, App, Evidence} = membership(Pid, #{}, Masters),
+    Fields = #{<<"role">> => <<"unknown">>,
+               <<"rank">> => Rank,
+               <<"rankedBy">> => atom_to_binary(SortBy, utf8),
+               <<"status">> => bin(proplists:get_value(status, Info, unknown)),
+               <<"currentFunction">> => mfa_text(proplists:get_value(current_function, Info)),
+               <<"initialCall">> => mfa_text(proplists:get_value(initial_call, Info)),
+               <<"reductions">> => proplists:get_value(reductions, Info, 0),
+               <<"memory">> => proplists:get_value(memory, Info, 0),
+               <<"memoryUnit">> => <<"bytes">>,
+               <<"messageQueueLen">> => proplists:get_value(message_queue_len, Info, 0),
+               <<"application">> => case App of undefined -> null; _ -> bin(App) end,
+               <<"membership">> => #{<<"confidence">> => Conf, <<"evidence">> => Evidence}},
+    {_, B1} = process_entity(Pid, Fields, B),
+    {ok, B1}.
 
 %%------------------------------------------------------------------------------
 %% ets_tables (metadata of approved named tables only)

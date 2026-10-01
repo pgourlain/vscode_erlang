@@ -400,7 +400,7 @@ dispatch(<<"initialize">>, Params, Id, _Config) ->
                                    "then application_overview (no modules), pick the application and follow its 'roots' "
                                    "ids with supervision_tree (expand deeper subtrees with the ids given in 'limit_reached' "
                                    "omissions), then process_info / registered_processes(application=id) / ets_tables / "
-                                   "debug_session only where needed. Ids are reusable across tools. Default detail=summary "
+                                   "debug_session only where needed; top_processes finds hot or stuck processes in one call. Ids are reusable across tools. Default detail=summary "
                                    "keeps answers small; follow nextCursor only if you need the remaining items. Use "
                                    "detail=full only when the user asks for the complete JSON (e.g. to save it to a file). "
                                    "Maps are bounded observation intervals, not atomic snapshots: honour complete/"
