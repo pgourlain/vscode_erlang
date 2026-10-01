@@ -30,6 +30,8 @@ all() ->
      top_processes_ranks_and_is_bounded,
      supervision_tree_reports_child_counts,
      mermaid_format_renders_the_returned_edges,
+     topology_overview_maps_one_application_in_one_call,
+     topology_overview_leaves_out_parts_the_policy_denies,
      paused_process_is_reported_from_debugger_evidence,
      restart_changes_identity,
      pagination_cursors_and_retention,
@@ -82,6 +84,8 @@ test_config(Case) ->
     case Case of
         allowlist_enforced ->
             Base1#{allowed_tools => [<<"runtime_summary">>, <<"ets_tables">>]};
+        topology_overview_leaves_out_parts_the_policy_denies ->
+            Base1#{allowed_tools => [<<"topology_overview">>, <<"supervision_tree">>, <<"application_overview">>]};
         pagination_cursors_and_retention ->
             Base1#{limits => L#{max_items => 10, max_collections => 2, collection_ttl_ms => 1500}};
         collection_byte_budget_is_partial_and_non_resumable ->
@@ -157,7 +161,7 @@ decode(Bin) ->
 %% unless the case chooses the detail itself (see agent_summary_is_compact).
 call(Config, Tool, Args0) when is_map(Args0) ->
     Graph = [<<"application_overview">>, <<"supervision_tree">>, <<"registered_processes">>,
-             <<"process_info">>, <<"ets_tables">>, <<"top_processes">>],
+             <<"process_info">>, <<"ets_tables">>, <<"top_processes">>, <<"topology_overview">>],
     Args = case lists:member(Tool, Graph) andalso not maps:is_key(<<"detail">>, Args0) of
                true -> Args0#{<<"detail">> => <<"full">>};
                false -> Args0
@@ -313,7 +317,7 @@ initialize_negotiates_and_lists_only_readonly_tools(Config) ->
     #{<<"result">> := #{<<"tools">> := Tools}} = rpc(Config, <<"tools/list">>, #{}),
     Names = lists:sort([maps:get(<<"name">>, T) || T <- Tools]),
     ?assertEqual(lists:sort(mcp_policy:all_tools()), Names),
-    ?assertEqual(8, length(Tools)),
+    ?assertEqual(9, length(Tools)),
     [begin
          ?assertMatch(#{<<"inputSchema">> := #{<<"type">> := <<"object">>, <<"additionalProperties">> := false},
                         <<"outputSchema">> := #{<<"type">> := <<"object">>},
@@ -1052,6 +1056,51 @@ supervision_tree_reports_child_counts(Config) ->
                                        <<"supervisors">> := 2, <<"workers">> := 1}}, Root),
     %% workers carry no counts
     ?assertEqual([], [E || #{<<"role">> := <<"worker">>} = E <- Ents, maps:is_key(<<"children">>, E)]).
+
+topology_overview_maps_one_application_in_one_call(Config) ->
+    Pages = all_pages(Config, <<"topology_overview">>, #{<<"name">> => <<"mcp_fixture_app">>}),
+    Ents = entities(Pages),
+    %% the application, its tree (same edges as supervision_tree), registered workers and the owned table
+    ?assertMatch(#{<<"kind">> := <<"application">>, <<"version">> := <<"9.9.9">>}, ent(<<"mcp_fixture_app">>, Ents)),
+    ?assertEqual(lists:sort([{<<"mcp_fx_root">>, <<"worker_a">>}, {<<"mcp_fx_root">>, <<"mcp_fx_sub_sup">>},
+                             {<<"mcp_fx_root">>, <<"mcp_fx_dyn_sup">>}, {<<"mcp_fx_sub_sup">>, <<"worker_b">>},
+                             {<<"mcp_fx_sub_sup">>, <<"worker_c">>}]), supervises_edges(Pages)),
+    Sub = hd([E || #{<<"childId">> := <<"mcp_fx_sub_sup">>} = E <- Ents]),
+    ?assertMatch(#{<<"children">> := #{<<"specs">> := 2}}, Sub),
+    ?assertMatch(#{<<"kind">> := <<"ets_table">>, <<"protection">> := <<"public">>}, ent(<<"mcp_fx_orders">>, Ents)),
+    %% a private or unrelated table is not in the application's map
+    ?assertEqual([], by_name(<<"mcp_fx_private">>, Ents)),
+    Owns = [R || #{<<"type">> := <<"owns_table">>} = R <- relationships(Pages)],
+    ?assertEqual(1, length(Owns)),
+    ?assertEqual(<<"belongs_to">>, maps:get(<<"type">>, hd([R || #{<<"type">> := <<"belongs_to">>} = R <- relationships(Pages)]))),
+    %% the orphan (linked, unsupervised, registered) is at most an inferred member, never supervised
+    ?assertMatch(#{<<"membership">> := #{<<"confidence">> := <<"inferred">>}}, ent(<<"mcp_fx_orphan">>, Ents)),
+    OrphanId = id_of(ent(<<"mcp_fx_orphan">>, Ents)),
+    ?assertEqual([], [R || #{<<"type">> := <<"supervises">>, <<"to">> := T} = R <- relationships(Pages), T =:= OrphanId]),
+    %% unrelated registered processes are reported as omitted, never merged in
+    Reasons = lists:usort([maps:get(<<"reason">>, O) || P <- Pages, O <- maps:get(<<"omissions">>, P)]),
+    ?assertEqual([], Reasons -- [<<"unknown_membership">>]),
+    ?assertEqual(nomatch, re:run(iolist_to_binary(io_lib:format("~p", [Pages])), "SENTINEL")),
+    ?assertMatch(#{<<"tool">> := <<"topology_overview">>, <<"parts">> := [_, _, _, _]}, maps:get(<<"scope">>, hd(Pages))),
+    %% by id gives the same collection content; exactly one selector, strict arguments
+    AppId = fixture_app_id(Config),
+    ?assertEqual(supervises_edges(Pages), supervises_edges(all_pages(Config, <<"topology_overview">>, #{<<"application">> => AppId}))),
+    ?assertMatch({rpc_error, -32602, _}, call(Config, <<"topology_overview">>, #{})),
+    ?assertMatch({rpc_error, -32602, _}, call(Config, <<"topology_overview">>, #{<<"name">> => <<"a">>, <<"application">> => AppId})),
+    ?assertMatch({tool_error, #{<<"error">> := #{<<"code">> := <<"not_found">>}}},
+                 call(Config, <<"topology_overview">>, #{<<"name">> => <<"no_such_application_zz">>})),
+    ?assertMatch({tool_error, #{<<"error">> := #{<<"code">> := <<"not_found">>}}},
+                 call(Config, <<"topology_overview">>, #{<<"name">> => <<"kernel_not_started_zz">>})),
+    ?assertMatch({tool_error, #{<<"error">> := #{<<"code">> := <<"invalid_id">>}}},
+                 call(Config, <<"topology_overview">>, #{<<"application">> => id_of(hd([E || #{<<"role">> := <<"supervisor">>} = E <- Ents]))})).
+
+topology_overview_leaves_out_parts_the_policy_denies(Config) ->
+    S = ok_call(Config, <<"topology_overview">>, #{<<"name">> => <<"mcp_fixture_app">>}),
+    ?assertMatch(#{<<"parts">> := [<<"supervision_tree">>, <<"application_overview">>]}, maps:get(<<"scope">>, S)),
+    Denied = [maps:get(<<"message">>, O) || #{<<"reason">> := <<"policy_denied">>} = O <- maps:get(<<"omissions">>, S)],
+    ?assertEqual(2, length(Denied)),
+    ?assertEqual([], [E || #{<<"kind">> := <<"ets_table">>} = E <- maps:get(<<"entities">>, S)]),
+    ?assertEqual(false, maps:get(<<"complete">>, S)).
 
 mermaid_format_renders_the_returned_edges(Config) ->
     RootId = fixture_root_id(Config),

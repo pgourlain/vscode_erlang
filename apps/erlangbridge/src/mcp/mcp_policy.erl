@@ -33,7 +33,7 @@
 -define(TOOLS, [<<"runtime_summary">>, <<"application_overview">>,
                 <<"supervision_tree">>, <<"process_info">>,
                 <<"registered_processes">>, <<"ets_tables">>,
-                <<"debug_session">>, <<"top_processes">>]).
+                <<"debug_session">>, <<"top_processes">>, <<"topology_overview">>]).
 
 %% {internal key, project key, JSON key, default = ceiling}
 -define(LIMITS,

@@ -62,13 +62,23 @@ call(Tool, Args, Ctx0) ->
 
 run(<<"runtime_summary">>, Args, Ctx) -> runtime_summary(Args, Ctx);
 run(<<"debug_session">>, _Args, Ctx) -> debug_session(Ctx);
-run(<<"application_overview">>, Args, Ctx) -> application_overview(Args, Ctx);
-run(<<"supervision_tree">>, Args, Ctx) -> supervision_tree(Args, Ctx);
-run(<<"registered_processes">>, Args, Ctx) -> registered_processes(Args, Ctx);
+run(<<"application_overview">>, Args, Ctx) -> graph_tool(<<"application_overview">>, fun application_overview_build/2, Args, Ctx);
+run(<<"supervision_tree">>, Args, Ctx) -> graph_tool(<<"supervision_tree">>, fun supervision_tree_build/2, Args, Ctx);
+run(<<"registered_processes">>, Args, Ctx) -> graph_tool(<<"registered_processes">>, fun registered_processes_build/2, Args, Ctx);
 run(<<"process_info">>, Args, Ctx) -> tool_process_info(Args, Ctx);
-run(<<"ets_tables">>, Args, Ctx) -> ets_tables(Args, Ctx);
+run(<<"ets_tables">>, Args, Ctx) -> graph_tool(<<"ets_tables">>, fun ets_tables_build/2, Args, Ctx);
+run(<<"topology_overview">>, Args, Ctx) -> graph_tool(<<"topology_overview">>, fun topology_overview_build/2, Args, Ctx);
 run(<<"top_processes">>, Args, Ctx) -> top_processes(Args, Ctx);
 run(_, _, _) -> {error, <<"unknown_tool">>, <<"unknown tool">>}.
+
+%% Graph tools build a Builder (entities, relationships, omissions) and a scope;
+%% finish_graph retains it as a collection and renders the first page.
+graph_tool(Tool, Build, Args, Ctx) ->
+    Started = mcp_store:now_ms(),
+    case Build(Args, Ctx) of
+        {ok, Scope, B} -> finish_graph(Tool, Args, Scope, B, Started, Ctx);
+        {error, _, _} = E -> E
+    end.
 
 %% A deadline-bounded call in a monitored worker. On timeout the worker is
 %% killed (an inspector-owned process) and any late reply is discarded.
@@ -521,8 +531,7 @@ root_info(App, Ctx) ->
         _ -> no_start_module
     end.
 
-application_overview(Args, #{enc := Enc} = Ctx) ->
-    Started = mcp_store:now_ms(),
+application_overview_build(Args, #{enc := Enc} = Ctx) ->
     IncludeModules0 = maps:get(<<"includeModules">>, Args, false),
     %% listing the modules of every application floods an agent: with
     %% detail=summary, modules are only listed for a selected application
@@ -579,7 +588,7 @@ application_overview(Args, #{enc := Enc} = Ctx) ->
                            <<"Declared dependencies (depends_on) are declarations from the application resource, not evidence of runtime communication.">>,
                            <<"Root discovery uses the application master; rootStatus explains when no root is available.">>,
                            <<"Application environment values, code paths and callbacks are never read or invoked.">>]},
-            finish_graph(<<"application_overview">>, Args, Scope, B3, Started, Ctx)
+            {ok, Scope, B3}
     end.
 
 select_application(undefined) -> {ok, all};
@@ -653,8 +662,7 @@ app_entities(App, Desc, Vsn, _StartedNames, IncludeModules, Enc, Ctx, B0) ->
 %% supervision_tree
 %%------------------------------------------------------------------------------
 
-supervision_tree(Args, #{config := Config} = Ctx) ->
-    Started = mcp_store:now_ms(),
+supervision_tree_build(Args, #{config := Config} = Ctx) ->
     MaxDepth = min(maps:get(<<"maxDepth">>, Args, 16), mcp_policy:limit(max_traversal_depth, Config)),
     IncludeModules = maps:get(<<"includeModules">>, Args, false),
     case tree_start(Args, Ctx) of
@@ -667,7 +675,7 @@ supervision_tree(Args, #{config := Config} = Ctx) ->
                                 [<<"Only 'supervises' edges from supervisor:which_children/1 are emitted; links and monitors are never supervision.">>,
                                  <<"Unsupervised, unregistered and transient processes are not part of this map.">>,
                                  <<"Child start arguments are never returned.">>]},
-            finish_graph(<<"supervision_tree">>, Args, Scope, B1, Started, Ctx)
+            {ok, Scope, B1}
     end.
 
 %% -> {ok, [RootPid], AppName | undefined, Scope, Builder} | {error, Code, Msg}
@@ -913,8 +921,7 @@ module_edges(_, _, B) -> B.
 %% registered_processes
 %%------------------------------------------------------------------------------
 
-registered_processes(Args, #{enc := Enc, config := Config} = Ctx) ->
-    Started = mcp_store:now_ms(),
+registered_processes_build(Args, #{enc := Enc, config := Config} = Ctx) ->
     case select_application(maps:get(<<"application">>, Args, undefined)) of
         {error, _, _} = E -> E;
         {ok, Selected} ->
@@ -948,7 +955,7 @@ registered_processes(Args, #{enc := Enc, config := Config} = Ctx) ->
                           [<<"Only locally registered names are listed; unregistered processes are not enumerated.">>,
                            <<"A registered name alone never confirms application membership.">>,
                            <<"Inspector processes are excluded.">>]},
-            finish_graph(<<"registered_processes">>, Args, Scope, B3, Started, Ctx)
+            {ok, Scope, B3}
     end.
 
 masters(Ctx) ->
@@ -1144,6 +1151,113 @@ resolve_process(Name) when is_binary(Name) ->
     end.
 
 %%------------------------------------------------------------------------------
+%% topology_overview: application + supervision tree + registered processes +
+%% owned approved ETS tables of ONE application in a single collection. Each part is
+%% included only when its own tool is allowed by the project policy.
+%%------------------------------------------------------------------------------
+
+topology_overview_build(Args, #{config := Config} = Ctx) ->
+    case overview_application(Args, Ctx) of
+        {error, _, _} = E -> E;
+        {ok, App} ->
+            AppId = app_id(App),
+            Allowed = fun(Tool) -> mcp_policy:tool_allowed(Tool, Config) end,
+            Part = fun(Tool, Build, PArgs) ->
+                           case Allowed(Tool) of
+                               true -> Build(PArgs, Ctx);
+                               false -> denied
+                           end
+                   end,
+            Tree = Part(<<"supervision_tree">>, fun supervision_tree_build/2, #{<<"id">> => AppId}),
+            Over = Part(<<"application_overview">>, fun application_overview_build/2, #{<<"application">> => AppId}),
+            Reg = Part(<<"registered_processes">>, fun registered_processes_build/2, #{<<"application">> => AppId}),
+            Ets = Part(<<"ets_tables">>, fun ets_tables_build/2, #{}),
+            Parts = [{<<"supervision_tree">>, Tree}, {<<"application_overview">>, Over},
+                     {<<"registered_processes">>, Reg}, {<<"ets_tables">>, Ets}],
+            case [E || {_, {error, _, _} = E} <- Parts] of
+                [Err | _] -> Err;
+                [] -> merge_overview(AppId, Parts)
+            end
+    end.
+
+%% -> {ok, App} | {error, Code, Msg}: an entity id or the name of a started application
+overview_application(#{<<"application">> := Id}, _Ctx) ->
+    case select_application(Id) of
+        {ok, {app, App}} -> {ok, App};
+        {error, _, _} = E -> E
+    end;
+overview_application(#{<<"name">> := Name}, Ctx) ->
+    try binary_to_existing_atom(Name, utf8) of
+        App ->
+            case started_apps(Ctx) of
+                {ok, Apps} ->
+                    case lists:keymember(App, 1, Apps) of
+                        true -> {ok, App};
+                        false -> {error, <<"not_found">>, <<"no started application has this name">>}
+                    end;
+                _ -> {error, <<"timeout">>, <<"application_controller did not answer in time">>}
+            end
+    catch _:_ -> {error, <<"not_found">>, <<"no started application has this name">>}
+    end.
+
+%% The richest entity wins (the tree describes a supervisor better than the overview
+%% does), so the tree is merged first; ETS tables only when their owner is in the map.
+merge_overview(AppId, Parts) ->
+    Order = [<<"supervision_tree">>, <<"application_overview">>, <<"registered_processes">>],
+    Merged = lists:foldl(
+               fun(Tool, Acc) ->
+                       case proplists:get_value(Tool, Parts) of
+                           {ok, _, B} -> merge_builders(Acc, B);
+                           _ -> Acc
+                       end
+               end, new_b(), Order),
+    WithEts = case proplists:get_value(<<"ets_tables">>, Parts) of
+                  {ok, _, EtsB} -> merge_owned_tables(Merged, EtsB);
+                  _ -> Merged
+              end,
+    Denied = [Tool || {Tool, denied} <- Parts],
+    B1 = lists:foldl(
+           fun(Tool, Acc) ->
+                   add_omission(Acc, <<"policy_denied">>, 1, undefined,
+                                <<"part not included: the project policy does not allow ", Tool/binary>>, false)
+           end, WithEts, Denied),
+    Included = [Tool || {Tool, {ok, _, _}} <- Parts],
+    Limitations = lists:usort(lists:append([maps:get(<<"limitations">>, Sc, []) || {_, {ok, Sc, _}} <- Parts])),
+    Scope = #{<<"tool">> => <<"topology_overview">>,
+              <<"application">> => AppId,
+              <<"parts">> => Included,
+              <<"limitations">> =>
+                  [<<"One collection assembled from several observations made in sequence: it is an interval, not an atomic snapshot.">>
+                   | Limitations]},
+    {ok, Scope, B1}.
+
+merge_builders(Into, From) ->
+    B1 = lists:foldl(fun(E, Acc) -> add_entity(Acc, maps:get(<<"id">>, E), maps:remove(<<"id">>, E)) end,
+                     Into, lists:reverse(maps:get(ents, From))),
+    B2 = lists:foldl(fun(#{<<"type">> := T, <<"from">> := F, <<"to">> := To} = R, #{rel_keys := Keys, rels := Rs} = Acc) ->
+                             Key = {T, F, To},
+                             case maps:is_key(Key, Keys) of
+                                 true -> Acc;
+                                 false -> Acc#{rel_keys := Keys#{Key => true}, rels := [R | Rs]}
+                             end
+                     end, B1, lists:reverse(maps:get(rels, From))),
+    B3 = B2#{oms := maps:get(oms, B2) ++ maps:get(oms, From)},
+    B3#{pids := maps:merge(maps:get(pids, B3), maps:get(pids, From))}.
+
+%% keep an approved table (and its owns_table edge) only when its owner is already in the map
+merge_owned_tables(B, EtsB) ->
+    Have = maps:get(ent_ids, B),
+    Tables = maps:from_list([{maps:get(<<"id">>, E), E} || E <- maps:get(ents, EtsB),
+                                                          maps:get(<<"kind">>, E) =:= <<"ets_table">>]),
+    Owned = [R || #{<<"type">> := <<"owns_table">>, <<"from">> := F, <<"to">> := T} = R <- lists:reverse(maps:get(rels, EtsB)),
+                  maps:is_key(F, Have), maps:is_key(T, Tables)],
+    lists:foldl(fun(#{<<"to">> := T} = R, Acc) ->
+                        Acc1 = add_entity(Acc, T, maps:remove(<<"id">>, maps:get(T, Tables))),
+                        add_rel(Acc1, <<"owns_table">>, maps:get(<<"from">>, R), T,
+                                maps:get(<<"evidence">>, R), maps:get(<<"confidence">>, R))
+                end, B, Owned).
+
+%%------------------------------------------------------------------------------
 %% top_processes (ranking by queue length / reductions / memory)
 %%------------------------------------------------------------------------------
 
@@ -1249,8 +1363,7 @@ top_entity(Pid, Info, SortBy, Rank, Masters, B) ->
 %% ets_tables (metadata of approved named tables only)
 %%------------------------------------------------------------------------------
 
-ets_tables(Args, #{config := Config} = Ctx) ->
-    Started = mcp_store:now_ms(),
+ets_tables_build(_Args, #{config := Config}) ->
     Names = maps:get(allowed_ets_tables, Config),
     {B, Denied, Gone} = lists:foldl(
                           fun(Name, {Acc, D, G}) -> ets_entry(Name, Acc, D, G) end,
@@ -1271,7 +1384,7 @@ ets_tables(Args, #{config := Config} = Ctx) ->
                   [<<"Only tables approved by allowed_ets_tables are inspected; no node-wide inventory exists.">>,
                    <<"Keys, objects and values are never read.">>,
                    <<"memory is reported in words with memoryBytes derived from the VM word size.">>]},
-    finish_graph(<<"ets_tables">>, Args, Scope, B2, Started, Ctx).
+    {ok, Scope, B2}.
 
 ets_entry(NameBin, B, Denied, Gone) ->
     Atom = try binary_to_existing_atom(NameBin, utf8) catch _:_ -> undefined end,

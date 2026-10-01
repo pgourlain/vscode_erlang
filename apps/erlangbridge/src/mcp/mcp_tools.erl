@@ -110,6 +110,21 @@ def(<<"ets_tables">>) ->
            <<"format">> => format_prop()}, []),
      graph_output()};
 
+def(<<"topology_overview">>) ->
+    {<<"Topology overview">>,
+     <<"One-call map of a single started application: the application with its declared dependencies and root, "
+       "its supervision tree (with child counts), its registered processes and the approved ETS tables owned by those "
+       "processes, as one collection of entities and typed relationships. Give the application by entity id or by "
+       "name. Parts whose own tool is not allowed by the project policy are left out and reported as a policy_denied "
+       "omission. For several applications, deeper subtrees or exports use the individual tools.">>,
+     obj(#{<<"application">> => id_prop(<<"Application entity id from a previous call.">>),
+           <<"name">> => #{<<"type">> => <<"string">>, <<"maxLength">> => 255,
+                           <<"description">> => <<"Name of a started application (must be an existing atom).">>},
+           <<"cursor">> => cursor_prop(),
+           <<"detail">> => detail_prop(), <<"pageSize">> => page_size_prop(),
+           <<"format">> => format_prop()}, []),
+     graph_output()};
+
 def(<<"top_processes">>) ->
     {<<"Top processes">>,
      <<"Rank the local processes of the node by message queue length, reductions or memory and return the top ones "
@@ -209,6 +224,15 @@ exclusive(<<"process_info">>, Args) ->
     case length([K || K <- [<<"id">>, <<"name">>, <<"pid">>], maps:is_key(K, Args)]) of
         1 -> ok;
         _ -> {error, <<"exactly one of id, name or pid is required">>}
+    end;
+exclusive(<<"topology_overview">>, Args) ->
+    case maps:is_key(<<"cursor">>, Args) of
+        true -> ok;
+        false ->
+            case length([K || K <- [<<"application">>, <<"name">>], maps:is_key(K, Args)]) of
+                1 -> ok;
+                _ -> {error, <<"exactly one of application or name is required">>}
+            end
     end;
 exclusive(<<"supervision_tree">>, Args) ->
     case maps:is_key(<<"cursor">>, Args) of

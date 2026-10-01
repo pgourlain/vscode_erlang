@@ -178,7 +178,7 @@ ceilings:
 {mcp, [
     {allowed_tools, [<<"runtime_summary">>, <<"application_overview">>, <<"supervision_tree">>,
                      <<"process_info">>, <<"registered_processes">>, <<"ets_tables">>,
-                     <<"debug_session">>, <<"top_processes">>]},
+                     <<"debug_session">>, <<"top_processes">>, <<"topology_overview">>]},
     {allowed_ets_tables, []},          %% exact names, e.g. [<<"orders_index">>]; private tables never
     {limits, [{max_request_bytes, 16384}, {max_result_bytes, 262144}, {max_items, 500},
               {max_depth, 16}, {max_binary_bytes, 4096}, {max_traversal_depth, 8},
@@ -200,6 +200,7 @@ A malformed or duplicated term, an `mcp` term only inside a profile, or keys suc
 | `registered_processes` | locally registered names with status/queue length and membership (`confirmed`/`inferred`/`unknown`); `application`, `cursor` |
 | `process_info` | allowlisted fields of one process (by `id`, `name` or `pid`), links/monitors as ids; never dictionary, stack, mailbox or state |
 | `ets_tables` | metadata of the approved named tables (protection, type, owner, size, memory in words and bytes) - never keys or values |
+| `topology_overview` | one call for one application (`name` or `application` id): the application, its supervision tree with child counts, registered processes and the approved ETS tables they own, as one collection. Parts whose own tool is not allowed by the policy are left out (`policy_denied` omission) |
 | `top_processes` | the hottest local processes ranked by message queue length, reductions or memory (`sortBy`, `limit` up to 50): status, current function, initial call, name, membership. Bounded point-in-time scan, never mailbox/state |
 | `debug_session` | launch/attach, interpreted modules, breakpoint locations (module and line), processes currently stopped at a breakpoint (`pausedProcesses`: process id, module, line) |
 
