@@ -203,7 +203,8 @@ A malformed or duplicated term, an `mcp` term only inside a profile, or keys suc
 | `top_processes` | the hottest local processes ranked by message queue length, reductions or memory (`sortBy`, `limit` up to 50): status, current function, initial call, name, membership. Bounded point-in-time scan, never mailbox/state |
 | `debug_session` | launch/attach, interpreted modules, breakpoint locations (module and line), processes currently stopped at a breakpoint (`pausedProcesses`: process id, module, line) |
 
-Graph tools also take `detail` and `pageSize`. `detail: "summary"` (default) is meant for agents:
+Graph tools also take `detail`, `pageSize` and `format`. `format: "mermaid"` adds a `mermaid` field (a `graph TD`
+of the returned page, built from the returned edges only) so that an agent can render the diagram without redrawing it. `detail: "summary"` (default) is meant for agents:
 same entities, ids and edges, without rarely needed fields (pids, descriptions, per-edge
 `observedAt`, coverage limitations after the first page), 100 items per page, and module lists only
 for one selected application. `detail: "full"` returns every field in the largest pages (policy

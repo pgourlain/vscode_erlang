@@ -47,7 +47,12 @@ call(Tool, Args, Ctx0) ->
                    {undefined, full} -> MaxItems;
                    {N, _} -> min(N, MaxItems)
                end,
-    Ctx = Ctx0#{enc => maps:with([max_depth, max_items, max_binary_bytes], maps:get(limits, Config)),
+    Format = case maps:get(<<"format">>, Args, <<"json">>) of
+                 <<"mermaid">> -> mermaid;
+                 _ -> json
+             end,
+    Ctx = Ctx0#{format => Format,
+                enc => maps:with([max_depth, max_items, max_binary_bytes], maps:get(limits, Config)),
                 soft_deadline => now_mono() + (Timeout * 7) div 10,
                 detail => Detail, page_size => PageSize},
     case maps:find(<<"cursor">>, Args) of
@@ -330,7 +335,7 @@ envelope(Tool, Hash, CollId, Meta, Page, Offset, More, Ctx) ->
                true -> mcp_store:make_cursor(CollId, Tool, Hash, Offset + length(Page));
                false -> null
            end,
-    #{<<"schemaVersion">> => ?SV,
+    Env = #{<<"schemaVersion">> => ?SV,
       <<"sessionId">> => mcp_store:session_id(),
       <<"collectionId">> => CollId,
       <<"startedAt">> => mcp_encoder:iso8601(maps:get(started_at, Meta)),
@@ -343,7 +348,58 @@ envelope(Tool, Hash, CollId, Meta, Page, Offset, More, Ctx) ->
       <<"truncated">> => maps:get(truncated, Meta),
       <<"omissions">> => maps:get(omissions, Meta),
       <<"nextCursor">> => Next,
-      <<"page">> => #{<<"offset">> => Offset, <<"items">> => length(Page)}}.
+      <<"page">> => #{<<"offset">> => Offset, <<"items">> => length(Page)}},
+    case maps:get(format, Ctx, json) of
+        mermaid -> Env#{<<"mermaid">> => mermaid_graph(Entities, Rels)};
+        json -> Env
+    end.
+
+%% A `graph TD` of one page, from the entities and relationships it returns. Labels
+%% are reduced to a safe character set (they come from atoms of the debugged VM).
+mermaid_graph(Entities, Rels) ->
+    Known = maps:from_list([{maps:get(<<"id">>, E), E} || E <- Entities]),
+    Missing = lists:usort([Id || R <- Rels, Id <- [maps:get(<<"from">>, R), maps:get(<<"to">>, R)],
+                                 not maps:is_key(Id, Known)]),
+    Nodes = [mermaid_node(E) || E <- Entities]
+        ++ [[<<"    ">>, mermaid_id(Id), <<"[\"">>, mermaid_text(Id), <<"\"]\n">>] || Id <- Missing],
+    Edges = [mermaid_edge(R) || R <- Rels],
+    iolist_to_binary([<<"graph TD\n">>, Nodes, Edges]).
+
+mermaid_node(E) ->
+    Label = [mermaid_text(mermaid_label(E)),
+             case mermaid_detail(E) of
+                 <<>> -> [];
+                 D -> [<<"<br/>">>, mermaid_text(D)]
+             end],
+    [<<"    ">>, mermaid_id(maps:get(<<"id">>, E)), <<"[\"">>, Label, <<"\"]\n">>].
+
+mermaid_edge(#{<<"type">> := Type, <<"from">> := F, <<"to">> := T}) ->
+    Arrow = case Type of
+                <<"supervises">> -> <<"-->">>;
+                _ -> <<"-.->">>
+            end,
+    [<<"    ">>, mermaid_id(F), <<" ">>, Arrow, <<"|">>, mermaid_text(Type), <<"| ">>, mermaid_id(T), <<"\n">>].
+
+mermaid_label(E) ->
+    first_binary([maps:get(K, E, null) || K <- [<<"name">>, <<"childId">>, <<"pid">>, <<"id">>]]).
+
+mermaid_detail(E) ->
+    Parts = [V || K <- [<<"role">>, <<"restart">>, <<"childState">>], V <- [maps:get(K, E, null)],
+                  is_binary(V), V =/= <<"unknown">>],
+    iolist_to_binary(lists:join(<<" / ">>, Parts)).
+
+first_binary([B | _]) when is_binary(B) -> B;
+first_binary([_ | T]) -> first_binary(T);
+first_binary([]) -> <<"?">>.
+
+mermaid_id(Id) -> [<<"n_">>, re:replace(Id, "[^A-Za-z0-9_]", "_", [global, {return, binary}])].
+
+mermaid_text(Bin) ->
+    Clean = re:replace(Bin, "[^A-Za-z0-9_ :/.@#-]", "_", [global, {return, binary}]),
+    case byte_size(Clean) > 60 of
+        true -> <<(binary:part(Clean, 0, 57))/binary, "...">>;
+        false -> Clean
+    end.
 
 %% detail=summary: same entities and edges, without the fields an agent rarely
 %% needs to reason about the topology (they stay available with detail=full).

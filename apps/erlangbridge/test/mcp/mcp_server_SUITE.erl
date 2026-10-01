@@ -29,6 +29,7 @@ all() ->
      ets_tables_metadata_only_for_approved_tables,
      top_processes_ranks_and_is_bounded,
      supervision_tree_reports_child_counts,
+     mermaid_format_renders_the_returned_edges,
      paused_process_is_reported_from_debugger_evidence,
      restart_changes_identity,
      pagination_cursors_and_retention,
@@ -1051,6 +1052,32 @@ supervision_tree_reports_child_counts(Config) ->
                                        <<"supervisors">> := 2, <<"workers">> := 1}}, Root),
     %% workers carry no counts
     ?assertEqual([], [E || #{<<"role">> := <<"worker">>} = E <- Ents, maps:is_key(<<"children">>, E)]).
+
+mermaid_format_renders_the_returned_edges(Config) ->
+    RootId = fixture_root_id(Config),
+    Plain = ok_call(Config, <<"supervision_tree">>, #{<<"id">> => RootId}),
+    ?assertEqual(false, maps:is_key(<<"mermaid">>, Plain)),
+    S = ok_call(Config, <<"supervision_tree">>, #{<<"id">> => RootId, <<"format">> => <<"mermaid">>,
+                                                 <<"detail">> => <<"summary">>}),
+    ?assertEqual(false, maps:get(<<"truncated">>, S)),
+    Mermaid = maps:get(<<"mermaid">>, S),
+    [<<"graph TD">> | Lines] = binary:split(Mermaid, <<"\n">>, [global, trim_all]),
+    Edges = [L || L <- Lines, binary:match(L, <<"-->">>) =/= nomatch],
+    ?assertEqual(5, length(Edges)),
+    [?assertNotEqual(nomatch, binary:match(E, <<"|supervises|">>)) || E <- Edges],
+    ?assertEqual(5, length(supervises_edges([S]))),
+    [?assertNotEqual(nomatch, binary:match(Mermaid, N)) || N <- [<<"mcp_fx_root">>, <<"mcp_fx_sub_sup">>, <<"supervisor">>]],
+    %% only safe characters: nothing from the VM can break out of a label
+    ?assertEqual(nomatch, re:run(binary:replace(Mermaid, <<"<br/>">>, <<" ">>, [global]), "[<>\"{}`;]\\w*[<>{}`;]",
+                                 [{capture, none}])),
+    ?assertEqual(nomatch, binary:match(Mermaid, <<"SENTINEL">>)),
+    %% a relationship whose endpoint is on another page still gets a node
+    Small = ok_call(Config, <<"supervision_tree">>, #{<<"id">> => RootId, <<"format">> => <<"mermaid">>,
+                                                     <<"pageSize">> => 3}),
+    ?assertNotEqual(nomatch, binary:match(maps:get(<<"mermaid">>, Small), <<"graph TD">>)),
+    ?assertMatch({rpc_error, -32602, _}, call(Config, <<"supervision_tree">>, #{<<"id">> => RootId, <<"format">> => <<"dot">>})),
+    %% other graph tools accept it too
+    ?assertMatch(#{<<"mermaid">> := _}, ok_call(Config, <<"top_processes">>, #{<<"format">> => <<"mermaid">>})).
 
 paused_process_is_reported_from_debugger_evidence(Config) ->
     Quiet = ok_call(Config, <<"debug_session">>, #{}),

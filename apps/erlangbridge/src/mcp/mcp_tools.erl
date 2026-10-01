@@ -54,7 +54,8 @@ def(<<"application_overview">>) ->
      obj(#{<<"application">> => id_prop(<<"Only this application (entity id from a previous call).">>),
            <<"includeModules">> => bool(<<"Also list module entities (with declared behaviours when the module is already loaded). Default false.">>),
            <<"cursor">> => cursor_prop(),
-           <<"detail">> => detail_prop(), <<"pageSize">> => page_size_prop()}, []),
+           <<"detail">> => detail_prop(), <<"pageSize">> => page_size_prop(),
+           <<"format">> => format_prop()}, []),
      graph_output()};
 
 def(<<"supervision_tree">>) ->
@@ -69,7 +70,8 @@ def(<<"supervision_tree">>) ->
            <<"maxDepth">> => #{<<"type">> => <<"integer">>, <<"minimum">> => 1, <<"maximum">> => 16},
            <<"includeModules">> => bool(<<"Add module entities and uses_module edges. Default false.">>),
            <<"cursor">> => cursor_prop(),
-           <<"detail">> => detail_prop(), <<"pageSize">> => page_size_prop()}, []),
+           <<"detail">> => detail_prop(), <<"pageSize">> => page_size_prop(),
+           <<"format">> => format_prop()}, []),
      graph_output()};
 
 def(<<"registered_processes">>) ->
@@ -79,7 +81,8 @@ def(<<"registered_processes">>) ->
        "never silently assigned to the selected application. Does not enumerate unregistered processes.">>,
      obj(#{<<"application">> => id_prop(<<"Only processes attributed to this application.">>),
            <<"cursor">> => cursor_prop(),
-           <<"detail">> => detail_prop(), <<"pageSize">> => page_size_prop()}, []),
+           <<"detail">> => detail_prop(), <<"pageSize">> => page_size_prop(),
+           <<"format">> => format_prop()}, []),
      graph_output()};
 
 def(<<"process_info">>) ->
@@ -93,7 +96,8 @@ def(<<"process_info">>) ->
            <<"pid">> => #{<<"type">> => <<"string">>, <<"maxLength">> => 64,
                           <<"description">> => <<"Local pid text such as <0.123.0>.">>},
            <<"cursor">> => cursor_prop(),
-           <<"detail">> => detail_prop(), <<"pageSize">> => page_size_prop()}, []),
+           <<"detail">> => detail_prop(), <<"pageSize">> => page_size_prop(),
+           <<"format">> => format_prop()}, []),
      graph_output()};
 
 def(<<"ets_tables">>) ->
@@ -102,7 +106,8 @@ def(<<"ets_tables">>) ->
        "protection, type, owner entity id, size and memory with units. Private tables are excluded. Never reads keys, "
        "objects or values.">>,
      obj(#{<<"cursor">> => cursor_prop(),
-           <<"detail">> => detail_prop(), <<"pageSize">> => page_size_prop()}, []),
+           <<"detail">> => detail_prop(), <<"pageSize">> => page_size_prop(),
+           <<"format">> => format_prop()}, []),
      graph_output()};
 
 def(<<"top_processes">>) ->
@@ -118,7 +123,8 @@ def(<<"top_processes">>) ->
            <<"limit">> => #{<<"type">> => <<"integer">>, <<"minimum">> => 1, <<"maximum">> => 50,
                             <<"description">> => <<"Number of processes to return. Default 10.">>},
            <<"cursor">> => cursor_prop(),
-           <<"detail">> => detail_prop(), <<"pageSize">> => page_size_prop()}, []),
+           <<"detail">> => detail_prop(), <<"pageSize">> => page_size_prop(),
+           <<"format">> => format_prop()}, []),
      graph_output()};
 
 def(<<"debug_session">>) ->
@@ -159,6 +165,12 @@ str() -> #{<<"type">> => <<"string">>}.
 int() -> #{<<"type">> => <<"integer">>}.
 bool(Desc) -> #{<<"type">> => <<"boolean">>, <<"description">> => Desc}.
 id_prop(Desc) -> #{<<"type">> => <<"string">>, <<"maxLength">> => 64, <<"description">> => Desc}.
+format_prop() ->
+    #{<<"type">> => <<"string">>, <<"enum">> => [<<"json">>, <<"mermaid">>],
+      <<"description">> => <<"json (default): entities and relationships only. mermaid: also return a 'mermaid' field "
+                            "with a ready-to-render `graph TD` of this page (built from the returned edges, so it "
+                            "cannot show a relationship the tools did not report).">>}.
+
 detail_prop() ->
     #{<<"type">> => <<"string">>, <<"enum">> => [<<"summary">>, <<"full">>],
       <<"description">> => <<"summary (default): compact entities/edges, 100 items per page - best for reasoning. "
