@@ -99,7 +99,7 @@ The policy example shows the defaults. For an approved named table, use a binary
 
 ### Read-Only Tools
 
-Implement exactly the seven tools below, with discoverable input/output schemas and descriptions. Do not expose prompts or resources in V1.
+Implement exactly the seven tools below, with discoverable input/output schemas and descriptions. Do not expose prompts or resources in V1. *(Superseded after V1: five more tools, one prompt and one edge type were added deliberately; see "Post-V1 additions" under Implementation Progress. The text below keeps describing the original V1 contract.)*
 
 #### `application_overview`
 
@@ -577,7 +577,17 @@ Deviation: `proc_lib:initial_call/1` (reads the process dictionary internally, r
 
 **T15.** Docs: HELP.MD, mcp_security.md, DevelopersReadme.md, CHANGELOG.md; CI step added. Not done: startup from a packaged VSIX, OTP 25/27/28 runs.
 
-Next: T11 real-client test, T12/T14 gaps above.
+Next: T11 real-client test, T12/T14 gaps above (still open; deliberately not scheduled).
+
+### Post-V1 additions
+
+Decided with the user after the V1 work order, all within the read-only/metadata-only guardrails (no new write, eval, mailbox, ETS-value or source access). The toolset is now twelve tools; the original seven are unchanged apart from the additive fields noted.
+
+- `top_processes` (queue length / reductions / memory ranking), `top_ports` (queue size / traffic counters; driver name and owner only, never addresses or command lines), `ets_summary` (ETS memory per owner, no table names), `topology_overview` (one application in one collection; each part obeys its own tool's allowlist entry), `changes_since` (diff against a retained collection; baseline limited by `collection_ttl_ms` / `max_collections`).
+- Additive fields: `children` counts on supervisors (`supervisor:count_children`), `pausedProcesses` in `debug_session` and a `debugger` field in `process_info` (from `int:snapshot/0`; a supervisor that is itself stopped at a breakpoint is reported as `unavailable_while_paused`), run queue / VM resource usage / connected node names in `runtime_summary`, `format: "mermaid"` on graph tools.
+- New edge type `owns_port` (MAP-03 extension). New MCP prompt `map_application` (the only exception to "no prompts"; static text, argument-checked, grants nothing).
+- Not added: restart intensity/period (no safe API), distributed traversal, tracing, any mutation.
+- Tests: `./rebar3 ct --dir apps/erlangbridge/test/mcp` (74 cases). Plain `./rebar3 ct` does not include this directory.
 
 ## Acceptance Criteria
 

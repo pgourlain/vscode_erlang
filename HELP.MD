@@ -254,23 +254,25 @@ coverage gaps, without guessing beyond what the tools return:
 
 ```text
 Using the erlang-otp-topology-inspector MCP server, map the OTP topology of application <app>
-in the node I am debugging.
+in the node I am debugging. Use only the tools that tools/list returns.
 
 Steps:
-1. runtime_summary, then application_overview to find <app>'s id and its root supervisors.
-2. supervision_tree from each root. If an omission says limit_reached or timeout, expand that
-   subtree with the id it gives.
-3. registered_processes(application=<app id>) to catch registered workers outside the tree.
-4. process_info only for processes that matter: supervisors, registered workers, anything with
-   a non-zero message queue or many links/monitors.
-5. ets_tables and debug_session only if they relate to <app>.
+1. topology_overview(name="<app>"): the application, its supervision tree, registered processes
+   and owned approved ETS tables in one call. If an omission says limit_reached or timeout,
+   expand that subtree with supervision_tree and the id it gives. (Without topology_overview:
+   runtime_summary, application_overview, supervision_tree from each root,
+   registered_processes(application=<id>).)
+2. top_processes (or process_info) only for processes that matter: supervisors, registered
+   workers, anything with a non-zero message queue. If debug_session reports processes stopped
+   at a breakpoint, say so: their supervisors may be reported as unavailable_while_paused.
+3. ets_tables and debug_session only if they relate to the application.
 
 Output:
-- A Mermaid `graph TD` of the supervision tree (edge = supervises; label children with kind
-  and restart type).
+- A Mermaid `graph TD` of the supervision tree (edge = supervises; label children with kind and
+  restart type). Tools take format=mermaid and return the diagram from the reported edges.
 - A table: name/pid, module, kind, restart, msg queue len, membership (confirmed/inferred).
 - "Coverage gaps": every truncated/omission/timeout reported by the tools.
-- 3–5 observations (single points of failure, deep trees, hot queues, temporary children).
+- 3-5 observations (single points of failure, deep trees, hot queues, temporary children).
 
 Rules: use only what the tools returned. Structural edges are not message traffic, so do not
 describe runtime call flows. Keep detail=summary unless I ask for the full JSON.
@@ -280,7 +282,7 @@ Example of the agent's answer (supervision tree diagram, then the process table)
 
 ![MCP inspector result](images/vscode-erlang-mcp-results.png)
 
-Narrower questions work too, e.g. *"Why is `<process>` slow? Use process_info on it and compare
+Narrower questions work too, e.g. *"Which processes are hot? Use top_processes by message_queue_len and say which application each belongs to"*, *"Why is `<process>` slow? Use process_info on it and compare
 its queue length and reductions with its siblings in the supervision tree"*, or *"Where are my
 breakpoints in the supervision tree? Use debug_session and supervision_tree with includeModules"*.
 
