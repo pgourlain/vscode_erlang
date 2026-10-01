@@ -12,6 +12,7 @@ vsc-extension-quickstart.md
 **/sample_forms.txt
 syntaxes/test/**
 _build/**
+**/_build/**
 apps/erlangbridge/test/**
 .vscode
 node_modules
