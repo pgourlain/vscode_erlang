@@ -11,6 +11,7 @@
   - Optional user setting `erlang.mcp.authToken` (development convenience): a fixed token so that a static client such as Claude Code (`claude mcp add`) is configured once; default empty = random token per session
   - The verbose debug log no longer prints the Erlang cookie passed to an attach helper
   - Supervisors in `supervision_tree` carry their child counts (`children`: specs, active, supervisors, workers); `debug_session` lists the processes stopped at a breakpoint (`pausedProcesses`), `process_info` adds a `debugger` field for such a process, and a supervisor that is itself stopped at a breakpoint is reported with the `unavailable_while_paused` omission instead of a plain timeout
+  - `runtime_summary` also reports the run queue length and process/atom/port/ETS counts against their VM limits (`resources`)
   - A ready-to-use prompt to map an application with an agent: [HELP.MD](./HELP.MD#mcp-topology-inspector-ai-agents-debug-sessions-only) (*Sample prompt*)
 
 ---

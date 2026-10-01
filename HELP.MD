@@ -194,7 +194,7 @@ A malformed or duplicated term, an `mcp` term only inside a profile, or keys suc
 
 | Tool | Purpose |
 | --- | --- |
-| `runtime_summary` | OTP/ERTS versions, node (host redacted by default), uptime, schedulers, process count, memory, session id |
+| `runtime_summary` | OTP/ERTS versions, node (host redacted by default), uptime, schedulers, run queue, process/atom/port/ETS counts against their VM limits (`resources`), memory, session id |
 | `application_overview` | started applications, versions, declared dependencies, root supervisor ids, optional module names/behaviours; `application`, `includeModules`, `cursor` |
 | `supervision_tree` | typed `supervises` edges from an application/supervisor id or a named supervisor; child role, modules, restart/shutdown; `id`/`supervisor`, `maxDepth`, `includeModules`, `cursor` |
 | `registered_processes` | locally registered names with status/queue length and membership (`confirmed`/`inferred`/`unknown`); `application`, `cursor` |

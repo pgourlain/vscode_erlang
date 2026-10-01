@@ -120,13 +120,30 @@ runtime_summary(Args, _Ctx) ->
            <<"uptimeMs">> => Uptime,
            <<"schedulers">> => erlang:system_info(schedulers),
            <<"processCount">> => erlang:system_info(process_count),
+           <<"schedulersOnline">> => erlang:system_info(schedulers_online),
+           <<"runQueue">> => erlang:statistics(run_queue),
+           <<"resources">> => #{<<"processes">> => resource(process_count, process_limit),
+                                <<"atoms">> => resource(atom_count, atom_limit),
+                                <<"ports">> => resource(port_count, port_limit),
+                                <<"ets">> => resource(ets_count, ets_limit)},
            <<"memory">> => #{<<"unit">> => <<"bytes">>,
                              <<"total">> => proplists:get_value(total, Mem),
+                             <<"code">> => proplists:get_value(code, Mem),
                              <<"processes">> => proplists:get_value(processes, Mem),
                              <<"system">> => proplists:get_value(system, Mem),
                              <<"atom">> => proplists:get_value(atom, Mem),
                              <<"binary">> => proplists:get_value(binary, Mem),
                              <<"ets">> => proplists:get_value(ets, Mem)}}}.
+
+%% {count, limit, usedPercent}: how close the node is to a VM limit; absent
+%% (null) on an OTP release that does not report it.
+resource(CountKey, LimitKey) ->
+    try {erlang:system_info(CountKey), erlang:system_info(LimitKey)} of
+        {C, L} when is_integer(C), is_integer(L), L > 0 ->
+            #{<<"count">> => C, <<"limit">> => L, <<"usedPercent">> => round(C * 1000 / L) / 10};
+        _ -> null
+    catch _:_ -> null
+    end.
 
 node_text(false) -> atom_to_binary(node(), utf8);
 node_text(true) ->

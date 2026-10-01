@@ -370,6 +370,13 @@ runtime_summary_redacts_node_host(Config) ->
     ?assertEqual(erlang:system_info(schedulers), maps:get(<<"schedulers">>, S)),
     ?assert(maps:get(<<"processCount">>, S) > 10),
     ?assert(maps:get(<<"uptimeMs">>, S) >= 0),
+    ?assert(maps:get(<<"runQueue">>, S) >= 0),
+    ?assertEqual(erlang:system_info(schedulers_online), maps:get(<<"schedulersOnline">>, S)),
+    #{<<"processes">> := #{<<"count">> := PC, <<"limit">> := PL, <<"usedPercent">> := PP},
+      <<"atoms">> := #{<<"count">> := AC, <<"limit">> := AL}} = maps:get(<<"resources">>, S),
+    ?assert(PC > 10 andalso PL >= PC andalso PP >= 0 andalso PP < 100),
+    ?assert(AC > 0 andalso AL > AC),
+    ?assertMatch(#{<<"code">> := C} when is_integer(C), maps:get(<<"memory">>, S)),
     ?assertMatch(#{<<"unit">> := <<"bytes">>, <<"total">> := T} when is_integer(T), maps:get(<<"memory">>, S)),
     %% opaque, non-secret session id shared with the map contract
     Sid = maps:get(<<"sessionId">>, S),

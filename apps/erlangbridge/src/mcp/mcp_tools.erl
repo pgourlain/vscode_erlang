@@ -33,12 +33,15 @@ tool_def(Name) ->
 def(<<"runtime_summary">>) ->
     {<<"Runtime summary">>,
      <<"Bounded metadata of the debugged Erlang node: OTP/ERTS versions, node name (host redacted by default), "
-       "uptime, scheduler and process counts, memory summary and the opaque debug session id. "
+       "uptime, scheduler count, run queue length, process/atom/port/ETS counts against their VM limits, memory "
+       "summary and the opaque debug session id. "
        "Start here, then call application_overview.">>,
      obj(#{<<"redactNodeHost">> => bool(<<"Replace the host part of the node name by <redacted>. Default true.">>)}, []),
      obj(#{<<"schemaVersion">> => str(), <<"sessionId">> => str(), <<"observedAt">> => str(),
            <<"otpRelease">> => str(), <<"ertsVersion">> => str(), <<"node">> => str(),
            <<"uptimeMs">> => int(), <<"schedulers">> => int(), <<"processCount">> => int(),
+           <<"schedulersOnline">> => int(), <<"runQueue">> => int(),
+           <<"resources">> => #{<<"type">> => <<"object">>},
            <<"memory">> => #{<<"type">> => <<"object">>}},
          [<<"schemaVersion">>, <<"sessionId">>])};
 
