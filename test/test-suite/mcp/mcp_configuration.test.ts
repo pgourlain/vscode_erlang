@@ -57,17 +57,19 @@ suite('MCP: debug configuration hook', () => {
         assert.strictEqual(cfg.mcpSettings, undefined);
     });
 
-    test('package.json declares the three settings with the documented defaults', () => {
+    test('package.json declares the four settings with the documented defaults', () => {
         const pkg = require('../../../../package.json');
         const props = pkg.contributes.configuration.properties;
         assert.strictEqual(props['erlang.mcp.enabled'].default, false);
         assert.strictEqual(props['erlang.mcp.host'].default, '127.0.0.1');
         assert.strictEqual(props['erlang.mcp.port'].default, 0);
+        // empty = random token per session; machine scope keeps it out of workspace settings
+        assert.strictEqual(props['erlang.mcp.authToken'].default, '');
+        assert.strictEqual(props['erlang.mcp.authToken'].scope, 'machine');
         assert.deepStrictEqual(Object.keys(props).filter(k => k.startsWith('erlang.mcp.')).sort(),
-            ['erlang.mcp.enabled', 'erlang.mcp.host', 'erlang.mcp.port']);
-        // no `required` option and no token setting in V1
+            ['erlang.mcp.authToken', 'erlang.mcp.enabled', 'erlang.mcp.host', 'erlang.mcp.port']);
+        // no `required` option
         assert.ok(!('erlang.mcp.required' in props));
-        assert.ok(!('erlang.mcp.authToken' in props));
         assert.ok(pkg.contributes.commands.some((c: any) => c.command === 'erlang.mcp.showConnectionDetails'));
     });
 });
