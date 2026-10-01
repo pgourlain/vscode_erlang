@@ -1,7 +1,7 @@
 {
 	"name": "erlang",
 	"description": "Erlang language extension for Visual Studio Code",
-	"version": "1.2.5",
+	"version": "1.2.6",
 	"icon": "images/icon.png",
 	"publisher": "pgourlain",
 	"engines": {
@@ -229,7 +229,17 @@
 				}
 			}
 		],
+		"mcpServerDefinitionProviders": [
+			{
+				"id": "erlang.mcp",
+				"label": "Erlang debug session (OTP topology inspector)"
+			}
+		],
 		"commands": [
+			{
+				"command": "erlang.mcp.showConnectionDetails",
+				"title": "Erlang MCP: Show Connection Details"
+			},
 			{
 				"command": "extension.rebarBuild",
 				"title": "Erlang: rebar compile"
@@ -525,6 +535,32 @@
 						"Always spawn through a shell",
 						"Never spawn through a shell"
 					]
+				},
+				"erlang.mcp.enabled": {
+					"type": "boolean",
+					"default": false,
+					"scope": "resource",
+					"markdownDescription": "Start a read-only, authenticated MCP server (OTP topology inspector) inside the Erlang node of a **debug session**. Off by default; never active in a normal editor session or with `noDebug`. Changes apply to new debug sessions. Tool/table allowlists and lower limits can be set with a top-level `{mcp, [...]}` term in the project's `rebar.config` (see HELP.MD)."
+				},
+				"erlang.mcp.host": {
+					"type": "string",
+					"default": "127.0.0.1",
+					"scope": "resource",
+					"markdownDescription": "Loopback address the MCP server binds to (`127.0.0.1`, another `127.x.y.z`, `::1`, or a name that resolves only to loopback). Wildcard, LAN and public addresses are rejected."
+				},
+				"erlang.mcp.authToken": {
+					"type": "string",
+					"default": "",
+					"scope": "machine",
+					"markdownDescription": "**Development convenience.** Fixed bearer token (16-128 characters of `A-Za-z0-9._~-`) used for every MCP session instead of a fresh random one, so a static client (e.g. `claude mcp add`) is configured once. Empty (default) = random token per session. Only read from user settings (not from the workspace). Anyone who knows the token and can reach the loopback port can read the inspector's metadata: prefer the default."
+				},
+				"erlang.mcp.port": {
+					"type": "integer",
+					"default": 0,
+					"minimum": 0,
+					"maximum": 65535,
+					"scope": "resource",
+					"markdownDescription": "Port of the MCP server. `0` (default) lets the OS pick a free port, which VS Code discovers automatically. Set a fixed port for static MCP clients; if it is busy, MCP is disabled for the session (no silent rebind)."
 				}
 			}
 		},

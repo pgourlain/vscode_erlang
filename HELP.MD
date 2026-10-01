@@ -121,6 +121,221 @@ Restart the language server after changing it.
   the same machine, with the `debugger` and `inets` applications available - see
   [Attach to a running node](./README.md#attach-to-a-running-node).
 
+## MCP topology inspector (AI agents, debug sessions only)
+
+An opt-in, **read-only** [MCP](https://modelcontextprotocol.io) server that lets an AI agent
+discover and explain the OTP topology (applications, supervisors, processes, modules, approved
+ETS metadata) of the Erlang node you are debugging. It is a structural map, not a trace of
+messages or business flows. Security model and residual risks: [mcp_security.md](./mcp_security.md).
+
+**Turn it on** (folder-scoped, default `false`) and start a *debug session* (launch or attach):
+
+```json
+{
+    "erlang.mcp.enabled": true,
+    "erlang.mcp.host": "127.0.0.1",
+    "erlang.mcp.port": 0
+}
+```
+
+- It starts only inside the debugged node, only for a real debug session (never in a normal
+  editor session, with *Run without debugging*, or from rebar/eunit) and stops with the session.
+  Settings are read per debug folder when the session starts; changing them does not affect a
+  running session.
+- `host` must be loopback (`127.0.0.1`, `::1`, ...); `0.0.0.0`, LAN and public addresses are
+  rejected. `port: 0` (default) lets the OS choose.
+- Any MCP problem (bad policy, busy port, untrusted workspace) is reported and disables **only** the
+  inspector; debugging continues. There is no "required" option.
+- Same machine only: the client must reach the node's loopback; no port forwarding is supported.
+  Attach needs the `crypto` application in the target in addition to `debugger` and `inets`.
+
+**Connect a client**
+
+- *VS Code* (1.101+, MCP provider API): the running session appears as an MCP server named
+  `Erlang debug: <session>` in the MCP server list (*MCP: List Servers*); the per-session token is
+  handed to VS Code automatically and never printed. It disappears when the session ends.
+- *Claude Code (and other static clients)*: Claude Code does not read VS Code's MCP list. For a
+  one-time setup, set the **user** setting `erlang.mcp.authToken` to a fixed development token
+  (16-128 chars `A-Za-z0-9._~-`, not read from workspace settings) and a fixed `erlang.mcp.port`, then once:
+  `claude mcp add --transport http erlang-debug http://127.0.0.1:<port>/mcp --header "Authorization: Bearer <token>"`.
+  The server is only reachable during a debug session. A fixed token is a convenience that trades
+  away the per-session credential: anyone knowing it who can reach the loopback port can read the
+  inspector's metadata. Leave it empty (default) for a fresh random token per session.
+- *Any other client*: run **Erlang MCP: Show Connection Details** (select the session if several)
+  and choose *Copy URL* / *Copy Authorization header* (explicit action; nothing is copied
+  automatically). Set a fixed `erlang.mcp.port` if the client needs a stable URL: the token
+  still changes at every session and must be supplied as `Authorization: Bearer <token>`. If the
+  fixed port is busy MCP is disabled for the session (no silent rebinding).
+- Protocol: MCP `2025-06-18`, Streamable HTTP with JSON responses (no SSE, no resources). One prompt, `map_application` (argument `application`), carries the sample prompt below, so a client that lists MCP prompts (e.g. VS Code: `/mcp.<server>.map_application`) can run it directly; it grants nothing.
+
+**Project policy (optional)** - a literal top-level term in the *target project's* `rebar.config`
+(nearest file from the debug `cwd`, never above the workspace folder; no `rebar.config.script`,
+no profiles). It controls tools, tables and limits only; activation, host, port and
+credentials come only from the VS Code settings. The values below are the defaults:
+
+```erlang
+{mcp, [
+    {allowed_tools, [<<"runtime_summary">>, <<"application_overview">>, <<"supervision_tree">>,
+                     <<"process_info">>, <<"registered_processes">>, <<"ets_tables">>,
+                     <<"debug_session">>, <<"top_processes">>, <<"topology_overview">>, <<"changes_since">>,
+                     <<"top_ports">>, <<"ets_summary">>, <<"process_groups">>]},
+    {allowed_ets_tables, []},          %% exact names, e.g. [<<"orders_index">>], or `all`; private tables never
+    {limits, [{max_request_bytes, 16384}, {max_result_bytes, 262144}, {max_items, 500},
+              {max_depth, 16}, {max_binary_bytes, 4096}, {max_traversal_depth, 8},
+              {max_concurrency, 2}, {request_timeout_ms, 3000}, {collection_ttl_ms, 30000},
+              {max_collection_bytes, 1048576}, {max_collections, 2}]}
+]}.
+```
+
+`allowed_tools` is an allowlist: a tool that is not listed is hidden, including tools added in later
+versions of the extension. To follow the built-in set write `{allowed_tools, default}`, or
+`{allowed_tools, [default, <<"process_state">>]}` to add developer tools to it. When the policy
+disables tools, the server says so in its MCP `instructions` (so the agent can tell you why a tool
+is missing instead of silently using a fallback).
+
+A limit can be raised above its default up to a hard ceiling (never beyond): `max_request_bytes` 65536,
+`max_result_bytes` 2097152, `max_items` 5000, `max_depth` 32, `max_binary_bytes` 65536,
+`max_traversal_depth` 16, `max_concurrency` 8, `request_timeout_ms` 15000, `collection_ttl_ms` 600000,
+`max_collection_bytes` 8388608, `max_collections` 16. Raising `collection_ttl_ms` and `max_collections`
+is what makes `changes_since` useful over a longer debugging session.
+
+**Developer tier (opt-in)** - on your own machine, with your own code, metadata alone is often not
+enough ("why is this process stuck?"). Three more tools return a *bounded sample of application
+data*; they are never enabled by default and must be named in `allowed_tools`. Remember that
+whatever a tool returns goes into the agent's context, i.e. to the model provider:
+
+```erlang
+{mcp, [
+    {allowed_tools, [<<"runtime_summary">>, <<"application_overview">>, <<"supervision_tree">>,
+                     <<"process_info">>, <<"top_processes">>, <<"topology_overview">>,
+                     <<"process_state">>, <<"mailbox_sample">>, <<"ets_sample">>]},
+    {allowed_ets_tables, all},          %% or exact names; also lets ets_summary count every non-private table
+    {limits, [{max_items, 2000}, {max_result_bytes, 1048576}, {request_timeout_ms, 10000},
+              {collection_ttl_ms, 300000}, {max_collections, 8}]}
+]}.
+```
+
+| Tool | Returns |
+| --- | --- |
+| `process_state` | `sys:get_state` of one gen_server / gen_statem / gen_event process (never a supervisor: its state holds the child start arguments; never a plain process: it is never sent a system message), bounded by depth, items and binary size. A process stopped at a breakpoint is reported as such |
+| `mailbox_sample` | queue length and the oldest few messages (default 5, max 20) of one process; a mailbox of more than 20000 messages is not copied |
+| `ets_sample` | a few objects (default 5, max 20) of one approved, non-private named table |
+
+Redaction is best effort: values of keys or map entries named like a secret (`password`, `token`,
+`secret`, `api_key`, `cookie`, `auth`...) and credentials in URLs (`scheme://user:pw@host`) are replaced,
+but a record without keys, or a secret in an unlabelled term, cannot be recognised.
+
+A malformed or duplicated term, an `mcp` term only inside a profile, or keys such as `enabled`,
+`host`, `port`, `required` or a token disable MCP for that session with an explanation.
+
+**Tools** (all read-only, strict input schemas, discoverable through `tools/list`)
+
+| Tool | Purpose |
+| --- | --- |
+| `runtime_summary` | OTP/ERTS versions, node (host redacted by default), uptime, schedulers, run queue, process/atom/port/ETS counts against their VM limits (`resources`), connected node names (host redacted by default), memory, session id |
+| `application_overview` | started applications, versions, declared dependencies, root supervisor ids, optional module names/behaviours; `application`, `includeModules`, `cursor` |
+| `supervision_tree` | typed `supervises` edges from an application/supervisor id or a named supervisor; child role, modules, restart/shutdown; `id`/`supervisor`, `maxDepth`, `includeModules`, `cursor` |
+| `registered_processes` | locally registered names with status/queue length and membership (`confirmed`/`inferred`/`unknown`); `application`, `cursor` |
+| `process_info` | allowlisted fields of one process (by `id`, `name` or `pid`), links/monitors as ids; never dictionary, stack, mailbox or state |
+| `ets_tables` | metadata of the approved named tables (protection, type, owner, size, memory in words and bytes) - never keys or values |
+| `topology_overview` | one call for one application (`name` or `application` id): the application, its supervision tree with child counts, registered processes and the approved ETS tables they own, as one collection. Parts whose own tool is not allowed by the policy are left out (`policy_denied` omission) |
+| `changes_since` | what changed since an earlier collection (`collectionId`): added, removed and replaced (restarted: same child, new id) entities, with `absence: unconfirmed` for removals from a partial collection. The baseline is only retained for `collection_ttl_ms` (30 s by default) and 2 collections: compare soon after the first call, else `baseline_expired` |
+| `process_groups` | every local process aggregated by where it was started (initial call; the callback module for gen_server and friends): the top groups (`limit` up to 50, `sortBy` count / memory / reductions / message_queue_len) with count, share of the node, registered vs unregistered, memory, queue, inferred applications and 3 sample process ids. The answer has a fixed size whatever the number of processes (40,000 anonymous workers = one group); finds fan-out and leaks |
+| `top_ports` | local ports ranked by queue size, bytes in or bytes out (`sortBy`, `limit` up to 50): driver name, counters, queue size and the owner process (`owns_port` edge). Never addresses, command lines, paths or data; a non-driver port (e.g. a spawned program) is `<redacted>` |
+| `ets_summary` | ETS memory per owner process, largest first (`limit` up to 50): table count and memory in words/bytes, plus node totals. Counts only tables approved by `allowed_ets_tables` (exact names or `all`), never private ones; no table name, key or value, no table inventory (use `ets_tables` for approved tables) |
+| `top_processes` | the hottest local processes ranked by message queue length, reductions or memory (`sortBy`, `limit` up to 50): status, current function, initial call, name, membership. Bounded point-in-time scan, never mailbox/state |
+| `debug_session` | launch/attach, interpreted modules, breakpoint locations (module and line), processes currently stopped at a breakpoint (`pausedProcesses`: process id, module, line) |
+
+The developer-tier tools above (`process_state`, `mailbox_sample`, `ets_sample`) are only listed when the project enables them.
+
+Graph tools also take `detail`, `pageSize` and `format`. `format: "mermaid"` adds a `mermaid` field (a `graph TD`
+of the returned page, built from the returned edges only) so that an agent can render the diagram without redrawing it. `detail: "summary"` (default) is meant for agents:
+same entities, ids and edges, without rarely needed fields (pids, descriptions, per-edge
+`observedAt`, coverage limitations after the first page), 100 items per page, and module lists only
+for one selected application. `detail: "full"` returns every field in the largest pages (policy
+`max_items`): ask the agent for it when you want the complete JSON, e.g. to save it to a file.
+
+Graph tools return a versioned envelope: `schemaVersion`, `sessionId`, `collectionId`,
+`startedAt`, `finishedAt`, `scope` (with `limitations`), `entities`, `relationships`,
+`complete`, `truncated`, `omissions`, `nextCursor`. Entity kinds: `application`, `process`,
+`module`, `ets_table` (a supervisor is a process with `role: supervisor`). Edge types:
+`depends_on`, `supervises`, `owns_table`, `owns_port`, `linked_to`, `monitors`, `belongs_to`, `uses_module`, each
+with `evidence`, `observedAt` and `confidence` (`confirmed`/`inferred`/`unknown`). Links and
+monitors never imply supervision or message traffic. IDs are opaque, valid only within the session
+and change when a process restarts or a table is recreated. A collection is an observation
+interval, not an atomic snapshot: absence from a partial collection is not proof of termination.
+Units: timestamps are UTC ISO-8601, `memory` of a process is bytes, of a table words
+(`memoryBytes` is derived), `uptimeMs` is milliseconds.
+
+`omissions` (`policy_denied`, `disappeared`, `timeout`, `unavailable_while_paused`, `limit_reached`,
+`unknown_membership`) explain what is missing and whether it is resumable; cursors are bound to
+the session, the collection, the tool and the arguments, and return `cursor_expired` after the
+retention time - a traversal is never silently restarted. Partial example (a supervisor blocked at
+a breakpoint or busy):
+
+```json
+{ "complete": false, "truncated": false, "nextCursor": null,
+  "omissions": [ { "reason": "timeout", "count": 1, "scope": "p_51ad...",
+                   "resumable": false, "message": "the supervisor did not answer in time; its children are missing from this map" } ],
+  "relationships": [ { "type": "supervises", "from": "p_0a1...", "to": "p_51ad...", "confidence": "confirmed",
+                       "evidence": "supervisor:which_children/1", "observedAt": "2026-01-01T10:00:00.000Z" } ] }
+```
+
+**Agent workflow**: `runtime_summary` + `application_overview` -> pick an application, follow its
+root ids into `supervision_tree` (expand subtrees with the ids in `limit_reached` omissions) ->
+enrich with `process_info`, `registered_processes`, `top_processes`, `ets_tables`, `debug_session` -> join by ids,
+keep confirmed edges apart from inferences, and report the omissions. Module names can then be
+correlated with the workspace/LSP tools; the inspector never returns source or code paths.
+
+**Sample prompt** (also served as the MCP prompt `map_application`): once the client is connected and the node is paused or running under the
+debugger, paste this into the agent chat (Copilot agent mode, Claude Code...), replacing `<app>` with
+your application name. It follows the workflow above and asks for a diagram, a table and the
+coverage gaps, without guessing beyond what the tools return:
+
+```text
+Using the erlang-otp-topology-inspector MCP server, map the OTP topology of application <app>
+in the node I am debugging. Use only the tools that tools/list returns.
+
+Steps:
+1. topology_overview(name="<app>"): the application, its supervision tree, registered processes
+   and owned approved ETS tables in one call. If an omission says limit_reached or timeout,
+   expand that subtree with supervision_tree and the id it gives. (Without topology_overview:
+   runtime_summary, application_overview, supervision_tree from each root,
+   registered_processes(application=<id>).)
+2. top_processes (or process_info) only for processes that matter: supervisors, registered
+   workers, anything with a non-zero message queue. If debug_session reports processes stopped
+   at a breakpoint, say so: their supervisors may be reported as unavailable_while_paused.
+3. ets_tables and debug_session only if they relate to the application.
+
+Output:
+- A Mermaid `graph TD` of the supervision tree (edge = supervises; label children with kind and
+  restart type). Tools take format=mermaid and return the diagram from the reported edges.
+- A table: name/pid, module, kind, restart, msg queue len, membership (confirmed/inferred).
+- "Coverage gaps": every truncated/omission/timeout reported by the tools.
+- 3-5 observations (single points of failure, deep trees, hot queues, temporary children).
+
+Rules: use only what the tools returned. Structural edges are not message traffic, so do not
+describe runtime call flows. Keep detail=summary unless I ask for the full JSON.
+```
+
+Example of the agent's answer (supervision tree diagram, then the process table):
+
+![MCP inspector result](images/vscode-erlang-mcp-results.png)
+
+Narrower questions work too, e.g. *"Which processes are hot? Use top_processes by message_queue_len and say which application each belongs to"*, *"Why is `<process>` slow? Use process_info on it and compare
+its queue length and reductions with its siblings in the supervision tree"*, or *"Where are my
+breakpoints in the supervision tree? Use debug_session and supervision_tree with includeModules"*.
+
+**Request journal**: every MCP request of the session is written to the **Output > Erlang MCP**
+channel - request number, tool, status, time spent in the inspector, response size, entities /
+relationships, page and cursor use, and the delay since the previous request (time spent by the
+agent) - with a summary when the session ends. Arguments, results and the token are never written.
+
+**Breakpoints**: inspection never resumes, suspends or alters application processes. A process
+stopped at a breakpoint still answers `process_info`; a supervisor that cannot answer in time
+yields a `timeout` omission (never a guess that it is paused). The target stops the inspector
+within ~10 seconds if the debug adapter stops renewing its lease.
+
 ## Changing the debugger mode has no effect
 
 `erlang.debuggerRunMode` is read at extension startup: restart VS Code after

@@ -1,5 +1,33 @@
 # Change log
 
+
+## Version 1.2.6 (October 1, 2026)
+
+* MCP topology inspector for debug sessions (opt-in)
+  - New settings `erlang.mcp.enabled` (default `false`), `erlang.mcp.host` (loopback only) and `erlang.mcp.port` (`0` = any free port). When enabled, a debug session (launch or attach, not *Run without debugging*) starts a read-only, token-authenticated [MCP](https://modelcontextprotocol.io) server inside the debugged Erlang node, so that an AI agent can map its OTP topology: `runtime_summary`, `application_overview`, `supervision_tree`, `registered_processes`, `process_info`, `top_processes` (hottest processes by queue length, reductions or memory), `ets_tables` (approved tables, metadata only) and `debug_session`. Results are bounded, paginated, with typed edges, evidence, confidence and explicit coverage limitations
+  - VS Code registers the live endpoint automatically (MCP server list) and **Erlang MCP: Show Connection Details** helps configure other clients. The session token never appears in logs, DAP events or settings
+  - An optional top-level `{mcp, [...]}` term in the project's `rebar.config` restricts tools, ETS tables and limits. Nothing changes when the setting is off. See [HELP.MD](./HELP.MD#mcp-topology-inspector-ai-agents-debug-sessions-only) and [mcp_security.md](./mcp_security.md)
+  - Agent-sized answers: graph tools default to `detail: "summary"` (compact entities and edges, 100 items per page, modules listed per application only); `detail: "full"` returns the complete JSON (e.g. to save it to a file), `pageSize` tunes the pages
+  - **Output > Erlang MCP** journals every MCP request (tool, status, inspector time, size, pages, delay since the previous request) and summarizes the session, to see how an agent uses the inspector; arguments, results and token are never written
+  - Optional user setting `erlang.mcp.authToken` (development convenience): a fixed token so that a static client such as Claude Code (`claude mcp add`) is configured once; default empty = random token per session
+  - The verbose debug log no longer prints the Erlang cookie passed to an attach helper
+  - Supervisors in `supervision_tree` carry their child counts (`children`: specs, active, supervisors, workers); `debug_session` lists the processes stopped at a breakpoint (`pausedProcesses`), `process_info` adds a `debugger` field for such a process, and a supervisor that is itself stopped at a breakpoint is reported with the `unavailable_while_paused` omission instead of a plain timeout
+  - `runtime_summary` also reports the run queue length and process/atom/port/ETS counts against their VM limits (`resources`)
+  - Graph tools accept `format: "mermaid"`: the page is also returned as a ready-to-render Mermaid `graph TD`, built from the reported edges
+  - New tool `topology_overview`: the application, its supervision tree, registered processes and owned approved ETS tables of one application in a single call (each part still subject to the project policy)
+  - New tool `changes_since`: compares a retained collection with a fresh observation and reports added, removed and replaced (restarted) entities; removals from partial collections are marked unconfirmed
+  - New tools `top_ports` (local ports by queue size or traffic counters: driver name and owner only, never addresses or command lines) and `ets_summary` (ETS memory per owner process, no table names or contents); `runtime_summary` lists the connected nodes (host redacted by default); new edge type `owns_port`
+  - Developer tier (opt-in, named in the project's `allowed_tools`): `process_state` (bounded `sys:get_state` of a gen_server/gen_statem/gen_event, never a supervisor), `mailbox_sample` (oldest messages) and `ets_sample` (a few rows of an approved table), with best-effort redaction of secret-like keys and URL credentials; `allowed_ets_tables` accepts `all`; limits can be raised above their defaults up to higher ceilings (e.g. `collection_ttl_ms` up to 10 min)
+  - Hardening: the bearer token and cursor secret no longer appear in crash reports, non-ASCII workspace paths find the project policy, `ets_summary` only counts approved tables, `top_ports` only names well-known drivers, inspector processes are excluded from the rankings, child ids are redacted
+  - `allowed_tools` accepts `default` (the built-in set, also after upgrades) or `[default, <<"tool">>]`; the server tells the agent in its `instructions` which tools the project policy disables
+  - New tool `process_groups`: all local processes aggregated by initial call (count, memory, reductions, queue, registered vs unregistered, sample ids) in an answer of fixed size, to find fan-out and leaks of anonymous processes
+  - MCP prompt `map_application`: the sample prompt served by the inspector itself (argument-checked, grants nothing)
+  - A ready-to-use prompt to map an application with an agent: [HELP.MD](./HELP.MD#mcp-topology-inspector-ai-agents-debug-sessions-only) (*Sample prompt*)
+
+* Update  erlang.plist to latest
+
+---
+
 ## Version 1.2.5 (September 27, 2026)
 
 * [358](https://github.com/pgourlain/vscode_erlang/issues/358) : Launch (Run / Debug) broken on Linux and macOS since 1.2.4

@@ -1,7 +1,7 @@
 import {
-    workspace, WorkspaceFolder, DebugConfiguration, DebugConfigurationProvider, CancellationToken, ProviderResult, WorkspaceConfiguration
+    window, workspace, WorkspaceFolder, DebugConfiguration, DebugConfigurationProvider, CancellationToken, ProviderResult, WorkspaceConfiguration
 } from 'vscode';
-import { ErlangSettings } from './erlangSettings';
+import { ErlangSettings, ErlangMcpSettings } from './erlangSettings';
 import { stringify } from 'querystring';
 //import { ErlangOutput } from './vscodeAdapter';
 
@@ -21,9 +21,36 @@ export class ErlangDebugConfigurationProvider implements DebugConfigurationProvi
         debugConfiguration.verbose = cfg.verbose;
         debugConfiguration.erlangPath = cfg.erlangPath;
         debugConfiguration.useShell = cfg.useShell;
+        applyMcpSettings(folder, debugConfiguration);
         return debugConfiguration;
     }
 };
+
+/**
+ * erlang.mcp.* is the only switch of the MCP inspector, resolved for the debug
+ * session's own workspace folder (not the first folder of a multi-root
+ * workspace). It reaches the adapter as an internal property; a user-authored
+ * `mcp`/`mcpSettings` block in launch.json can neither enable nor tune it.
+ */
+export function applyMcpSettings(folder: WorkspaceFolder | undefined, debugConfiguration: DebugConfiguration): void {
+    if (debugConfiguration.mcp !== undefined || debugConfiguration.mcpSettings !== undefined) {
+        window.showWarningMessage("Erlang: an 'mcp' block in a launch configuration is not supported and was ignored; use the 'erlang.mcp.*' settings.");
+    }
+    delete debugConfiguration.mcp;
+    delete debugConfiguration.mcpSettings;
+    const mcp = workspace.getConfiguration("erlang", folder?.uri);
+    const settings: ErlangMcpSettings = {
+        enabled: mcp.get<boolean>("mcp.enabled", false) === true,
+        host: mcp.get<string>("mcp.host", "127.0.0.1"),
+        port: mcp.get<number>("mcp.port", 0),
+        authToken: mcp.get<string>("mcp.authToken", "") || undefined,
+        trusted: workspace.isTrusted,
+        root: folder ? folder.uri.fsPath : (getElangConfigConfiguration().rootPath ?? "")
+    };
+    if (settings.enabled && !debugConfiguration.noDebug) {
+        debugConfiguration.mcpSettings = settings;
+    }
+}
 
 let currentSettings: ErlangSettings = null;
 

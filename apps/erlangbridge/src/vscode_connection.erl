@@ -77,6 +77,10 @@ configure(no_compiled_args_file) ->
 %%------------------------------------------------------------------------------
 
 -define(ATTACH_MODULES, [vscode_jsone, gen_connection, vscode_connection]).
+%% Pushed to the target only when the embedded MCP inspector is enabled for
+%% this debug session (the helper is then started with -vscode_mcp).
+-define(MCP_MODULES, [vscode_jsone_decode, mcp_policy, mcp_encoder, mcp_audit, mcp_store,
+                      mcp_tools, mcp_runtime, mcp_server, mcp_sup]).
 
 attach() ->
     {ok, [[NodeString]]} = init:get_argument(vscode_attach_node),
@@ -97,7 +101,7 @@ attach(Node, Port, ArgsModule) ->
         true ->
             case missing_apps(Node) of
                 [] ->
-                    lists:foreach(fun(M) -> push_module(Node, M) end, ?ATTACH_MODULES),
+                    lists:foreach(fun(M) -> push_module(Node, M) end, ?ATTACH_MODULES ++ mcp_modules(Node)),
                     case rpc:call(Node, ?MODULE, start_attached, [Port, ArgsModule], infinity) of
                         ok -> ok;
                         Other -> {error, io_lib:format("~p", [Other])}
@@ -111,9 +115,26 @@ attach(Node, Port, ArgsModule) ->
                     "is running on this machine, and the cookie"}
     end.
 
-%% int (debugger app) runs the interpreter, httpc (inets app) posts the events.
+%% int (debugger app) runs the interpreter, httpc (inets app) posts the events;
+%% the MCP inspector also needs crypto (token, cursor signatures).
 missing_apps(Node) ->
-    [M || M <- [int, httpc], rpc:call(Node, code, which, [M]) =:= non_existing].
+    Needed = case mcp_requested() of
+                 true -> [int, httpc, crypto];
+                 false -> [int, httpc]
+             end,
+    [M || M <- Needed, rpc:call(Node, code, which, [M]) =:= non_existing].
+
+mcp_requested() ->
+    case init:get_argument(vscode_mcp) of
+        {ok, _} -> true;
+        _ -> false
+    end.
+
+mcp_modules(_Node) ->
+    case mcp_requested() of
+        true -> ?MCP_MODULES;
+        false -> []
+    end.
 
 push_module(Node, Module) ->
     {Module, Binary, File} = code:get_object_code(Module),
@@ -160,6 +181,7 @@ detach() ->
     [int:continue(Pid) || {Pid, _, break, _} <- int:snapshot()],
     [int:nn(M) || M <- int:interpreted()],
     int:clear(),
+    stop_mcp(),
     stop_attached(),
     application:unset_env(vscode_debugger, port),
     ok.
@@ -255,6 +277,13 @@ decode_request(Data) ->
             {error,{_,erl_parse, Messages}} ->
                 debugger_eval_error(lists:flatten(Messages))
         end;
+    {mcp_start, Body} ->
+        mcp_start(Body);
+    {mcp_renew, _Body} ->
+        mcp_renew();
+    {mcp_stop, _Body} ->
+        stop_mcp(),
+        #{ok => true};
     {debugger_exit, _Body} ->
         init:stop(0);
     {debugger_detach, _Body} ->
@@ -263,6 +292,61 @@ decode_request(Data) ->
         #{};
     _ ->
         unknown_command
+    end.
+
+%%------------------------------------------------------------------------------
+%% Embedded MCP inspector (debug sessions only, enabled by the adapter)
+%%
+%% The adapter posts the normalized, non-secret configuration; the token is
+%% generated here and returned only to the adapter that started the session.
+%% It never appears in a debug event, an output event or a log.
+%%------------------------------------------------------------------------------
+
+mcp_start(Body) ->
+    case code:which(mcp_sup) of
+        non_existing -> mcp_error(<<"the MCP inspector is not available in the debugged node">>);
+        _ ->
+            try vscode_jsone_decode:decode(unicode:characters_to_binary(Body)) of
+                {ok, Map, _} when is_map(Map) ->
+                    case mcp_policy:from_json_map(Map) of
+                        {ok, Config} ->
+                            Fixed = maps:get(<<"authToken">>, Map, undefined),
+                            Notify = fun(Meta) -> gen_connection:send_message_to_vscode(port_int(), "mcp_call", Meta) end,
+                            case mcp_sup:start_session(Config, mcp_mode(Map), Fixed, #{notify => Notify}) of
+                                {ok, #{host := Host, port := Port, path := Path, sessionId := Sid, token := Token}} ->
+                                    #{ok => true, host => list_to_binary(Host), port => Port,
+                                      path => Path, sessionId => Sid, token => Token};
+                                {error, Msg} -> mcp_error(Msg)
+                            end;
+                        {error, Msg} -> mcp_error(unicode:characters_to_binary(Msg))
+                    end;
+                _ -> mcp_error(<<"invalid MCP configuration">>)
+            catch _:_ -> mcp_error(<<"invalid MCP configuration">>)
+            end
+    end.
+
+%% get_port/0 returns the -vscode_port argument (a string) or, in attach mode, the stored port.
+port_int() ->
+    case get_port() of
+        P when is_integer(P) -> P;
+        P when is_list(P) -> list_to_integer(P)
+    end.
+
+mcp_mode(#{<<"mode">> := <<"attach">>}) -> attach;
+mcp_mode(_) -> launch.
+
+mcp_error(Msg) -> #{ok => false, error => Msg}.
+
+mcp_renew() ->
+    case code:which(mcp_sup) of
+        non_existing -> #{ok => false};
+        _ -> case mcp_sup:renew() of ok -> #{ok => true}; _ -> #{ok => false} end
+    end.
+
+stop_mcp() ->
+    case code:is_loaded(mcp_sup) of
+        false -> ok;
+        _ -> catch mcp_sup:stop_session(), ok
     end.
 
 debugger_eval_error(Message) ->

@@ -21,6 +21,7 @@ New to the extension? Open **Help > Welcome > Get started with Erlang**: a walkt
 | Testing | EUnit and Common Test in the Testing view: run, debug, coverage |
 | Build | rebar3 commands, rebar3 tasks (compile, eunit, ct, dialyzer, release, shell, clean), Dialyzer warnings in Problems with PLT status in the status bar |
 | Debugger | Launch or attach to a running node; line, function, conditional, hit-count breakpoints, logpoints; variables, call stack, inline values |
+| AI agents | Opt-in, read-only MCP server inside the debugged node: an agent maps its applications, supervision trees, processes and ETS metadata |
 | Status | Language server state and OTP version in the status bar |
 
 
@@ -180,6 +181,18 @@ The debugger starts a hidden helper node, connects to `node`, loads its bridge t
 - Cookie: `~/.erlang.cookie` by default, or a `"cookie"` entry.
 - Project modules must be compiled with `debug_info` (rebar3 default).
 
+### MCP topology inspector (AI agents)
+
+Set `"erlang.mcp.enabled": true` and start a debug session (launch or attach). The debugged node then serves a read-only [MCP](https://modelcontextprotocol.io) server on loopback, so that an AI agent (Copilot agent mode, Claude Code...) can discover and explain its OTP topology: applications, supervision trees, processes, registered names and approved ETS tables. It stops with the debug session and never runs in a normal editor session.
+
+![mcpInspector](images/vscode-erlang-mcp-running.png)
+
+In VS Code the session shows up in the MCP server list on its own; other clients connect with **Erlang MCP: Show Connection Details**. Then ask the agent, e.g. *"map the OTP topology of application `<app>`"*. Setup, project policy, tools and a ready-to-use [sample prompt](./HELP.MD#mcp-topology-inspector-ai-agents-debug-sessions-only) are in HELP.MD; security model in [mcp_security.md](./mcp_security.md).
+
+The agent answers with a supervision tree diagram and a process table (here a worker with 18 queued messages stands out):
+
+![mcpResults](images/vscode-erlang-mcp-results.png)
+
 ## Using this extension in Erlang Docker instance
 
 Clone this repo, and try it :
@@ -223,6 +236,9 @@ For Erlang files the extension sets 4-space indentation (erlfmt's), enables sema
 - `erlang.verboseExcludeFilter` - LSP methods excluded from technical traces
 - `erlang.debuggerRunMode` - How the debug adapter is run (`external`, `server`, `inline`)
 - `erlang.useShell` - Whether erl/escript/erlc are spawned through a shell (`auto`: Windows only, `always`, `never`)
+- `erlang.mcp.enabled` - Start the MCP topology inspector in debug sessions (default `false`)
+- `erlang.mcp.host`, `erlang.mcp.port` - Loopback address and port of the inspector (`0` = any free port)
+- `erlang.mcp.authToken` - Optional fixed bearer token (user setting, development convenience; empty = random per session)
 
 ## Help
 

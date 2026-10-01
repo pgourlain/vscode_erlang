@@ -26,7 +26,14 @@ then
 
 ```bash
 ./rebar3 ct
+./rebar3 ct --dir apps/erlangbridge/test/mcp   # MCP inspector suites (policy, server, debugger bridge)
+npm test                                        # includes out/test/test-suite/mcp/* (real erl target)
 ```
+
+The embedded MCP inspector lives in `apps/erlangbridge/src/mcp/` (`mcp_*.erl`, all Erlang) and is
+only compiled to `_build/default/lib/ebin` by the debug adapter and started on request
+(`vscode_connection`: `mcp_start`, `mcp_renew`, `mcp_stop`); the LSP node never loads it. Its
+tests/fixtures are in `apps/erlangbridge/test/mcp/` and `test/test-suite/mcp/`.
 
 ## build package
 

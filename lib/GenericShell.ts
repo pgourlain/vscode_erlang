@@ -103,6 +103,11 @@ export function commandLineArgs(value: string | undefined, useShell: boolean): s
     return useShell ? [value] : splitCommandLine(value);
 }
 
+// Arguments that carry a secret (the Erlang cookie) must not reach the logs.
+export function redactArgs(args: string[]): string[] {
+    return args.map((a, i) => (i > 0 && args[i - 1] === '-setcookie') ? '<redacted>' : a);
+}
+
 export class GenericShell extends EventEmitter {
     protected childProcess: ChildProcess;
     protected logOutput: ILogOutput;
@@ -182,7 +187,7 @@ export class GenericShell extends EventEmitter {
                     if (this.erlangPath) {
                         this.log("log",`using erlang binaries from path : '${this.erlangPath}'`);
                     }
-                    this.log("log", `starting : ${processName} \r\n` + args.join(" "));
+                    this.log("log", `starting : ${processName} \r\n` + redactArgs(args).join(" "));
                 }
                 var childEnv = null;
                 if (this.erlangPath) {
