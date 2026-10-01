@@ -166,7 +166,7 @@ messages or business flows. Security model and residual risks: [mcp_security.md]
   automatically). Set a fixed `erlang.mcp.port` if the client needs a stable URL: the token
   still changes at every session and must be supplied as `Authorization: Bearer <token>`. If the
   fixed port is busy MCP is disabled for the session (no silent rebinding).
-- Protocol: MCP `2025-06-18`, Streamable HTTP with JSON responses (no SSE, no prompts, no resources).
+- Protocol: MCP `2025-06-18`, Streamable HTTP with JSON responses (no SSE, no resources). One prompt, `map_application` (argument `application`), carries the sample prompt below, so a client that lists MCP prompts (e.g. VS Code: `/mcp.<server>.map_application`) can run it directly; it grants nothing.
 
 **Project policy (optional)** - a literal top-level term in the *target project's* `rebar.config`
 (nearest file from the debug `cwd`, never above the workspace folder; no `rebar.config.script`,
@@ -243,7 +243,7 @@ enrich with `process_info`, `registered_processes`, `top_processes`, `ets_tables
 keep confirmed edges apart from inferences, and report the omissions. Module names can then be
 correlated with the workspace/LSP tools; the inspector never returns source or code paths.
 
-**Sample prompt**: once the client is connected and the node is paused or running under the
+**Sample prompt** (also served as the MCP prompt `map_application`): once the client is connected and the node is paused or running under the
 debugger, paste this into the agent chat (Copilot agent mode, Claude Code...), replacing `<app>` with
 your application name. It follows the workflow above and asks for a diagram, a table and the
 coverage gaps, without guessing beyond what the tools return:

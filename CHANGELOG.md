@@ -14,6 +14,7 @@
   - `runtime_summary` also reports the run queue length and process/atom/port/ETS counts against their VM limits (`resources`)
   - Graph tools accept `format: "mermaid"`: the page is also returned as a ready-to-render Mermaid `graph TD`, built from the reported edges
   - New tool `topology_overview`: the application, its supervision tree, registered processes and owned approved ETS tables of one application in a single call (each part still subject to the project policy)
+  - MCP prompt `map_application`: the sample prompt served by the inspector itself (argument-checked, grants nothing)
   - A ready-to-use prompt to map an application with an agent: [HELP.MD](./HELP.MD#mcp-topology-inspector-ai-agents-debug-sessions-only) (*Sample prompt*)
 
 ---

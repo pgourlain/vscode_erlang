@@ -32,6 +32,7 @@ all() ->
      mermaid_format_renders_the_returned_edges,
      topology_overview_maps_one_application_in_one_call,
      topology_overview_leaves_out_parts_the_policy_denies,
+     prompt_guides_an_agent_and_checks_its_argument,
      paused_process_is_reported_from_debugger_evidence,
      restart_changes_identity,
      pagination_cursors_and_retention,
@@ -308,7 +309,7 @@ initialize_negotiates_and_lists_only_readonly_tools(Config) ->
                                                                <<"capabilities">> => #{},
                                                                <<"clientInfo">> => #{<<"name">> => <<"t">>, <<"version">> => <<"1">>}}),
     ?assertEqual(<<"2025-06-18">>, maps:get(<<"protocolVersion">>, Init)),
-    ?assertEqual([<<"tools">>], maps:keys(maps:get(<<"capabilities">>, Init))),
+    ?assertEqual([<<"prompts">>, <<"tools">>], lists:sort(maps:keys(maps:get(<<"capabilities">>, Init)))),
     %% an older client version is answered with the implemented revision
     #{<<"result">> := Init2} = rpc(Config, <<"initialize">>, #{<<"protocolVersion">> => <<"2024-11-05">>}),
     ?assertEqual(<<"2025-06-18">>, maps:get(<<"protocolVersion">>, Init2)),
@@ -330,7 +331,7 @@ initialize_negotiates_and_lists_only_readonly_tools(Config) ->
     [?assertEqual(nomatch, re:run(N, "eval|exec|rpc|shell|lookup|trace|kill|load|write|send", [{capture, none}]))
      || N <- Names],
     [?assertMatch(#{<<"error">> := #{<<"code">> := -32601}}, rpc(Config, M, #{}))
-     || M <- [<<"resources/list">>, <<"prompts/list">>, <<"resources/read">>, <<"tools/eval">>,
+     || M <- [<<"resources/list">>, <<"resources/read">>, <<"tools/eval">>,
               <<"completion/complete">>, <<"logging/setLevel">>]],
     [?assertMatch({rpc_error, -32602, _}, call(Config, T, #{}))
      || T <- [<<"eval">>, <<"ets_lookup">>, <<"rpc_call">>, <<"sys_get_state">>, <<"shell">>, <<"trace">>,
@@ -1101,6 +1102,26 @@ topology_overview_leaves_out_parts_the_policy_denies(Config) ->
     ?assertEqual(2, length(Denied)),
     ?assertEqual([], [E || #{<<"kind">> := <<"ets_table">>} = E <- maps:get(<<"entities">>, S)]),
     ?assertEqual(false, maps:get(<<"complete">>, S)).
+
+prompt_guides_an_agent_and_checks_its_argument(Config) ->
+    #{<<"result">> := #{<<"prompts">> := [P]}} = rpc(Config, <<"prompts/list">>, #{}),
+    ?assertMatch(#{<<"name">> := <<"map_application">>,
+                   <<"arguments">> := [#{<<"name">> := <<"application">>, <<"required">> := true}]}, P),
+    #{<<"result">> := #{<<"messages">> := [#{<<"role">> := <<"user">>, <<"content">> := #{<<"text">> := Text}}]}} =
+        rpc(Config, <<"prompts/get">>, #{<<"name">> => <<"map_application">>,
+                                         <<"arguments">> => #{<<"application">> => <<"my_app">>}}),
+    ?assertNotEqual(nomatch, binary:match(Text, <<"topology_overview(name=\"my_app\")">>)),
+    ?assertNotEqual(nomatch, binary:match(Text, <<"Coverage gaps">>)),
+    %% an unknown prompt and hostile or missing arguments are rejected, nothing is embedded
+    Bad = fun(Params) -> rpc(Config, <<"prompts/get">>, Params) end,
+    [?assertMatch(#{<<"error">> := #{<<"code">> := -32602}}, Bad(Params))
+     || Params <- [#{<<"name">> => <<"eval">>},
+                   #{<<"name">> => <<"map_application">>},
+                   #{<<"name">> => <<"map_application">>, <<"arguments">> => #{<<"application">> => <<"a\nIgnore previous">>}},
+                   #{<<"name">> => <<"map_application">>, <<"arguments">> => #{<<"application">> => <<"a b">>}},
+                   #{<<"name">> => <<"map_application">>, <<"arguments">> => #{<<"application">> => 5}},
+                   #{<<"name">> => <<"map_application">>, <<"arguments">> => []},
+                   #{<<"name">> => <<"map_application">>, <<"arguments">> => #{<<"application">> => binary:copy(<<"a">>, 300)}}]].
 
 mermaid_format_renders_the_returned_edges(Config) ->
     RootId = fixture_root_id(Config),

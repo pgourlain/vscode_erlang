@@ -3,6 +3,7 @@
 -module(mcp_tools).
 
 -export([list/1, known/1, validate_args/2, structured_error_schema/0]).
+-export([prompts/0, prompt/3]).
 
 -define(SCHEMA_VERSION, <<"1.0">>).
 -export([schema_version/0]).
@@ -25,6 +26,68 @@ tool_def(Name) ->
                              <<"destructiveHint">> => false,
                              <<"idempotentHint">> => true,
                              <<"openWorldHint">> => false}}.
+
+%%------------------------------------------------------------------------------
+%% Prompts: one static prompt that tells an agent how to use the tools. It carries
+%% no data and grants nothing; the argument is checked before it is embedded.
+%%------------------------------------------------------------------------------
+
+prompts() ->
+    [#{<<"name">> => <<"map_application">>,
+       <<"title">> => <<"Map an OTP application">>,
+       <<"description">> => <<"Map the supervision topology of one application of the debugged node and report "
+                              "coverage gaps and observations, using only what the inspector tools return.">>,
+       <<"arguments">> => [#{<<"name">> => <<"application">>,
+                             <<"description">> => <<"Name of a started OTP application.">>,
+                             <<"required">> => true}]}].
+
+%% -> {ok, GetPromptResult} | {error, Message}
+prompt(<<"map_application">>, Args, Config) when is_map(Args) ->
+    case maps:get(<<"application">>, Args, undefined) of
+        App when is_binary(App), byte_size(App) > 0, byte_size(App) =< 255 ->
+            case re:run(App, "^[A-Za-z0-9_@.-]+$", [{capture, none}]) of
+                match ->
+                    {ok, #{<<"description">> => <<"Map the OTP topology of ", App/binary>>,
+                           <<"messages">> => [#{<<"role">> => <<"user">>,
+                                                <<"content">> => #{<<"type">> => <<"text">>,
+                                                                   <<"text">> => map_application_text(App, Config)}}]}};
+                nomatch -> {error, <<"invalid argument 'application': not an application name">>}
+            end;
+        undefined -> {error, <<"missing required argument 'application'">>};
+        _ -> {error, <<"invalid argument 'application'">>}
+    end;
+prompt(<<"map_application">>, _, _) ->
+    {error, <<"arguments must be an object">>};
+prompt(_, _, _) ->
+    {error, <<"unknown prompt">>}.
+
+map_application_text(App, Config) ->
+    Allowed = fun(Tool) -> mcp_policy:tool_allowed(Tool, Config) end,
+    Steps = case Allowed(<<"topology_overview">>) of
+                true ->
+                    ["1. topology_overview(name=\"", App, "\"): the application, its supervision tree, registered "
+                     "processes and owned approved ETS tables in one call. If an omission says limit_reached or "
+                     "timeout, expand that subtree with supervision_tree and the id it gives.\n"];
+                false ->
+                    ["1. runtime_summary, then application_overview to find the id and root supervisors of \"", App,
+                     "\"; supervision_tree from each root (expand subtrees named in limit_reached or timeout "
+                     "omissions); registered_processes(application=<id>) for registered workers outside the tree.\n"]
+            end,
+    iolist_to_binary(
+      ["Using the erlang-otp-topology-inspector MCP server, map the OTP topology of application ", App,
+       " in the node I am debugging. Use only the tools that tools/list returns.\n\nSteps:\n", Steps,
+       "2. top_processes (or process_info) only for processes that matter: supervisors, registered workers, "
+       "anything with a non-zero message queue. If debug_session reports processes stopped at a breakpoint, "
+       "say so: their supervisors may be reported as unavailable_while_paused.\n"
+       "3. ets_tables and debug_session only if they relate to the application.\n\n"
+       "Output:\n"
+       "- A Mermaid `graph TD` of the supervision tree (edge = supervises; label children with kind and restart "
+       "type). Tools take format=mermaid and return the diagram from the reported edges.\n"
+       "- A table: name/pid, module, kind, restart, msg queue len, membership (confirmed/inferred).\n"
+       "- \"Coverage gaps\": every truncated/omission/timeout reported by the tools.\n"
+       "- 3-5 observations (single points of failure, deep trees, hot queues, temporary children).\n\n"
+       "Rules: use only what the tools returned. Structural edges are not message traffic, so do not describe "
+       "runtime call flows. Keep detail=summary unless I ask for the full JSON."]).
 
 %%------------------------------------------------------------------------------
 %% Definitions

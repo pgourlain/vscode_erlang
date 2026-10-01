@@ -3,8 +3,8 @@
 %%
 %% Pinned protocol revision : 2025-06-18. Stateless: no Mcp-Session-Id is
 %% issued, no SSE stream (GET -> 405). Implemented methods: initialize,
-%% notifications/* (202), ping, tools/list, tools/call. No prompts, no
-%% resources. Batches are rejected (removed in this revision).
+%% notifications/* (202), ping, tools/list, tools/call, prompts/list and
+%% prompts/get (one static, argument-checked prompt; it grants nothing). No resources. Batches are rejected (removed in this revision).
 %%
 %% Security: explicit loopback bind, Host/Origin validation, no CORS, bearer
 %% token required on every request *before* the body is read, body size cap,
@@ -336,6 +336,7 @@ journal_meta(Method, Params, Obj) ->
 
 known_method(M) ->
     Known = [<<"initialize">>, <<"ping">>, <<"tools/list">>, <<"tools/call">>,
+             <<"prompts/list">>, <<"prompts/get">>,
              <<"notifications/initialized">>, <<"notifications/cancelled">>],
     case lists:member(M, Known) of
         true -> M;
@@ -391,7 +392,8 @@ dispatch(<<"initialize">>, Params, Id, _Config) ->
         V when is_binary(V) ->
             %% version negotiation: the server answers with the revision it implements
             result_obj(Id, #{<<"protocolVersion">> => ?PROTOCOL_VERSION,
-                             <<"capabilities">> => #{<<"tools">> => #{<<"listChanged">> => false}},
+                             <<"capabilities">> => #{<<"tools">> => #{<<"listChanged">> => false},
+                                                     <<"prompts">> => #{<<"listChanged">> => false}},
                              <<"serverInfo">> => #{<<"name">> => <<"erlang-otp-topology-inspector">>,
                                                    <<"title">> => <<"Erlang OTP topology inspector">>,
                                                    <<"version">> => <<"1.0.0">>},
@@ -414,6 +416,13 @@ dispatch(<<"tools/list">>, _, Id, Config) ->
     result_obj(Id, #{<<"tools">> => mcp_tools:list(Config)});
 dispatch(<<"tools/call">>, Params, Id, Config) ->
     tools_call(Params, Id, Config);
+dispatch(<<"prompts/list">>, _, Id, _) ->
+    result_obj(Id, #{<<"prompts">> => mcp_tools:prompts()});
+dispatch(<<"prompts/get">>, Params, Id, Config) ->
+    case mcp_tools:prompt(maps:get(<<"name">>, Params, undefined), maps:get(<<"arguments">>, Params, #{}), Config) of
+        {ok, Result} -> result_obj(Id, Result);
+        {error, Msg} -> error_obj(Id, -32602, Msg)
+    end;
 dispatch(_, _, Id, _) ->
     error_obj(Id, -32601, <<"method not found">>).
 
