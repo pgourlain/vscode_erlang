@@ -183,6 +183,38 @@ suite('MCP: debug adapter end-to-end (real erl target)', function () {
         assert.ok(await refused(started.url), 'endpoint must be closed');
     });
 
+    test('all tools and the prompt answer in a real target (default policy)', async () => {
+        client = new DapClient();
+        await client.launch(project, settings());
+        const started = await client.waitEvent('erlangMcp', b => b.status !== undefined);
+        assert.strictEqual(started.status, 'started', JSON.stringify(started));
+        const token = JSON.parse(fs.readFileSync(started.descriptor, 'utf8')).token;
+        const tools = (await post(started.url, token, { jsonrpc: '2.0', id: 1, method: 'tools/list' })).json.result.tools.map((t: any) => t.name);
+        assert.strictEqual(tools.length, 12, tools.join(','));
+        const ok = async (name: string, args: any = {}) => {
+            const r = await call(started.url, token, name, args);
+            assert.ok(r.json.result && r.json.result.isError === false, name + ': ' + JSON.stringify(r.json));
+            return r.json.result.structuredContent;
+        };
+        const rt = await ok('runtime_summary');
+        assert.ok(rt.resources.processes.count > 0 && rt.resources.atoms.limit > 0);
+        const top = await ok('top_processes', { limit: 3, format: 'mermaid' });
+        assert.strictEqual(top.entities.length, 3);
+        assert.ok(top.mermaid.startsWith('graph TD'));
+        assert.ok((await ok('top_ports', { limit: 3 })).entities.length > 0);
+        assert.ok((await ok('ets_summary', { limit: 3 })).entities.length > 0);
+        const topo = await ok('topology_overview', { name: 'kernel', format: 'mermaid' });
+        assert.ok(topo.relationships.some((r: any) => r.type === 'supervises'), 'kernel supervision tree');
+        assert.ok(topo.mermaid.includes('-->'));
+        const changes = await ok('changes_since', { collectionId: topo.collectionId });
+        assert.strictEqual(changes.scope.baselineTool, 'topology_overview');
+        const prompt = await post(started.url, token, { jsonrpc: '2.0', id: 1, method: 'prompts/get',
+            params: { name: 'map_application', arguments: { application: 'kernel' } } });
+        assert.ok(prompt.json.result.messages[0].content.text.includes('kernel'));
+        assert.ok(!JSON.stringify(client.events).includes(token), 'token leaked in a DAP message');
+        await client.request('disconnect', { terminateDebuggee: true });
+    });
+
     test('disabled (default): no listener, no event, debugging works', async () => {
         client = new DapClient();
         await client.launch(project, {});
