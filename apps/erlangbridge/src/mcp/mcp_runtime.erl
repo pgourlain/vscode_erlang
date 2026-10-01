@@ -28,6 +28,7 @@
 -define(MAX_TOP, 50).
 -define(MAX_ETS_SCAN, 50000).
 -define(MAX_MAILBOX_COPY, 20000).
+-define(MAX_GROUPS, 5000).
 -define(MAX_SAMPLE, 20).
 
 %%------------------------------------------------------------------------------
@@ -71,6 +72,7 @@ run(<<"registered_processes">>, Args, Ctx) -> graph_tool(<<"registered_processes
 run(<<"process_info">>, Args, Ctx) -> tool_process_info(Args, Ctx);
 run(<<"ets_tables">>, Args, Ctx) -> graph_tool(<<"ets_tables">>, builder(<<"ets_tables">>), Args, Ctx);
 run(<<"process_state">>, Args, Ctx) -> process_state(Args, Ctx);
+run(<<"process_groups">>, Args, Ctx) -> process_groups(Args, Ctx);
 run(<<"mailbox_sample">>, Args, Ctx) -> mailbox_sample(Args, Ctx);
 run(<<"ets_sample">>, Args, Ctx) -> ets_sample(Args, Ctx);
 run(<<"top_ports">>, Args, Ctx) -> graph_tool(<<"top_ports">>, builder(<<"top_ports">>), Args, Ctx);
@@ -1675,6 +1677,158 @@ top_entity(Pid, Info, SortBy, Rank, Masters, B) ->
                <<"membership">> => #{<<"confidence">> => Conf, <<"evidence">> => Evidence}},
     {_, B1} = process_entity(Pid, Fields, B),
     {ok, B1}.
+
+%%------------------------------------------------------------------------------
+%% process_groups: every local process aggregated by its initial call. The scan keeps
+%% one counter per group (never per-process data), so memory is O(groups) and the answer
+%% is O(limit) whether the node has 400 or 400000 processes. Finds fan-out and leaks
+%% (thousands of anonymous workers) that a top-N list of single processes never shows.
+%%------------------------------------------------------------------------------
+
+process_groups(Args, #{enc := Enc} = Ctx) ->
+    Started = mcp_store:now_ms(),
+    SortBy = case maps:get(<<"sortBy">>, Args, <<"count">>) of
+                 <<"memory">> -> memory;
+                 <<"reductions">> -> reductions;
+                 <<"message_queue_len">> -> queue;
+                 _ -> count
+             end,
+    Limit = min(maps:get(<<"limit">>, Args, 10), ?MAX_TOP),
+    All = erlang:processes(),
+    Total = length(All),
+    {Scan, Cut} = case Total > ?MAX_SCANNED of
+                      true -> {lists:sublist(All, ?MAX_SCANNED), Total - ?MAX_SCANNED};
+                      false -> {All, 0}
+                  end,
+    Masters = masters(Ctx),
+    Acc0 = #{groups => #{}, scanned => 0, registered => 0, memory => 0, other => 0},
+    {Acc, Unscanned} = group_scan(Scan, self(), Masters, Ctx, 0, Acc0),
+    #{groups := Groups, scanned := Scanned, registered := Registered, memory := TotalMem, other := Other} = Acc,
+    Ranked = lists:sublist(lists:sort(fun(A, B) -> group_rank(SortBy, A) >= group_rank(SortBy, B) end,
+                                      [G#{key => K} || {K, G} <- maps:to_list(Groups)]), Limit),
+    Shown = [group_json(G, I, Scanned, TotalMem, Enc) || {I, G} <- lists:zip(lists:seq(1, length(Ranked)), Ranked)],
+    CoveredCount = lists:sum([maps:get(count, G) || G <- Ranked]),
+    Oms = [#{<<"reason">> => <<"timeout">>, <<"count">> => Unscanned, <<"resumable">> => false,
+             <<"message">> => <<"the time budget ended the scan; the groups only cover the processes scanned so far">>}
+           || Unscanned > 0]
+        ++ [#{<<"reason">> => <<"limit_reached">>, <<"count">> => Cut, <<"resumable">> => false,
+              <<"message">> => <<"more processes than the scan limit; the groups only cover the first ones">>}
+            || Cut > 0]
+        ++ [#{<<"reason">> => <<"limit_reached">>, <<"count">> => Other, <<"resumable">> => false,
+              <<"message">> => <<"more distinct initial calls than the group limit; the rest are counted in <other>">>}
+            || Other > 0],
+    {ok, #{<<"schemaVersion">> => ?SV,
+           <<"sessionId">> => mcp_store:session_id(),
+           <<"observedAt">> => mcp_encoder:iso8601(Started),
+           <<"sortBy">> => atom_to_binary(case SortBy of queue -> message_queue_len; _ -> SortBy end, utf8),
+           <<"totals">> => #{<<"processCount">> => Total, <<"scanned">> => Scanned,
+                             <<"registered">> => Registered, <<"unregistered">> => Scanned - Registered,
+                             <<"groups">> => maps:size(Groups), <<"groupsShown">> => length(Shown),
+                             <<"shownCoverPercent">> => percent(CoveredCount, Scanned),
+                             <<"memoryBytes">> => TotalMem},
+           <<"groups">> => Shown,
+           <<"complete">> => Oms =:= [],
+           <<"truncated">> => Cut > 0 orelse Other > 0,
+           <<"omissions">> => Oms,
+           <<"limitations">> =>
+               [<<"Grouped by initial call (the callback module's init for OTP processes): a group is where processes were started, not a dependency.">>,
+                <<"A point-in-time scan, not an atomic snapshot: processes start and exit while it runs.">>,
+                <<"reductions are cumulative since the process started; memory is in bytes.">>,
+                <<"Only metadata is read: never mailbox, dictionary contents, stack or state. Inspector processes are excluded.">>]}}.
+
+group_scan([], _Self, _Masters, _Ctx, _N, Acc) -> {Acc, 0};
+group_scan([Pid | T] = Pids, Self, Masters, Ctx, N, Acc) ->
+    case N rem 1000 =:= 0 andalso N > 0 andalso remaining(Ctx) =:= 0 of
+        true -> {Acc, length(Pids)};
+        false ->
+            Acc1 = case Pid =/= Self andalso
+                       erlang:process_info(Pid, [registered_name, initial_call, current_function, memory,
+                                                 reductions, message_queue_len, group_leader]) of
+                       Info when is_list(Info) ->
+                           case inspector_info(Info) of
+                               true -> Acc;
+                               false -> group_add(Pid, Info, Masters, Acc)
+                           end;
+                       _ -> Acc
+                   end,
+            group_scan(T, Self, Masters, Ctx, N + 1, Acc1)
+    end.
+
+group_add(Pid, Info, Masters, #{groups := Groups, scanned := S, registered := R, memory := M, other := O} = Acc) ->
+    Key0 = group_key(Pid, Info),
+    {Key, Cap} = case maps:is_key(Key0, Groups) orelse maps:size(Groups) < ?MAX_GROUPS of
+                     true -> {Key0, 0};
+                     false -> {other, 1}
+                 end,
+    Reg = case lists:keyfind(registered_name, 1, Info) of
+              {registered_name, N} when is_atom(N), N =/= [] -> 1;
+              _ -> 0
+          end,
+    Mem = proplists:get_value(memory, Info, 0),
+    App = case maps:find(proplists:get_value(group_leader, Info), Masters) of
+              {ok, A} -> A;
+              error -> undefined
+          end,
+    G0 = maps:get(Key, Groups, #{count => 0, memory => 0, reductions => 0, queue => 0, registered => 0,
+                                 apps => #{}, samples => []}),
+    #{count := C, memory := GM, reductions := GR, queue := GQ, registered := GReg, apps := Apps, samples := Sm} = G0,
+    G1 = G0#{count := C + 1, memory := GM + Mem,
+             reductions := GR + proplists:get_value(reductions, Info, 0),
+             queue := GQ + proplists:get_value(message_queue_len, Info, 0),
+             registered := GReg + Reg,
+             apps := maps:update_with(App, fun(X) -> X + 1 end, 1, Apps),
+             samples := case length(Sm) < 3 of true -> Sm ++ [Pid]; false -> Sm end},
+    Acc#{groups := Groups#{Key => G1}, scanned := S + 1, registered := R + Reg, memory := M + Mem, other := O + Cap}.
+
+%% {M, F, A} of where the process started; for gen_server and friends the callback module's
+%% init (OTP 25+ reads the one dictionary entry, never the whole dictionary).
+group_key(Pid, Info) ->
+    Dict = try erlang:process_info(Pid, {dictionary, '$initial_call'}) of
+               {{dictionary, '$initial_call'}, {M0, F0, A0}} when is_atom(M0), is_atom(F0), is_integer(A0) -> {M0, F0, A0};
+               _ -> undefined
+           catch _:_ -> undefined
+           end,
+    case Dict of
+        undefined ->
+            case proplists:get_value(initial_call, Info) of
+                {M, F, A} -> {M, F, A};
+                _ -> unknown
+            end;
+        _ -> Dict
+    end.
+
+group_rank(count, #{count := V}) -> V;
+group_rank(memory, #{memory := V}) -> V;
+group_rank(reductions, #{reductions := V}) -> V;
+group_rank(queue, #{queue := V}) -> V.
+
+group_json(#{key := Key, count := C, memory := M, reductions := R, queue := Q, registered := Reg,
+             apps := Apps, samples := Sm}, Rank, Scanned, TotalMem, Enc) ->
+    {Text, Mod} = case Key of
+                      {Mo, F, A} -> {iolist_to_binary([bin(Mo), ":", bin(F), "/", integer_to_binary(A)]), bin(Mo)};
+                      other -> {<<"<other>">>, null};
+                      unknown -> {<<"<unknown>">>, null}
+                  end,
+    AppList = lists:sublist(lists:reverse(lists:keysort(2, [{A, N} || {A, N} <- maps:to_list(Apps), A =/= undefined])), 5),
+    Unattributed = maps:get(undefined, Apps, 0),
+    #{<<"rank">> => Rank,
+      <<"initialCall">> => mcp_encoder:safe_binary(Text, maps:get(max_binary_bytes, Enc)),
+      <<"module">> => Mod,
+      <<"count">> => C,
+      <<"countPercent">> => percent(C, Scanned),
+      <<"registered">> => Reg,
+      <<"unregistered">> => C - Reg,
+      <<"memoryBytes">> => M,
+      <<"memoryPercent">> => percent(M, TotalMem),
+      <<"reductions">> => R,
+      <<"messageQueueLen">> => Q,
+      <<"applications">> => [#{<<"name">> => bin(A), <<"count">> => N,
+                               <<"confidence">> => <<"inferred">>} || {A, N} <- AppList],
+      <<"unattributed">> => Unattributed,
+      <<"samples">> => [pid_id(P) || P <- Sm]}.
+
+percent(_, 0) -> 0.0;
+percent(N, Total) -> round(N * 1000 / Total) / 10.
 
 %%------------------------------------------------------------------------------
 %% top_ports: local ports ranked by queue size / bytes in / bytes out. Only the

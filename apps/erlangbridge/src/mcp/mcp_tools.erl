@@ -246,6 +246,25 @@ def(<<"ets_sample">>) ->
            <<"table">> => str(), <<"size">> => int(), <<"sample">> => #{<<"type">> => <<"array">>}},
          [<<"schemaVersion">>, <<"sessionId">>])};
 
+def(<<"process_groups">>) ->
+    {<<"Process groups">>,
+     <<"Aggregate every local process by where it was started (initial call; for gen_server and friends the callback "
+       "module's init) and return the largest groups (default 10, max 50) by process count, memory, reductions or "
+       "queue length: totals, shares of the node, registered versus unregistered, inferred application membership and "
+       "up to 3 sample process ids per group (usable with process_info). Finds fan-out and leaks - thousands of "
+       "anonymous workers - that a top list of single processes does not show. The answer has a fixed size however "
+       "many processes exist; the scan is bounded (process cap, time budget, group cap) and says when it was cut. "
+       "Metadata only.">>,
+     obj(#{<<"sortBy">> => #{<<"type">> => <<"string">>,
+                             <<"enum">> => [<<"count">>, <<"memory">>, <<"reductions">>, <<"message_queue_len">>],
+                             <<"description">> => <<"Ranking criterion. Default count.">>},
+           <<"limit">> => #{<<"type">> => <<"integer">>, <<"minimum">> => 1, <<"maximum">> => 50,
+                            <<"description">> => <<"Number of groups to return. Default 10.">>}}, []),
+     obj(#{<<"schemaVersion">> => str(), <<"sessionId">> => str(), <<"observedAt">> => str(),
+           <<"totals">> => #{<<"type">> => <<"object">>}, <<"groups">> => #{<<"type">> => <<"array">>},
+           <<"complete">> => #{<<"type">> => <<"boolean">>}, <<"omissions">> => #{<<"type">> => <<"array">>}},
+         [<<"schemaVersion">>, <<"sessionId">>])};
+
 def(<<"top_ports">>) ->
     {<<"Top ports">>,
      <<"Rank the local ports of the node (sockets, files, spawned programs) by queue size, bytes in or bytes out and "

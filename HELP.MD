@@ -178,7 +178,7 @@ credentials come only from the VS Code settings. The values below are the defaul
     {allowed_tools, [<<"runtime_summary">>, <<"application_overview">>, <<"supervision_tree">>,
                      <<"process_info">>, <<"registered_processes">>, <<"ets_tables">>,
                      <<"debug_session">>, <<"top_processes">>, <<"topology_overview">>, <<"changes_since">>,
-                     <<"top_ports">>, <<"ets_summary">>]},
+                     <<"top_ports">>, <<"ets_summary">>, <<"process_groups">>]},
     {allowed_ets_tables, []},          %% exact names, e.g. [<<"orders_index">>], or `all`; private tables never
     {limits, [{max_request_bytes, 16384}, {max_result_bytes, 262144}, {max_items, 500},
               {max_depth, 16}, {max_binary_bytes, 4096}, {max_traversal_depth, 8},
@@ -240,6 +240,7 @@ A malformed or duplicated term, an `mcp` term only inside a profile, or keys suc
 | `ets_tables` | metadata of the approved named tables (protection, type, owner, size, memory in words and bytes) - never keys or values |
 | `topology_overview` | one call for one application (`name` or `application` id): the application, its supervision tree with child counts, registered processes and the approved ETS tables they own, as one collection. Parts whose own tool is not allowed by the policy are left out (`policy_denied` omission) |
 | `changes_since` | what changed since an earlier collection (`collectionId`): added, removed and replaced (restarted: same child, new id) entities, with `absence: unconfirmed` for removals from a partial collection. The baseline is only retained for `collection_ttl_ms` (30 s by default) and 2 collections: compare soon after the first call, else `baseline_expired` |
+| `process_groups` | every local process aggregated by where it was started (initial call; the callback module for gen_server and friends): the top groups (`limit` up to 50, `sortBy` count / memory / reductions / message_queue_len) with count, share of the node, registered vs unregistered, memory, queue, inferred applications and 3 sample process ids. The answer has a fixed size whatever the number of processes (40,000 anonymous workers = one group); finds fan-out and leaks |
 | `top_ports` | local ports ranked by queue size, bytes in or bytes out (`sortBy`, `limit` up to 50): driver name, counters, queue size and the owner process (`owns_port` edge). Never addresses, command lines, paths or data; a non-driver port (e.g. a spawned program) is `<redacted>` |
 | `ets_summary` | ETS memory per owner process, largest first (`limit` up to 50): table count and memory in words/bytes, plus node totals. Counts only tables approved by `allowed_ets_tables` (exact names or `all`), never private ones; no table name, key or value, no table inventory (use `ets_tables` for approved tables) |
 | `top_processes` | the hottest local processes ranked by message queue length, reductions or memory (`sortBy`, `limit` up to 50): status, current function, initial call, name, membership. Bounded point-in-time scan, never mailbox/state |

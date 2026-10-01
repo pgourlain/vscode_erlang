@@ -190,7 +190,7 @@ suite('MCP: debug adapter end-to-end (real erl target)', function () {
         assert.strictEqual(started.status, 'started', JSON.stringify(started));
         const token = JSON.parse(fs.readFileSync(started.descriptor, 'utf8')).token;
         const tools = (await post(started.url, token, { jsonrpc: '2.0', id: 1, method: 'tools/list' })).json.result.tools.map((t: any) => t.name);
-        assert.strictEqual(tools.length, 12, tools.join(','));
+        assert.strictEqual(tools.length, 13, tools.join(','));
         const ok = async (name: string, args: any = {}) => {
             const r = await call(started.url, token, name, args);
             assert.ok(r.json.result && r.json.result.isError === false, name + ': ' + JSON.stringify(r.json));

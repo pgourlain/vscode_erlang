@@ -36,7 +36,7 @@
                         <<"supervision_tree">>, <<"process_info">>,
                         <<"registered_processes">>, <<"ets_tables">>,
                         <<"debug_session">>, <<"top_processes">>, <<"topology_overview">>, <<"changes_since">>,
-                        <<"top_ports">>, <<"ets_summary">>]).
+                        <<"top_ports">>, <<"ets_summary">>, <<"process_groups">>]).
 %% Developer tier: they return data of the debugged application (a bounded process
 %% state, a few mailbox messages, a few table rows), so a project must name them in
 %% allowed_tools; they are never enabled by default.

@@ -19,6 +19,7 @@
   - Developer tier (opt-in, named in the project's `allowed_tools`): `process_state` (bounded `sys:get_state` of a gen_server/gen_statem/gen_event, never a supervisor), `mailbox_sample` (oldest messages) and `ets_sample` (a few rows of an approved table), with best-effort redaction of secret-like keys and URL credentials; `allowed_ets_tables` accepts `all`; limits can be raised above their defaults up to higher ceilings (e.g. `collection_ttl_ms` up to 10 min)
   - Hardening: the bearer token and cursor secret no longer appear in crash reports, non-ASCII workspace paths find the project policy, `ets_summary` only counts approved tables, `top_ports` only names well-known drivers, inspector processes are excluded from the rankings, child ids are redacted
   - `allowed_tools` accepts `default` (the built-in set, also after upgrades) or `[default, <<"tool">>]`; the server tells the agent in its `instructions` which tools the project policy disables
+  - New tool `process_groups`: all local processes aggregated by initial call (count, memory, reductions, queue, registered vs unregistered, sample ids) in an answer of fixed size, to find fan-out and leaks of anonymous processes
   - MCP prompt `map_application`: the sample prompt served by the inspector itself (argument-checked, grants nothing)
   - A ready-to-use prompt to map an application with an agent: [HELP.MD](./HELP.MD#mcp-topology-inspector-ai-agents-debug-sessions-only) (*Sample prompt*)
 

@@ -37,6 +37,7 @@ all() ->
      prompt_guides_an_agent_and_checks_its_argument,
      changes_since_reports_replaced_and_removed_children,
      top_ports_reports_drivers_and_owners_only,
+     process_groups_aggregates_anonymous_processes_in_a_fixed_size_answer,
      ets_summary_aggregates_per_owner_without_names,
      ets_summary_counts_only_approved_tables,
      developer_tools_are_off_by_default,
@@ -336,7 +337,7 @@ initialize_negotiates_and_lists_only_readonly_tools(Config) ->
     #{<<"result">> := #{<<"tools">> := Tools}} = rpc(Config, <<"tools/list">>, #{}),
     Names = lists:sort([maps:get(<<"name">>, T) || T <- Tools]),
     ?assertEqual(lists:sort(mcp_policy:default_tools()), Names),
-    ?assertEqual(12, length(Tools)),
+    ?assertEqual(13, length(Tools)),
     [begin
          ?assertMatch(#{<<"inputSchema">> := #{<<"type">> := <<"object">>, <<"additionalProperties">> := false},
                         <<"outputSchema">> := #{<<"type">> := <<"object">>},
@@ -1213,6 +1214,52 @@ top_ports_reports_drivers_and_owners_only(Config) ->
     after
         catch port_close(Cat),
         [catch gen_tcp:close(X) || X <- [A, C, L]]
+    end.
+
+%% anonymous workers of one spawn site (the process_groups test)
+idle() -> receive stop -> ok end.
+
+process_groups_aggregates_anonymous_processes_in_a_fixed_size_answer(Config) ->
+    Pids = [spawn(?MODULE, idle, []) || _ <- lists:seq(1, 400)],
+    try
+        S = ok_call(Config, <<"process_groups">>, #{<<"limit">> => 5}),
+        Groups = maps:get(<<"groups">>, S),
+        ?assertEqual(5, length(Groups)),
+        [Top | _] = Groups,
+        %% the 400 anonymous workers are one group, not 400 entries
+        ?assertMatch(#{<<"rank">> := 1, <<"initialCall">> := <<"mcp_server_SUITE:idle/0">>,
+                       <<"module">> := <<"mcp_server_SUITE">>, <<"count">> := C,
+                       <<"registered">> := 0, <<"unregistered">> := C} when C >= 400, Top),
+        ?assertEqual(3, length(maps:get(<<"samples">>, Top))),
+        %% the sample ids join with process_info
+        [Id | _] = maps:get(<<"samples">>, Top),
+        ?assertMatch(#{<<"entities">> := [_ | _]}, ok_call(Config, <<"process_info">>, #{<<"id">> => Id})),
+        Counts = [maps:get(<<"count">>, G) || G <- Groups],
+        ?assertEqual(lists:reverse(lists:sort(Counts)), Counts),
+        #{<<"processCount">> := PC, <<"scanned">> := Sc, <<"registered">> := Reg, <<"unregistered">> := Un,
+          <<"shownCoverPercent">> := Cover} = Totals = maps:get(<<"totals">>, S),
+        ?assert(PC >= 400 andalso Sc >= 400 andalso Reg + Un =:= Sc),
+        ?assert(Cover > 0 andalso Cover =< 100),
+        ?assertMatch(#{<<"groups">> := G, <<"groupsShown">> := 5} when G >= 5, Totals),
+        ?assertEqual(true, maps:get(<<"complete">>, S)),
+        %% OTP processes are grouped by their callback module; inspector processes are not listed
+        All = maps:get(<<"groups">>, ok_call(Config, <<"process_groups">>, #{<<"limit">> => 50})),
+        Calls = [maps:get(<<"initialCall">>, G) || G <- All],
+        [?assertEqual(nomatch, binary:match(C1, X)) || C1 <- Calls, X <- [<<"mcp_runtime:">>, <<"mcp_server:">>, <<"mcp_store:">>]],
+        ?assert(length(All) =< 50),
+        %% other criteria, and strict arguments
+        lists:foreach(fun({By, Field}) ->
+                              R = ok_call(Config, <<"process_groups">>, #{<<"sortBy">> => By, <<"limit">> => 8}),
+                              Vs = [maps:get(Field, G) || G <- maps:get(<<"groups">>, R)],
+                              ?assertEqual(lists:reverse(lists:sort(Vs)), Vs)
+                      end, [{<<"memory">>, <<"memoryBytes">>}, {<<"reductions">>, <<"reductions">>},
+                            {<<"message_queue_len">>, <<"messageQueueLen">>}]),
+        ?assertEqual(nomatch, re:run(iolist_to_binary(io_lib:format("~p", [S])), "SENTINEL")),
+        ?assertMatch({rpc_error, -32602, _}, call(Config, <<"process_groups">>, #{<<"limit">> => 51})),
+        ?assertMatch({rpc_error, -32602, _}, call(Config, <<"process_groups">>, #{<<"sortBy">> => <<"links">>})),
+        ?assertMatch({rpc_error, -32602, _}, call(Config, <<"process_groups">>, #{<<"cursor">> => <<"x">>}))
+    after
+        [exit(P, kill) || P <- Pids]
     end.
 
 ets_summary_aggregates_per_owner_without_names(Config) ->
