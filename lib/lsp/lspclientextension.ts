@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import {
 	workspace as Workspace, window as Window, ExtensionContext, TextDocument, OutputChannel,
-	LogOutputChannel, Uri, Disposable, CodeLens, FileSystemWatcher, workspace, languages, commands
+	LogOutputChannel, Uri, Disposable, CodeLens, FileSystemWatcher, workspace, languages, commands, env
 } from 'vscode';
 
 import {
@@ -31,6 +31,7 @@ import * as lspcodelens from './lspcodelens';
 import * as lspValue from './lsp-inlinevalues';
 import * as lspTest from './lsp-testcontroller';
 import { LspStatus, SHOW_OUTPUT_COMMAND, RESTART_COMMAND } from './lsp-status';
+import { findErl } from '../erlangInstallation';
 
 
 // import { ErlangShellForDebugging } from '../ErlangShellDebugger';
@@ -96,6 +97,13 @@ namespace Configuration {
 		return result;
 	}
 
+	// The client is not started when Erlang is missing, or stopped after a failed start.
+	function notifyServer(type: { method: string }, params: object): void {
+		if (client.state === State.Running) {
+			client.sendNotification(type.method, params);
+		}
+	}
+
 	export function initialize() {
 		//force to read configuration
 		lspcodelens.configurationChanged();
@@ -103,19 +111,19 @@ namespace Configuration {
 		// listen to any change. However this will change in the near future.
 		configurationListener = Workspace.onDidChangeConfiguration(() => {
 			lspcodelens.configurationChanged();
-			client.sendNotification(DidChangeConfigurationNotification.type, { settings: null });
+			notifyServer(DidChangeConfigurationNotification.type, { settings: null });
 		});
 		fileSystemWatcher = workspace.createFileSystemWatcher('**/*.{erl,hrl}');
 		fileSystemWatcher.onDidCreate(uri => {
-			client.sendNotification(DidChangeWatchedFilesNotification.type,
+			notifyServer(DidChangeWatchedFilesNotification.type,
 				{ changes: [{ uri: uri.toString(), type: FileChangeType.Created }] });
 		});
 		fileSystemWatcher.onDidChange(uri => {
-			client.sendNotification(DidChangeWatchedFilesNotification.type,
+			notifyServer(DidChangeWatchedFilesNotification.type,
 				{ changes: [{ uri: uri.toString(), type: FileChangeType.Changed }] });
 		});
 		fileSystemWatcher.onDidDelete(uri => {
-			client.sendNotification(DidChangeWatchedFilesNotification.type,
+			notifyServer(DidChangeWatchedFilesNotification.type,
 				{ changes: [{ uri: uri.toString(), type: FileChangeType.Deleted }] });
 		});
 	}
@@ -224,7 +232,8 @@ export function activate(context: ExtensionContext) {
 	const status = new LspStatus();
 	context.subscriptions.push(status);
 	context.subscriptions.push(commands.registerCommand(SHOW_OUTPUT_COMMAND, () => client?.outputChannel.show()));
-	context.subscriptions.push(commands.registerCommand(RESTART_COMMAND, () => startClient(client.restart())));
+	context.subscriptions.push(commands.registerCommand(RESTART_COMMAND,
+		() => startIfErlangFound(() => client.state === State.Stopped ? client.start() : client.restart(), true)));
 	// Set by a failed start: the Stopped state that follows must not hide it.
 	let startFailure: string | undefined;
 	const startClient = (starting: Promise<void>) => {
@@ -237,6 +246,23 @@ export function activate(context: ExtensionContext) {
 				.then(choice => { if (choice) { client.outputChannel.show(); } });
 		});
 	};
+
+	// Without erl nothing can run (e.g. an unrelated project, Erlang not
+	// installed): starting the client would only fail with two error popups.
+	// Say it with a warning, and start once erlang.erlangPath is fixed.
+	const startIfErlangFound = (start: () => Promise<void>, explicit: boolean) => {
+		if (findErl()) {
+			startClient(start());
+		} else {
+			status.erlangNotFound();
+			notifyErlangNotFound(context, explicit);
+		}
+	};
+	context.subscriptions.push(Workspace.onDidChangeConfiguration(e => {
+		if (e.affectsConfiguration('erlang.erlangPath') && client.state === State.Stopped) {
+			startIfErlangFound(() => client.start(), false);
+		}
+	}));
 
 	lspValue.activate(context, lspOutputChannel);
 
@@ -325,12 +351,32 @@ export function activate(context: ExtensionContext) {
 	}));
 	Configuration.initialize();
 	// Start the client. This will also launch the server
-	startClient(client.start());
+	startIfErlangFound(() => client.start(), false);
 	// `client` (imported by lsp-testcontroller as a live binding) must be
 	// assigned before this runs - it registers an onNotification handler
 	// eagerly, unlike lspValue.activate above which only dereferences
 	// `client` lazily inside request calls.
 	lspTest.activate(context, lspOutputChannel);
+}
+
+const ERLANG_NOT_FOUND_SILENCED = 'erlang.erlangNotFound.silenced';
+
+function notifyErlangNotFound(context: ExtensionContext, explicit: boolean): void {
+	if (!explicit && context.globalState.get<boolean>(ERLANG_NOT_FOUND_SILENCED)) {
+		return;
+	}
+	const download = 'Download Erlang/OTP', settings = 'Set erlang.erlangPath', silence = "Don't Show Again";
+	Window.showWarningMessage('Erlang/OTP was not found (no erl on the PATH or in erlang.erlangPath): '
+		+ 'the Erlang language server is not started.', download, settings, ...(explicit ? [] : [silence]))
+		.then(choice => {
+			if (choice === download) {
+				env.openExternal(Uri.parse('https://www.erlang.org/downloads'));
+			} else if (choice === settings) {
+				commands.executeCommand('workbench.action.openSettings', 'erlang.erlangPath');
+			} else if (choice === silence) {
+				context.globalState.update(ERLANG_NOT_FOUND_SILENCED, true);
+			}
+		});
 }
 
 export function debugLog(msg: string): void {
@@ -344,5 +390,5 @@ export function deactivate(): Thenable<void> {
 		return undefined;
 	}
 	Configuration.dispose();
-	return client.stop();
+	return client.state === State.Stopped ? undefined : client.stop();
 }
