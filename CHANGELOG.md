@@ -1,5 +1,9 @@
 # Change log
 
+## Unreleased
+
+* Display warning on extension activation when Erlang doesn't exists.
+
 
 ## Version 1.2.6 (October 1, 2026)
 
