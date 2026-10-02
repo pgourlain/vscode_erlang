@@ -26,5 +26,14 @@ scripts/**
 CLAUDE.md
 tasks.md
 .github/**
-grammar/.vscode/**
-grammar/.github/**
+grammar/**
+!grammar/Erlang.plist
+!grammar/LICENSE
+images/**
+!images/icon.png
+!images/erlang-fileicon-*.png
+!images/vscode-erlang-rebarpath-settings.png
+!images/vscode-erlang-build.png
+!images/vscode-erlang-test-explorer.png
+!images/vscode-erlang-debug.png
+!images/vscode-erlang-mcp-results.png
