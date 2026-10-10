@@ -3,12 +3,12 @@
 %% per-test status in an ETS table so the caller (lsp_testing:run_tests/2)
 %% can read it back once eunit:test/2 returns.
 %%
-%% This is a sibling of eunit_jsonreport.erl (same behaviour, same `Data`
+%% This is a sibling of vscode_eunit_jsonreport.erl (same behaviour, same `Data`
 %% proplist shape from eunit's event manager - see `source`/`status`/`line`
-%% below), not a reuse of it verbatim: eunit_jsonreport only ever writes one
+%% below), not a reuse of it verbatim: vscode_eunit_jsonreport only ever writes one
 %% final file via a hand-rolled string builder, which doesn't fit streaming
 %% per-test results as they happen.
--module(lsp_testing_eunit_report).
+-module(vscode_lsp_testing_eunit_report).
 
 -behaviour(eunit_listener).
 

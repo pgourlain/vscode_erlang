@@ -1,7 +1,7 @@
--module(mcp_server_SUITE).
+-module(vscode_mcp_server_SUITE).
 
 %% End-to-end tests of the embedded MCP inspector over its real HTTP endpoint,
-%% against a deterministic OTP fixture (mcp_fixture_sup) whose expected
+%% against a deterministic OTP fixture (vscode_mcp_fixture_sup) whose expected
 %% topology is defined independently of the inspector output.
 %%
 %% The fixture contains SENTINEL_* strings in every place the inspector must
@@ -60,14 +60,14 @@ all() ->
      agent_summary_is_compact].
 
 init_per_suite(Config) ->
-    ok = mcp_fixture_sup:start_fixture(),
+    ok = vscode_mcp_fixture_sup:start_fixture(),
     Mailbox = spawn(fun() -> register(mcp_fx_mailbox, self()), receive never -> ok end end),
     Mailbox ! "SENTINEL_MAILBOX",
     [{mailbox, Mailbox} | Config].
 
 end_per_suite(Config) ->
     exit(?config(mailbox, Config), kill),
-    mcp_fixture_sup:stop_fixture(),
+    vscode_mcp_fixture_sup:stop_fixture(),
     ok.
 
 init_per_testcase(lsp_application_never_starts_the_inspector, Config) -> Config;
@@ -80,16 +80,16 @@ init_per_testcase(Case, Config) ->
                journal_reports_request_metadata_only -> #{notify => fun(M) -> Self ! {journal, M} end};
                _ -> #{}
            end,
-    {ok, Info} = mcp_sup:start_session(Cfg, launch, undefined, Opts),
+    {ok, Info} = vscode_mcp_sup:start_session(Cfg, launch, undefined, Opts),
     [{cfg, Cfg}, {info, Info}, {port, maps:get(port, Info)}, {token, maps:get(token, Info)} | Config].
 
 end_per_testcase(_Case, _Config) ->
     catch sys:resume(mcp_fx_sub_sup),
-    mcp_sup:stop_session(),
+    vscode_mcp_sup:stop_session(),
     ok.
 
 test_config(Case) ->
-    Base = mcp_policy:defaults(),
+    Base = vscode_mcp_policy:defaults(),
     L = maps:get(limits, Base),
     Ets = [<<"mcp_fx_orders">>, <<"mcp_fx_private">>, <<"mcp_fx_missing_table_zzz">>],
     Base1 = Base#{allowed_ets_tables => Ets},
@@ -103,7 +103,7 @@ test_config(Case) ->
         Dev when Dev =:= process_state_is_bounded_redacted_and_never_for_supervisors;
                  Dev =:= mailbox_sample_returns_the_oldest_messages_redacted;
                  Dev =:= ets_sample_only_for_approved_non_private_tables ->
-            Base1#{allowed_tools => mcp_policy:all_tools()};
+            Base1#{allowed_tools => vscode_mcp_policy:all_tools()};
         topology_overview_leaves_out_parts_the_policy_denies ->
             Base1#{allowed_tools => [<<"topology_overview">>, <<"supervision_tree">>, <<"application_overview">>]};
         pagination_cursors_and_retention ->
@@ -336,7 +336,7 @@ initialize_negotiates_and_lists_only_readonly_tools(Config) ->
     ?assertMatch(#{<<"result">> := #{}}, rpc(Config, <<"ping">>, #{})),
     #{<<"result">> := #{<<"tools">> := Tools}} = rpc(Config, <<"tools/list">>, #{}),
     Names = lists:sort([maps:get(<<"name">>, T) || T <- Tools]),
-    ?assertEqual(lists:sort(mcp_policy:default_tools()), Names),
+    ?assertEqual(lists:sort(vscode_mcp_policy:default_tools()), Names),
     ?assertEqual(13, length(Tools)),
     [begin
          ?assertMatch(#{<<"inputSchema">> := #{<<"type">> := <<"object">>, <<"additionalProperties">> := false},
@@ -472,8 +472,8 @@ application_overview_discovers_fixture_without_names(Config) ->
     %% modules: names and behaviours only when already loaded, never loaded by the inspector
     M = ok_call(Config, <<"application_overview">>, #{<<"application">> => id_of(App), <<"includeModules">> => true}),
     Mods = [E || #{<<"kind">> := <<"module">>} = E <- maps:get(<<"entities">>, M)],
-    ?assertEqual([<<"mcp_fixture_sup">>, <<"mcp_fixture_worker">>], lists:sort([maps:get(<<"name">>, E) || E <- Mods])),
-    ?assertEqual([<<"gen_server">>], maps:get(<<"behaviours">>, hd(by_name(<<"mcp_fixture_worker">>, Mods)))),
+    ?assertEqual([<<"vscode_mcp_fixture_sup">>, <<"vscode_mcp_fixture_worker">>], lists:sort([maps:get(<<"name">>, E) || E <- Mods])),
+    ?assertEqual([<<"gen_server">>], maps:get(<<"behaviours">>, hd(by_name(<<"vscode_mcp_fixture_worker">>, Mods)))),
     ?assert(lists:all(fun(E) -> is_boolean(maps:get(<<"loaded">>, E)) end, Mods)),
     %% no compile path, no environment
     ?assertEqual(nomatch, re:run(iolist_to_binary(io_lib:format("~p", [S])), "SENTINEL|\\.beam|/ebin")).
@@ -490,8 +490,8 @@ supervision_tree_matches_independent_expected_graph(Config) ->
     Ents = entities(Pages),
     ?assertEqual(<<"supervisor">>, maps:get(<<"role">>, ent(<<"mcp_fx_sub_sup">>, [E || E <- Ents, maps:get(<<"childId">>, E, undefined) =:= <<"mcp_fx_sub_sup">>]))),
     Wa = ent(<<"mcp_fx_worker_a">>, Ents),
-    ?assertMatch(#{<<"role">> := <<"worker">>, <<"callbackModule">> := <<"mcp_fixture_worker">>,
-                   <<"modules">> := [<<"mcp_fixture_worker">>], <<"behaviour">> := [<<"gen_server">>],
+    ?assertMatch(#{<<"role">> := <<"worker">>, <<"callbackModule">> := <<"vscode_mcp_fixture_worker">>,
+                   <<"modules">> := [<<"vscode_mcp_fixture_worker">>], <<"behaviour">> := [<<"gen_server">>],
                    <<"restart">> := <<"permanent">>, <<"shutdown">> := 1000, <<"specAvailable">> := true}, Wa),
     Wb = hd([E || #{<<"childId">> := <<"worker_b">>} = E <- Ents]),
     ?assertMatch(#{<<"role">> := <<"worker">>, <<"restart">> := <<"transient">>, <<"name">> := null}, Wb),
@@ -611,9 +611,9 @@ registered_processes_membership_evidence(Config) ->
     ?assert(length(by_name(<<"kernel_sup">>, AllEnts)) =:= 1),
     ?assertEqual(<<"unknown">>, maps:get(<<"confidence">>, maps:get(<<"membership">>, ent(<<"mcp_fx_mailbox">>, AllEnts)))),
     %% inspector processes are never listed as application processes
-    ?assertEqual([], [N || #{<<"name">> := N} <- AllEnts, is_binary(N), binary:match(N, <<"mcp_server">>) =/= nomatch
-                                orelse binary:match(N, <<"mcp_store">>) =/= nomatch orelse binary:match(N, <<"mcp_holder">>) =/= nomatch
-                                orelse binary:match(N, <<"mcp_sup">>) =/= nomatch]),
+    ?assertEqual([], [N || #{<<"name">> := N} <- AllEnts, is_binary(N), binary:match(N, <<"vscode_mcp_server">>) =/= nomatch
+                                orelse binary:match(N, <<"vscode_mcp_store">>) =/= nomatch orelse binary:match(N, <<"vscode_mcp_holder">>) =/= nomatch
+                                orelse binary:match(N, <<"vscode_mcp_sup">>) =/= nomatch]),
     ?assert(length(maps:get(<<"limitations">>, maps:get(<<"scope">>, hd(All)))) >= 3),
     %% mailbox contents are never read: only the queue length
     MB = ent(<<"mcp_fx_mailbox">>, AllEnts),
@@ -693,7 +693,7 @@ restart_changes_identity(Config) ->
     {ok, _} = supervisor:restart_child(mcp_fx_sub_sup, worker_b).
 
 pagination_cursors_and_retention(Config) ->
-    ok = mcp_fixture_sup:add_dynamic(30),
+    ok = vscode_mcp_fixture_sup:add_dynamic(30),
     RootId = fixture_root_id(Config),
     Args = #{<<"id">> => RootId},
     First = ok_call(Config, <<"supervision_tree">>, Args),
@@ -739,14 +739,14 @@ pagination_cursors_and_retention(Config) ->
     ?assertMatch({tool_error, #{<<"error">> := #{<<"code">> := <<"cursor_expired">>}}},
                  call(Config, <<"supervision_tree">>, Args#{<<"cursor">> => Cursor2})),
     %% bounded identity bookkeeping and retained state
-    Stats = mcp_store:stats(),
+    Stats = vscode_mcp_store:stats(),
     ?assert(maps:get(collections, Stats) =< 2),
-    wait_until(fun() -> maps:get(slots, mcp_store:stats()) =:= 0 end),
+    wait_until(fun() -> maps:get(slots, vscode_mcp_store:stats()) =:= 0 end),
     lists:foreach(fun({_, P, _, _}) -> supervisor:terminate_child(mcp_fx_dyn_sup, P) end,
                   supervisor:which_children(mcp_fx_dyn_sup)).
 
 collection_byte_budget_is_partial_and_non_resumable(Config) ->
-    ok = mcp_fixture_sup:add_dynamic(60),
+    ok = vscode_mcp_fixture_sup:add_dynamic(60),
     Args = #{<<"supervisor">> => <<"mcp_fx_root">>},
     S = ok_call(Config, <<"supervision_tree">>, Args),
     ?assertEqual(false, maps:get(<<"complete">>, S)),
@@ -758,7 +758,7 @@ collection_byte_budget_is_partial_and_non_resumable(Config) ->
     Pages = collect_pages(Config, <<"supervision_tree">>, Args, S, [S]),
     [?assertEqual(false, maps:get(<<"complete">>, P)) || P <- Pages],
     ?assertEqual(null, maps:get(<<"nextCursor">>, lists:last(Pages))),
-    ?assert(maps:get(collection_bytes, mcp_store:stats()) =< 2 * 4096),
+    ?assert(maps:get(collection_bytes, vscode_mcp_store:stats()) =< 2 * 4096),
     %% the whole response envelope stays under max_result_bytes
     {200, _, Raw} = http(?config(port, Config), "POST", std_headers(Config),
                          iolist_to_binary(element(2, vscode_jsone:encode(
@@ -792,7 +792,7 @@ blocked_supervisor_yields_partial_result(Config) ->
     ?assertEqual(suspended, SysState),
     ok = sys:resume(mcp_fx_sub_sup),
     %% inspector-owned workers and slots are back to baseline
-    wait_until(fun() -> maps:get(slots, mcp_store:stats()) =:= 0 end),
+    wait_until(fun() -> maps:get(slots, vscode_mcp_store:stats()) =:= 0 end),
     S2 = ok_call(Config, <<"supervision_tree">>, #{<<"id">> => RootId}),
     ?assertEqual(true, maps:get(<<"complete">>, S2)),
     ?assertEqual(5, length(supervises_edges([S2]))).
@@ -802,12 +802,12 @@ concurrency_is_bounded(Config) ->
     ok = sys:suspend(mcp_fx_sub_sup),
     Self = self(),
     spawn(fun() -> Self ! {first, call(Config, <<"supervision_tree">>, #{<<"id">> => RootId})} end),
-    wait_until(fun() -> maps:get(slots, mcp_store:stats()) =:= 1 end),
+    wait_until(fun() -> maps:get(slots, vscode_mcp_store:stats()) =:= 1 end),
     %% excess work is rejected with a clear MCP error, not queued
     ?assertMatch({rpc_error, -32000, <<"inspector busy", _/binary>>}, call(Config, <<"runtime_summary">>, #{})),
     receive {first, R} -> ?assertMatch({ok, _}, R) after 6000 -> ct:fail(no_first_result) end,
     ok = sys:resume(mcp_fx_sub_sup),
-    wait_until(fun() -> maps:get(slots, mcp_store:stats()) =:= 0 end),
+    wait_until(fun() -> maps:get(slots, vscode_mcp_store:stats()) =:= 0 end),
     ?assertMatch({ok, _}, call(Config, <<"runtime_summary">>, #{})).
 
 stop_closes_endpoint_and_invalidates_credentials(Config) ->
@@ -816,14 +816,14 @@ stop_closes_endpoint_and_invalidates_credentials(Config) ->
     Cursor = maps:get(<<"nextCursor">>, ok_call_small(Config)),
     ?assert(is_binary(Cursor)),
     ?assertMatch({200, _, _}, http(Port, "POST", std_headers(Config), <<"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}">>)),
-    ok = mcp_sup:stop_session(),
-    ?assertNot(mcp_sup:active()),
-    ?assertEqual(undefined, whereis(mcp_server)),
-    ?assertEqual(undefined, whereis(mcp_store)),
-    ?assertEqual(undefined, whereis(mcp_sup)),
+    ok = vscode_mcp_sup:stop_session(),
+    ?assertNot(vscode_mcp_sup:active()),
+    ?assertEqual(undefined, whereis(vscode_mcp_server)),
+    ?assertEqual(undefined, whereis(vscode_mcp_store)),
+    ?assertEqual(undefined, whereis(vscode_mcp_sup)),
     ?assertMatch({error, econnrefused}, gen_tcp:connect({127, 0, 0, 1}, Port, [binary], 1000)),
     %% a new session has a fresh token and identity; old credentials and cursors are worthless
-    {ok, Info2} = mcp_sup:start_session(?config(cfg, Config), launch),
+    {ok, Info2} = vscode_mcp_sup:start_session(?config(cfg, Config), launch),
     ?assertNotEqual(Tok, maps:get(token, Info2)),
     ?assertNotEqual(maps:get(sessionId, ?config(info, Config)), maps:get(sessionId, Info2)),
     Cfg2 = [{port, maps:get(port, Info2)}, {token, Tok}],
@@ -832,8 +832,8 @@ stop_closes_endpoint_and_invalidates_credentials(Config) ->
     ?assertMatch({tool_error, #{<<"error">> := #{<<"code">> := <<"invalid_cursor">>}}},
                  call(New, <<"application_overview">>, #{<<"cursor">> => Cursor})),
     %% concurrent start is refused: one inspector per node
-    ?assertMatch({error, <<"an MCP inspector is already running", _/binary>>}, mcp_sup:start_session(?config(cfg, Config), launch)),
-    ok = mcp_sup:stop_session().
+    ?assertMatch({error, <<"an MCP inspector is already running", _/binary>>}, vscode_mcp_sup:start_session(?config(cfg, Config), launch)),
+    ok = vscode_mcp_sup:stop_session().
 
 ok_call_small(Config) ->
     %% a call whose result spans several pages under the default limits: many registered names
@@ -846,33 +846,33 @@ ok_call_small(Config) ->
 fixed_port_conflict_disables_without_rebinding(_Config) ->
     {ok, Busy} = gen_tcp:listen(0, [binary, {ip, {127, 0, 0, 1}}, {reuseaddr, false}]),
     {ok, Port} = inet:port(Busy),
-    Cfg = (mcp_policy:defaults())#{port => Port},
-    {error, Msg} = mcp_sup:start_session(Cfg, launch),
+    Cfg = (vscode_mcp_policy:defaults())#{port => Port},
+    {error, Msg} = vscode_mcp_sup:start_session(Cfg, launch),
     ?assertNotEqual(nomatch, binary:match(Msg, <<"already in use">>)),
     %% nothing partially initialized is left running, no other port was chosen
-    ?assertNot(mcp_sup:active()),
-    [?assertEqual(undefined, whereis(N)) || N <- [mcp_holder, mcp_sup, mcp_server, mcp_store]],
+    ?assertNot(vscode_mcp_sup:active()),
+    [?assertEqual(undefined, whereis(N)) || N <- [vscode_mcp_holder, vscode_mcp_sup, vscode_mcp_server, vscode_mcp_store]],
     gen_tcp:close(Busy),
     %% once the port is free the same fixed port can be used, and it is really that port
-    {ok, Info} = mcp_sup:start_session(Cfg, launch),
+    {ok, Info} = vscode_mcp_sup:start_session(Cfg, launch),
     ?assertEqual(Port, maps:get(port, Info)),
-    ok = mcp_sup:stop_session().
+    ok = vscode_mcp_sup:stop_session().
 
 renewal_keeps_the_session_alive_and_lease_expiry_stops_it(_Config) ->
-    {ok, Info} = mcp_sup:start_session(mcp_policy:defaults(), launch),
+    {ok, Info} = vscode_mcp_sup:start_session(vscode_mcp_policy:defaults(), launch),
     Port = maps:get(port, Info),
     %% renewals (as the adapter sends them) keep the session beyond the lease duration
-    [begin timer:sleep(2000), ok = mcp_sup:renew() end || _ <- lists:seq(1, 6)],
-    ?assert(mcp_sup:active()),
+    [begin timer:sleep(2000), ok = vscode_mcp_sup:renew() end || _ <- lists:seq(1, 6)],
+    ?assert(vscode_mcp_sup:active()),
     ?assertMatch({ok, _}, gen_tcp:connect({127, 0, 0, 1}, Port, [binary], 1000)),
     %% without renewal the inspector stops within the documented bound (10 s)
     T0 = erlang:monotonic_time(millisecond),
-    wait_until(fun() -> not mcp_sup:active() end, 12000),
+    wait_until(fun() -> not vscode_mcp_sup:active() end, 12000),
     Elapsed = erlang:monotonic_time(millisecond) - T0,
     ct:pal("lease expired after ~p ms without renewal", [Elapsed]),
     ?assert(Elapsed =< 10000),
     ?assertMatch({error, econnrefused}, gen_tcp:connect({127, 0, 0, 1}, Port, [binary], 1000)),
-    [?assertEqual(undefined, whereis(N)) || N <- [mcp_holder, mcp_sup, mcp_server, mcp_store]],
+    [?assertEqual(undefined, whereis(N)) || N <- [vscode_mcp_holder, vscode_mcp_sup, vscode_mcp_server, vscode_mcp_store]],
     %% the application node itself is untouched
     ?assert(is_pid(whereis(mcp_fx_root))).
 
@@ -913,7 +913,7 @@ no_forbidden_data_no_atoms_no_stacktraces(Config) ->
 logs_never_contain_token_or_runtime_data(Config) ->
     Self = self(),
     HandlerId = mcp_capture_handler,
-    ok = logger:add_handler(HandlerId, mcp_capture_logger, #{config => #{owner => Self}, level => all}),
+    ok = logger:add_handler(HandlerId, vscode_mcp_capture_logger, #{config => #{owner => Self}, level => all}),
     PrevLevel = maps:get(level, logger:get_primary_config()),
     ok = logger:set_primary_config(level, all),
     try
@@ -944,17 +944,17 @@ collect_logs(Acc) ->
 
 lsp_application_never_starts_the_inspector(_Config) ->
     %% enabling nothing: the LSP application (and its settings) never start MCP
-    ?assertNot(mcp_sup:active()),
+    ?assertNot(vscode_mcp_sup:active()),
     ok = application:start(vscode_lsp, permanent),
     try
-        ?assertNot(mcp_sup:active()),
-        [?assertEqual(undefined, whereis(N)) || N <- [mcp_holder, mcp_sup, mcp_server, mcp_store]],
+        ?assertNot(vscode_mcp_sup:active()),
+        [?assertEqual(undefined, whereis(N)) || N <- [vscode_mcp_holder, vscode_mcp_sup, vscode_mcp_server, vscode_mcp_store]],
         %% the LSP application supervisor knows no MCP child
         Kids = supervisor:which_children(vscode_lsp_app_sup),
-        ?assertEqual([], [K || {Id, _, _, _} = K <- Kids, lists:prefix("mcp_", lists:flatten(io_lib:format("~w", [Id])))]),
+        ?assertEqual([], [K || {Id, _, _, _} = K <- Kids, lists:prefix("vscode_mcp_", lists:flatten(io_lib:format("~w", [Id])))]),
         %% the entry module's hot-loaded module list does not include MCP
         {ok, Beam} = file:read_file(code:where_is_file("vscode_lsp_entry.beam")),
-        ?assertEqual(nomatch, binary:match(Beam, <<"mcp_sup">>))
+        ?assertEqual(nomatch, binary:match(Beam, <<"vscode_mcp_sup">>))
     after
         application:stop(vscode_lsp)
     end.
@@ -970,7 +970,7 @@ journal_reports_request_metadata_only(Config) ->
     Tok = ?config(token, Config),
     #{<<"result">> := _} = rpc(Config, <<"initialize">>, #{<<"protocolVersion">> => <<"2025-06-18">>}),
     #{<<"result">> := _} = rpc(Config, <<"tools/list">>, #{}),
-    ok = mcp_fixture_sup:add_dynamic(5),
+    ok = vscode_mcp_fixture_sup:add_dynamic(5),
     First = ok_call(Config, <<"registered_processes">>, #{}),
     _ = call(Config, <<"process_info">>, #{<<"name">> => <<"mcp_fx_worker_a">>}),
     _ = call(Config, <<"supervision_tree">>, #{<<"supervisor">> => <<"SENTINEL_no_such_sup">>}),
@@ -998,7 +998,7 @@ journal_reports_request_metadata_only(Config) ->
     Allowed = [seq, method, tool, cursor, status, durationMs, bytes, entities, relationships,
                omissions, complete, more, offset],
     ?assertEqual([], lists:usort(lists:append([maps:keys(E) || E <- Entries])) -- Allowed),
-    ?assertEqual(7, maps:get(seq, mcp_store:stats())),
+    ?assertEqual(7, maps:get(seq, vscode_mcp_store:stats())),
     lists:foreach(fun({_, P, _, _}) -> supervisor:terminate_child(mcp_fx_dyn_sup, P) end,
                   supervisor:which_children(mcp_fx_dyn_sup)).
 
@@ -1027,7 +1027,7 @@ agent_summary_is_compact(Config) ->
                                                          <<"application">> => maps:get(<<"id">>, App)}),
     ?assertEqual(2, length([E || #{<<"kind">> := <<"module">>} = E <- maps:get(<<"entities">>, Mods)])),
     %% agent pages: 100 items by default, pageSize honoured, limitations only on the first page
-    ok = mcp_fixture_sup:add_dynamic(120),
+    ok = vscode_mcp_fixture_sup:add_dynamic(120),
     Args = #{<<"supervisor">> => <<"mcp_fx_root">>, <<"detail">> => <<"summary">>},
     P1 = ok_call(Config, <<"supervision_tree">>, Args),
     ?assertEqual(100, length(maps:get(<<"entities">>, P1)) + length(maps:get(<<"relationships">>, P1))),
@@ -1061,7 +1061,7 @@ top_processes_ranks_and_is_bounded(Config) ->
     %% metadata only: no mailbox content, no relationships, no inspector processes
     ?assertEqual([], maps:get(<<"relationships">>, S)),
     ?assertEqual(nomatch, re:run(iolist_to_binary(io_lib:format("~p", [S])), "SENTINEL|\\{msg")),
-    [?assertEqual(false, lists:member(maps:get(<<"name">>, E), [<<"mcp_server">>, <<"mcp_store">>, <<"mcp_sup">>]))
+    [?assertEqual(false, lists:member(maps:get(<<"name">>, E), [<<"vscode_mcp_server">>, <<"vscode_mcp_store">>, <<"vscode_mcp_sup">>]))
      || E <- Ents],
     %% the other criteria rank by their own value
     lists:foreach(fun({By, Field}) ->
@@ -1143,7 +1143,7 @@ topology_overview_leaves_out_parts_the_policy_denies(Config) ->
     ?assertEqual(false, maps:get(<<"complete">>, S)).
 
 changes_since_reports_replaced_and_removed_children(Config) ->
-    ok = mcp_fixture_sup:add_dynamic(2),
+    ok = vscode_mcp_fixture_sup:add_dynamic(2),
     RootId = fixture_root_id(Config),
     Args = #{<<"id">> => RootId},
     Base = ok_call(Config, <<"supervision_tree">>, Args),
@@ -1227,8 +1227,8 @@ process_groups_aggregates_anonymous_processes_in_a_fixed_size_answer(Config) ->
         ?assertEqual(5, length(Groups)),
         [Top | _] = Groups,
         %% the 400 anonymous workers are one group, not 400 entries
-        ?assertMatch(#{<<"rank">> := 1, <<"initialCall">> := <<"mcp_server_SUITE:idle/0">>,
-                       <<"module">> := <<"mcp_server_SUITE">>, <<"count">> := C,
+        ?assertMatch(#{<<"rank">> := 1, <<"initialCall">> := <<"vscode_mcp_server_SUITE:idle/0">>,
+                       <<"module">> := <<"vscode_mcp_server_SUITE">>, <<"count">> := C,
                        <<"registered">> := 0, <<"unregistered">> := C} when C >= 400, Top),
         ?assertEqual(3, length(maps:get(<<"samples">>, Top))),
         %% the sample ids join with process_info
@@ -1245,7 +1245,7 @@ process_groups_aggregates_anonymous_processes_in_a_fixed_size_answer(Config) ->
         %% OTP processes are grouped by their callback module; inspector processes are not listed
         All = maps:get(<<"groups">>, ok_call(Config, <<"process_groups">>, #{<<"limit">> => 50})),
         Calls = [maps:get(<<"initialCall">>, G) || G <- All],
-        [?assertEqual(nomatch, binary:match(C1, X)) || C1 <- Calls, X <- [<<"mcp_runtime:">>, <<"mcp_server:">>, <<"mcp_store:">>]],
+        [?assertEqual(nomatch, binary:match(C1, X)) || C1 <- Calls, X <- [<<"vscode_mcp_runtime:">>, <<"vscode_mcp_server:">>, <<"vscode_mcp_store:">>]],
         ?assert(length(All) =< 50),
         %% other criteria, and strict arguments
         lists:foreach(fun({By, Field}) ->
@@ -1329,7 +1329,7 @@ developer_tools_are_off_by_default(Config) ->
 
 process_state_is_bounded_redacted_and_never_for_supervisors(Config) ->
     S = ok_call(Config, <<"process_state">>, #{<<"name">> => <<"mcp_fx_worker_a">>}),
-    ?assertMatch(#{<<"behaviour">> := <<"gen_server">>, <<"callbackModule">> := <<"mcp_fixture_worker">>,
+    ?assertMatch(#{<<"behaviour">> := <<"gen_server">>, <<"callbackModule">> := <<"vscode_mcp_fixture_worker">>,
                    <<"name">> := <<"mcp_fx_worker_a">>, <<"process">> := _, <<"state">> := _}, S),
     %% the state is a map with a `secret` key: its value is replaced, the orphan pid stays visible
     Dump = iolist_to_binary(io_lib:format("~p", [S])),
@@ -1347,7 +1347,7 @@ process_state_is_bounded_redacted_and_never_for_supervisors(Config) ->
     ?assertEqual({messages, []}, erlang:process_info(Orphan, messages)),
     %% inspector processes, exited processes, hostile names and strict arguments
     ?assertMatch({tool_error, #{<<"error">> := #{<<"code">> := <<"not_found">>}}},
-                 call(Config, <<"process_state">>, #{<<"name">> => <<"mcp_server">>})),
+                 call(Config, <<"process_state">>, #{<<"name">> => <<"vscode_mcp_server">>})),
     ?assertMatch({tool_error, #{<<"error">> := #{<<"code">> := <<"not_found">>}}},
                  call(Config, <<"process_state">>, #{<<"name">> => <<"no_such_name_zz">>})),
     ?assertMatch({rpc_error, -32602, _}, call(Config, <<"process_state">>, #{})),
@@ -1445,7 +1445,7 @@ mermaid_format_renders_the_returned_edges(Config) ->
 paused_process_is_reported_from_debugger_evidence(Config) ->
     Quiet = ok_call(Config, <<"debug_session">>, #{}),
     ?assertEqual([], maps:get(<<"pausedProcesses">>, Quiet)),
-    Mod = mcp_fixture_paused,
+    Mod = vscode_mcp_fixture_paused,
     {module, Mod} = code:ensure_loaded(Mod),
     case catch int:i(Mod) of
         {module, Mod} ->
@@ -1461,7 +1461,7 @@ paused_process_is_reported_from_debugger_evidence(Config) ->
                                    end
                            end),
                 #{<<"pausedProcesses">> := [Paused]} = ok_call(Config, <<"debug_session">>, #{}),
-                ?assertMatch(#{<<"status">> := <<"break">>, <<"module">> := <<"mcp_fixture_paused">>,
+                ?assertMatch(#{<<"status">> := <<"break">>, <<"module">> := <<"vscode_mcp_fixture_paused">>,
                                <<"line">> := Line, <<"id">> := _}, Paused),
                 %% the same process id joins with process_info, which names the breakpoint
                 Info = ok_call(Config, <<"process_info">>,
@@ -1470,7 +1470,7 @@ paused_process_is_reported_from_debugger_evidence(Config) ->
                 [E] = [X || #{<<"pid">> := T} = X <- maps:get(<<"entities">>, Info), T =:= PidText],
                 ?assertEqual(maps:get(<<"id">>, Paused), id_of(E)),
                 ?assertMatch(#{<<"debugger">> := #{<<"status">> := <<"break">>,
-                                                   <<"module">> := <<"mcp_fixture_paused">>,
+                                                   <<"module">> := <<"vscode_mcp_fixture_paused">>,
                                                    <<"line">> := Line}}, E),
                 %% an ordinary process has no debugger field
                 Other = ok_call(Config, <<"process_info">>, #{<<"name">> => <<"mcp_fx_worker_c">>}),

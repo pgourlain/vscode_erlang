@@ -1,5 +1,5 @@
--module(gen_connection_SUITE).
--behaviour(gen_connection).
+-module(vscode_gen_connection_SUITE).
+-behaviour(vscode_gen_connection).
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -10,18 +10,18 @@
 
 all() -> [command_server_binds_to_loopback].
 
-%% gen_connection callbacks: this suite is the callback module.
+%% vscode_gen_connection callbacks: this suite is the callback module.
 %% get_port/0 returns a free loopback port nobody listens on, so the
-%% "listen" notification POST fails and gen_connection ignores the result.
+%% "listen" notification POST fails and vscode_gen_connection ignores the result.
 get_port() -> free_port().
 init(_Port) -> ok.
 decode_request(_Data) -> #{}.
 
 command_server_binds_to_loopback(_Config) ->
     Before = erlang:ports(),
-    ok = gen_connection:start(?MODULE),
+    ok = vscode_gen_connection:start(?MODULE),
     LSock = wait_for_listener(Before, 50),
-    %% gen_connection spawns the command server unlinked and exposes no
+    %% vscode_gen_connection spawns the command server unlinked and exposes no
     %% stop API. Kill the socket owner to close the listen socket: closing
     %% it from here would crash the accept loop with a badmatch instead.
     {connected, Owner} = erlang:port_info(LSock, connected),

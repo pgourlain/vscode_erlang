@@ -2,8 +2,8 @@
 %% entity-ID bookkeeping, retained collections (with TTL/count/byte budgets),
 %% signed cursors, worker slots and the process-membership evidence.
 %%
-%% Everything here dies with the session (the process is a child of mcp_sup).
--module(mcp_store).
+%% Everything here dies with the session (the process is a child of vscode_mcp_sup).
+-module(vscode_mcp_store).
 -behaviour(gen_server).
 
 -export([start_link/2, start_link/3, stop/0]).
@@ -108,7 +108,7 @@ notify(Meta) when is_map(Meta) -> gen_server:cast(?SERVER, {notify, Meta}).
 init({Config, Mode, Notify}) ->
     Limits = maps:get(limits, Config),
     Secret = crypto:strong_rand_bytes(32),
-    SessionId = <<"s_", (mcp_encoder:hex(crypto:strong_rand_bytes(8)))/binary>>,
+    SessionId = <<"s_", (vscode_mcp_encoder:hex(crypto:strong_rand_bytes(8)))/binary>>,
     erlang:send_after(?SWEEP_MS, self(), sweep),
     {ok, #state{config = Config, session_id = SessionId, mode = Mode, notify = Notify,
                 started_at = now_ms(), secret = Secret,
@@ -152,7 +152,7 @@ handle_call({parse_cursor, Cursor, Tool, ArgsHash}, _, S) ->
     {reply, verify_cursor(Cursor, Tool, ArgsHash, S), S};
 
 handle_call({acquire_slot, Pid}, _, #state{slots = Slots, config = Config} = S) ->
-    Max = mcp_policy:limit(max_concurrency, Config),
+    Max = vscode_mcp_policy:limit(max_concurrency, Config),
     case maps:size(Slots) >= Max of
         true -> {reply, busy, S};
         false ->
@@ -214,7 +214,7 @@ do_entity_id(Kind, Key, #state{ids_fwd = Fwd} = S) ->
     case maps:find(Key, Fwd) of
         {ok, Id} -> {Id, S};
         error ->
-            Id = <<(prefix(Kind))/binary, (mcp_encoder:hex(crypto:strong_rand_bytes(8)))/binary>>,
+            Id = <<(prefix(Kind))/binary, (vscode_mcp_encoder:hex(crypto:strong_rand_bytes(8)))/binary>>,
             S1 = evict_ids(S#state{ids_fwd = Fwd#{Key => Id},
                                    ids_rev = (S#state.ids_rev)#{Id => Key},
                                    id_order = queue:in(Key, S#state.id_order)}),
@@ -256,10 +256,10 @@ trim_members(#state{members = M, member_order = Q} = S) ->
 %%------------------------------------------------------------------------------
 
 do_put_collection(Tool, ArgsHash, Meta, Items, Ctx, #state{config = Config} = S) ->
-    MaxBytes = mcp_policy:limit(max_collection_bytes, Config),
-    MaxColls = mcp_policy:limit(max_collections, Config),
+    MaxBytes = vscode_mcp_policy:limit(max_collection_bytes, Config),
+    MaxColls = vscode_mcp_policy:limit(max_collections, Config),
     {Stored, Dropped} = fit(Items, MaxBytes, 0, []),
-    CollId = <<"c_", (mcp_encoder:hex(crypto:strong_rand_bytes(6)))/binary>>,
+    CollId = <<"c_", (vscode_mcp_encoder:hex(crypto:strong_rand_bytes(6)))/binary>>,
     Meta1 = case Dropped of
                 0 -> Meta;
                 _ -> add_limit_omission(Meta, Dropped)
@@ -294,7 +294,7 @@ evict_collections(#state{coll_order = Order, collections = Colls} = S, Max) ->
     S#state{coll_order = Keep, collections = maps:without(Drop, Colls)}.
 
 sweep_collections(#state{collections = Colls, config = Config} = S) ->
-    Ttl = mcp_policy:limit(collection_ttl_ms, Config),
+    Ttl = vscode_mcp_policy:limit(collection_ttl_ms, Config),
     Now = erlang:monotonic_time(millisecond),
     Alive = maps:filter(fun(_, #{created := C}) -> Now - C < Ttl end, Colls),
     S#state{collections = Alive,
@@ -312,7 +312,7 @@ sign_cursor(CollId, Tool, ArgsHash, Offset, S) ->
 signature(CollId, Tool, ArgsHash, Offset, #state{secret = Secret, session_id = Sid}) ->
     Data = [Secret, Sid, 0, CollId, 0, Tool, 0, ArgsHash, 0, integer_to_binary(Offset)],
     <<Head:12/binary, _/binary>> = crypto:hash(sha256, Data),
-    mcp_encoder:hex(Head).
+    vscode_mcp_encoder:hex(Head).
 
 verify_cursor(Cursor, Tool, ArgsHash, S) ->
     case binary:split(Cursor, <<".">>, [global]) of

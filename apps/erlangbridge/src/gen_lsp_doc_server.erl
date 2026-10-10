@@ -674,7 +674,7 @@ get_tree(TreeType, File) ->
 parse_next_file_in_background(#state{files_to_parse = []} = State) ->
     State;
 parse_next_file_in_background(#state{files_to_parse = [File | Rest]} = State) ->
-    worker:start(fun () -> parse_and_store(File, File) end, File),
+    vscode_lsp_worker:start(fun () -> parse_and_store(File, File) end, File),
     State#state{files_to_parse = Rest}.
 
 %% @doc Find source files of a module

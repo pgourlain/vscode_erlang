@@ -1,4 +1,4 @@
--module(gen_connection).
+-module(vscode_gen_connection).
 
 -export([behaviour_info/1]).
 

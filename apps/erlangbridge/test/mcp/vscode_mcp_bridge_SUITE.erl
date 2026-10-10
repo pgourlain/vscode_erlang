@@ -1,4 +1,4 @@
--module(mcp_bridge_SUITE).
+-module(vscode_mcp_bridge_SUITE).
 
 %% Debugger-bridge integration of the MCP inspector (T12): the inspector is
 %% pushed to and started inside the *attached target node* only when the
@@ -60,10 +60,10 @@ inspector_is_pushed_started_and_stopped_with_the_attach(Config0) ->
                                [Target, port_arg(Config), args_module(Config)], 60000)),
     CmdPort = wait_listen(),
     %% pushed to the target, because -vscode_mcp was requested
-    ?assertNotEqual(non_existing, rpc:call(Target, code, which, [mcp_sup])),
-    ?assertNotEqual(non_existing, rpc:call(Target, code, which, [mcp_server])),
+    ?assertNotEqual(non_existing, rpc:call(Target, code, which, [vscode_mcp_sup])),
+    ?assertNotEqual(non_existing, rpc:call(Target, code, which, [vscode_mcp_server])),
     %% nothing runs until the adapter asks
-    ?assertEqual(false, rpc:call(Target, mcp_sup, active, [])),
+    ?assertEqual(false, rpc:call(Target, vscode_mcp_sup, active, [])),
     Start = decode(post_command(CmdPort, "mcp_start", start_body(#{}))),
     ?assertMatch(#{<<"ok">> := true, <<"host">> := <<"127.0.0.1">>, <<"path">> := <<"/mcp">>,
                    <<"port">> := P, <<"token">> := T, <<"sessionId">> := _} when is_integer(P) andalso P > 0 andalso is_binary(T),
@@ -71,10 +71,10 @@ inspector_is_pushed_started_and_stopped_with_the_attach(Config0) ->
     #{<<"port">> := McpPort, <<"token">> := Token} = Start,
     ?assert(byte_size(Token) >= 43),
     %% the inspector lives in the target, not in the adapter/helper/test nodes
-    ?assertEqual(true, rpc:call(Target, mcp_sup, active, [])),
-    ?assertEqual(false, mcp_sup:active()),
-    ?assertEqual(undefined, whereis(mcp_server)),
-    ?assertEqual(false, peer:call(Helper, mcp_sup, active, [])),
+    ?assertEqual(true, rpc:call(Target, vscode_mcp_sup, active, [])),
+    ?assertEqual(false, vscode_mcp_sup:active()),
+    ?assertEqual(undefined, whereis(vscode_mcp_server)),
+    ?assertEqual(false, peer:call(Helper, vscode_mcp_sup, active, [])),
     %% it reports the target's own state (attach mode, interpreted module, breakpoint)
     Summary = tool(McpPort, Token, <<"runtime_summary">>, #{<<"redactNodeHost">> => false}),
     ?assertEqual(atom_to_binary(Target, utf8), maps:get(<<"node">>, Summary)),
@@ -100,7 +100,7 @@ inspector_is_pushed_started_and_stopped_with_the_attach(Config0) ->
     ?assertMatch(#{<<"ok">> := false, <<"error">> := _}, decode(post_command(CmdPort, "mcp_start", start_body(#{})))),
     %% detach: the inspector is stopped, its endpoint closed, the target keeps running
     ?assertEqual(<<"{}">>, post_command(CmdPort, "debugger_detach", <<>>)),
-    wait_until(fun() -> rpc:call(Target, mcp_sup, active, []) =:= false end),
+    wait_until(fun() -> rpc:call(Target, vscode_mcp_sup, active, []) =:= false end),
     ?assertMatch({error, econnrefused}, gen_tcp:connect({127, 0, 0, 1}, McpPort, [binary], 1000)),
     ?assertEqual(3, rpc:call(Target, mcp_attach_target, add, [1, 2])),
     ?assert(is_pid(rpc:call(Target, erlang, whereis, [init]))).
@@ -109,8 +109,8 @@ without_the_mcp_flag_nothing_is_pushed_or_started(Config) ->
     Target = ?config(target, Config),
     ok = vscode_connection:attach(Target, port_arg(Config), args_module(Config)),
     CmdPort = wait_listen(),
-    ?assertEqual(non_existing, rpc:call(Target, code, which, [mcp_sup])),
-    ?assertEqual(non_existing, rpc:call(Target, code, which, [mcp_policy])),
+    ?assertEqual(non_existing, rpc:call(Target, code, which, [vscode_mcp_sup])),
+    ?assertEqual(non_existing, rpc:call(Target, code, which, [vscode_mcp_policy])),
     ?assertMatch(#{<<"ok">> := false, <<"error">> := <<"the MCP inspector is not available", _/binary>>},
                  decode(post_command(CmdPort, "mcp_start", start_body(#{})))),
     ?assertMatch(#{<<"ok">> := false}, decode(post_command(CmdPort, "mcp_renew", <<>>))),
@@ -126,7 +126,7 @@ start_is_refused_for_an_invalid_configuration(Config0) ->
     CmdPort = wait_listen(),
     [begin
          ?assertMatch(#{<<"ok">> := false, <<"error">> := _}, decode(post_command(CmdPort, "mcp_start", Body))),
-         ?assertEqual(false, rpc:call(Target, mcp_sup, active, []))
+         ?assertEqual(false, rpc:call(Target, vscode_mcp_sup, active, []))
      end || Body <- [start_body(#{<<"host">> => <<"0.0.0.0">>}),
                      start_body(#{<<"port">> => 70000}),
                      start_body(#{<<"authToken">> => <<"x">>}),
@@ -157,7 +157,7 @@ fixed_development_token_is_used_when_given(Config0) ->
 %%%%%%%%%%%%%
 
 start_body(Override) ->
-    Base = (mcp_policy:to_json_map(mcp_policy:defaults()))#{<<"mode">> => <<"attach">>},
+    Base = (vscode_mcp_policy:to_json_map(vscode_mcp_policy:defaults()))#{<<"mode">> => <<"attach">>},
     {ok, Json} = vscode_jsone:encode(maps:merge(Base, Override)),
     iolist_to_binary(Json).
 

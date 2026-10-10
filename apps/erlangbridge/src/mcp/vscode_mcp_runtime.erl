@@ -2,7 +2,7 @@
 %%
 %% Everything here is metadata: no process dictionary, no sys:get_state, no
 %% mailbox, no ETS keys/objects, no application callbacks, no code loading.
-%% Callers run `call/3` inside a monitored, time-bounded worker (mcp_server).
+%% Callers run `call/3` inside a monitored, time-bounded worker (vscode_mcp_server).
 %%
 %% Mapping contract (schemaVersion 1.0): entities (application, process,
 %% module, ets_table), typed relationships (depends_on, supervises, owns_table,
@@ -15,7 +15,7 @@
 %% erlang:processes/0 (top_processes, capped at ?MAX_SCANNED entries), registered/0, supervisor:which_children/1 and supervisor:count_children/1
 %% materialize lists in the target VM and cannot be interrupted once started;
 %% killing the worker only discards the late reply.
--module(mcp_runtime).
+-module(vscode_mcp_runtime).
 
 -export([call/3, bounded/2, args_hash/1]).
 
@@ -40,7 +40,7 @@
 call(Tool, Args, Ctx0) ->
     Config = maps:get(config, Ctx0),
     Timeout = maps:get(timeout_ms, Ctx0),
-    MaxItems = mcp_policy:limit(max_items, Config),
+    MaxItems = vscode_mcp_policy:limit(max_items, Config),
     Detail = case maps:get(<<"detail">>, Args, <<"summary">>) of
                  <<"full">> -> full;
                  _ -> summary
@@ -95,7 +95,7 @@ builder(<<"ets_summary">>) -> fun ets_summary_build/2.
 %% Graph tools build a Builder (entities, relationships, omissions) and a scope;
 %% finish_graph retains it as a collection and renders the first page.
 graph_tool(Tool, Build, Args, Ctx) ->
-    Started = mcp_store:now_ms(),
+    Started = vscode_mcp_store:now_ms(),
     case Build(Args, Ctx) of
         {ok, Scope, B} -> finish_graph(Tool, Args, Scope, B, Started, Ctx);
         {error, _, _} = E -> E
@@ -131,12 +131,12 @@ now_mono() -> erlang:monotonic_time(millisecond).
 
 remaining(#{soft_deadline := D}) -> max(0, D - now_mono()).
 
-now_iso() -> mcp_encoder:iso8601(mcp_store:now_ms()).
+now_iso() -> vscode_mcp_encoder:iso8601(vscode_mcp_store:now_ms()).
 
 args_hash(Args) ->
     Sorted = lists:sort(maps:to_list(Args)),
     <<H:8/binary, _/binary>> = crypto:hash(sha256, term_to_binary(Sorted)),
-    mcp_encoder:hex(H).
+    vscode_mcp_encoder:hex(H).
 
 %%------------------------------------------------------------------------------
 %% runtime_summary / debug_session (plain structured results)
@@ -147,7 +147,7 @@ runtime_summary(Args, _Ctx) ->
     {Uptime, _} = erlang:statistics(wall_clock),
     Mem = erlang:memory(),
     {ok, #{<<"schemaVersion">> => ?SV,
-           <<"sessionId">> => mcp_store:session_id(),
+           <<"sessionId">> => vscode_mcp_store:session_id(),
            <<"observedAt">> => now_iso(),
            <<"otpRelease">> => list_to_binary(erlang:system_info(otp_release)),
            <<"ertsVersion">> => list_to_binary(erlang:system_info(version)),
@@ -217,9 +217,9 @@ debug_session(#{enc := Enc} = Ctx) ->
     Bps = [#{<<"module">> => atom_to_binary(M, utf8), <<"line">> => L}
            || {{M, L}, _} <- lists:sublist(lists:sort(Breaks), Max), is_atom(M), is_integer(L)],
     {ok, #{<<"schemaVersion">> => ?SV,
-           <<"sessionId">> => mcp_store:session_id(),
+           <<"sessionId">> => vscode_mcp_store:session_id(),
            <<"observedAt">> => now_iso(),
-           <<"mode">> => mode_text(mcp_store:mode()),
+           <<"mode">> => mode_text(vscode_mcp_store:mode()),
            <<"nodeConnected">> => true,
            <<"interpretedModules">> => Mods,
            <<"breakpoints">> => Bps,
@@ -316,11 +316,11 @@ note_pid(#{pids := P} = B, Pid) -> B#{pids := P#{Pid => true}}.
 finish_graph(Tool, Args, Scope, B, Started, Ctx) ->
     Oms = lists:reverse(maps:get(oms, B)),
     Truncated = lists:any(fun(#{<<"reason">> := R}) -> R =:= <<"limit_reached">> end, Oms),
-    Meta = #{scope => Scope, started_at => Started, finished_at => mcp_store:now_ms(),
+    Meta = #{scope => Scope, started_at => Started, finished_at => vscode_mcp_store:now_ms(),
              complete => Oms =:= [], truncated => Truncated, omissions => Oms},
     Items = builder_items(B),
     Hash = args_hash(maps:remove(<<"cursor">>, Args)),
-    {CollId, Meta1, Stored} = mcp_store:put_collection(Tool, Hash, Meta, Items, #{args => Args, detail => maps:get(detail, Ctx, summary)}),
+    {CollId, Meta1, Stored} = vscode_mcp_store:put_collection(Tool, Hash, Meta, Items, #{args => Args, detail => maps:get(detail, Ctx, summary)}),
     render_page(Tool, Hash, CollId, Meta1, Stored, 0, Ctx).
 
 builder_items(B) ->
@@ -329,11 +329,11 @@ builder_items(B) ->
 
 page_from_cursor(Tool, Args, Cursor, Ctx) ->
     Hash = args_hash(maps:remove(<<"cursor">>, Args)),
-    case mcp_store:parse_cursor(Cursor, Tool, Hash) of
+    case vscode_mcp_store:parse_cursor(Cursor, Tool, Hash) of
         {error, _} ->
             {error, <<"invalid_cursor">>, <<"the cursor is invalid for this tool, arguments or session">>};
         {ok, CollId, Offset} ->
-            case mcp_store:fetch_collection(CollId, Tool, Hash) of
+            case vscode_mcp_store:fetch_collection(CollId, Tool, Hash) of
                 {ok, #{meta := Meta, items := Items}} ->
                     render_page(Tool, Hash, CollId, Meta, Items, Offset, Ctx);
                 {error, cursor_expired} ->
@@ -345,7 +345,7 @@ page_from_cursor(Tool, Args, Cursor, Ctx) ->
 render_page(Tool, Hash, CollId, Meta, Items, Offset, #{config := Config} = Ctx) ->
     Rest = safe_nthtail(Offset, Items),
     MaxItems = maps:get(page_size, Ctx),
-    MaxResult = mcp_policy:limit(max_result_bytes, Config),
+    MaxResult = vscode_mcp_policy:limit(max_result_bytes, Config),
     fit_page(Tool, Hash, CollId, Meta, Rest, Offset, min(MaxItems, max(1, length(Rest))), MaxResult, Ctx).
 
 safe_nthtail(N, L) when N >= length(L) -> [];
@@ -383,14 +383,14 @@ envelope(Tool, Hash, CollId, Meta, Page, Offset, More, Ctx) ->
                         compact_scope(maps:get(scope, Meta), Offset)}
         end,
     Next = case More of
-               true -> mcp_store:make_cursor(CollId, Tool, Hash, Offset + length(Page));
+               true -> vscode_mcp_store:make_cursor(CollId, Tool, Hash, Offset + length(Page));
                false -> null
            end,
     Env = #{<<"schemaVersion">> => ?SV,
-      <<"sessionId">> => mcp_store:session_id(),
+      <<"sessionId">> => vscode_mcp_store:session_id(),
       <<"collectionId">> => CollId,
-      <<"startedAt">> => mcp_encoder:iso8601(maps:get(started_at, Meta)),
-      <<"finishedAt">> => mcp_encoder:iso8601(maps:get(finished_at, Meta)),
+      <<"startedAt">> => vscode_mcp_encoder:iso8601(maps:get(started_at, Meta)),
+      <<"finishedAt">> => vscode_mcp_encoder:iso8601(maps:get(finished_at, Meta)),
       <<"scope">> => Scope,
       <<"detail">> => atom_to_binary(Detail, utf8),
       <<"entities">> => Entities,
@@ -483,9 +483,9 @@ compact_scope(Scope, _) -> maps:remove(<<"limitations">>, Scope).
 %% Identities and small entity helpers
 %%------------------------------------------------------------------------------
 
-app_id(App) -> mcp_store:entity_id(application, {application, App}).
-pid_id(Pid) -> mcp_store:entity_id(process, {process, Pid}).
-module_id(Mod) -> mcp_store:entity_id(module, {module, Mod}).
+app_id(App) -> vscode_mcp_store:entity_id(application, {application, App}).
+pid_id(Pid) -> vscode_mcp_store:entity_id(process, {process, Pid}).
+module_id(Mod) -> vscode_mcp_store:entity_id(module, {module, Mod}).
 
 bin(A) when is_atom(A) -> atom_to_binary(A, utf8);
 bin(L) when is_list(L) ->
@@ -497,10 +497,10 @@ bin(B) when is_binary(B) -> B.
 
 %% Modules that belong to the inspector are flagged, never presented as application processes.
 inspector_name(Name) ->
-    lists:member(Name, [mcp_holder, mcp_sup, mcp_server, mcp_store]).
+    lists:member(Name, [vscode_mcp_holder, vscode_mcp_sup, vscode_mcp_server, vscode_mcp_store]).
 
--define(INSPECTOR_MODULES, [mcp_runtime, mcp_server, mcp_store, mcp_sup, mcp_audit, mcp_holder,
-                            mcp_encoder, mcp_policy, mcp_tools]).
+-define(INSPECTOR_MODULES, [vscode_mcp_runtime, vscode_mcp_server, vscode_mcp_store, vscode_mcp_sup, vscode_mcp_audit, vscode_mcp_holder,
+                            vscode_mcp_encoder, vscode_mcp_policy, vscode_mcp_tools]).
 
 %% A process of the inspector itself (registered name, or running one of its modules:
 %% workers and connections are anonymous funs of those modules).
@@ -559,7 +559,7 @@ process_entity(Pid, Fields, B) ->
                _ -> null
            end,
     E = maps:merge(#{<<"kind">> => <<"process">>,
-                     <<"pid">> => mcp_encoder:pid_text(Pid),
+                     <<"pid">> => vscode_mcp_encoder:pid_text(Pid),
                      <<"name">> => Name,
                      <<"alive">> => true}, Fields),
     {Id, note_pid(add_entity(B, Id, E), Pid)}.
@@ -656,7 +656,7 @@ application_overview_build(Args, #{enc := Enc} = Ctx) ->
 
 select_application(undefined) -> {ok, all};
 select_application(Id) ->
-    case mcp_store:resolve_id(Id) of
+    case vscode_mcp_store:resolve_id(Id) of
         {ok, {application, Name}} -> {ok, {app, Name}};
         {ok, _} -> {error, <<"invalid_id">>, <<"the id does not designate an application">>};
         expired -> {error, <<"unknown_or_expired_id">>, <<"unknown or expired entity id; call application_overview again">>}
@@ -676,7 +676,7 @@ app_entities(App, Desc, Vsn, _StartedNames, IncludeModules, Enc, Ctx, B0) ->
                                              end,
                                       {RId, Bx} = process_entity(Root, #{<<"role">> => Kind,
                                                                          <<"application">> => bin(App)}, B0),
-                                      mcp_store:note_member(Root, App, mcp_store:now_ms()),
+                                      vscode_mcp_store:note_member(Root, App, vscode_mcp_store:now_ms()),
                                       Bx1 = add_rel(Bx, <<"belongs_to">>, RId, AppId,
                                                     <<"application master child">>, <<"confirmed">>),
                                       {<<"discovered">>, [RId], Bx1};
@@ -686,7 +686,7 @@ app_entities(App, Desc, Vsn, _StartedNames, IncludeModules, Enc, Ctx, B0) ->
     Entity = #{<<"kind">> => <<"application">>,
                <<"name">> => bin(App),
                <<"version">> => bin(Vsn),
-               <<"description">> => mcp_encoder:safe_binary(unicode:characters_to_binary(Desc), 256),
+               <<"description">> => vscode_mcp_encoder:safe_binary(unicode:characters_to_binary(Desc), 256),
                <<"running">> => true,
                <<"startModule">> => StartMod,
                <<"dependencies">> => [bin(D) || D <- Deps],
@@ -726,7 +726,7 @@ app_entities(App, Desc, Vsn, _StartedNames, IncludeModules, Enc, Ctx, B0) ->
 %%------------------------------------------------------------------------------
 
 supervision_tree_build(Args, #{config := Config} = Ctx) ->
-    MaxDepth = min(maps:get(<<"maxDepth">>, Args, 16), mcp_policy:limit(max_traversal_depth, Config)),
+    MaxDepth = min(maps:get(<<"maxDepth">>, Args, 16), vscode_mcp_policy:limit(max_traversal_depth, Config)),
     IncludeModules = maps:get(<<"includeModules">>, Args, false),
     case tree_start(Args, Ctx) of
         {error, _, _} = E -> E;
@@ -743,7 +743,7 @@ supervision_tree_build(Args, #{config := Config} = Ctx) ->
 
 %% -> {ok, [RootPid], AppName | undefined, Scope, Builder} | {error, Code, Msg}
 tree_start(#{<<"id">> := Id}, Ctx) ->
-    case mcp_store:resolve_id(Id) of
+    case vscode_mcp_store:resolve_id(Id) of
         {ok, {application, App}} ->
             case lists:keymember(App, 1, application:which_applications(1000)) of
                 false -> {error, <<"not_found">>, <<"the application is not started (anymore)">>};
@@ -889,7 +889,7 @@ spec_meta(Sup, Id, Child) ->
 child({ChildId, Child, Type, Mods, Meta}, Sup, SupId, Depth, #{ctx := Ctx} = Cfg, B, Next) ->
     Enc = maps:get(enc, Ctx),
     Role = case Type of supervisor -> <<"supervisor">>; worker -> <<"worker">>; _ -> <<"unknown">> end,
-    ChildText = mcp_encoder:text(ChildId, Enc),
+    ChildText = vscode_mcp_encoder:text(ChildId, Enc),
     {ModNames, Callback} = module_names(Mods),
     Common = #{<<"role">> => Role,
                <<"childId">> => ChildText,
@@ -906,13 +906,13 @@ child({ChildId, Child, Type, Mods, Meta}, Sup, SupId, Depth, #{ctx := Ctx} = Cfg
             P when is_pid(P) ->
                 case Cfg of
                     #{app := App} when App =/= undefined ->
-                        mcp_store:note_member(P, App, mcp_store:now_ms());
+                        vscode_mcp_store:note_member(P, App, vscode_mcp_store:now_ms());
                     _ -> ok
                 end,
                 process_entity(P, Common1, B);
             Other ->
                 State = case Other of restarting -> <<"restarting">>; _ -> <<"not_running">> end,
-                Id = mcp_store:entity_id(process, {slot, Sup, ChildText}),
+                Id = vscode_mcp_store:entity_id(process, {slot, Sup, ChildText}),
                 E = Common1#{<<"kind">> => <<"process">>, <<"alive">> => false,
                              <<"childState">> => State, <<"pid">> => null, <<"name">> => null},
                 {Id, add_entity(B, Id, E)}
@@ -988,7 +988,7 @@ registered_processes_build(Args, #{enc := Enc, config := Config} = Ctx) ->
     case select_application(maps:get(<<"application">>, Args, undefined)) of
         {error, _, _} = E -> E;
         {ok, Selected} ->
-            Cap = mcp_policy:limit(max_items, Config) * 4,
+            Cap = vscode_mcp_policy:limit(max_items, Config) * 4,
             All = [N || N <- registered(), not inspector_name(N)],
             Sorted = lists:sort(All),
             Shown = lists:sublist(Sorted, Cap),
@@ -1041,7 +1041,7 @@ cached_tree_pids(App, Ctx) -> tree_pids(App, Ctx).
 tree_pids(App, #{config := Config} = Ctx) ->
     case root_info(App, Ctx) of
         {discovered, Root} ->
-            Cfg = #{max_depth => mcp_policy:limit(max_traversal_depth, Config),
+            Cfg = #{max_depth => vscode_mcp_policy:limit(max_traversal_depth, Config),
                     include_modules => false, app => App, ctx => Ctx},
             B = walk([{Root, 0}], Cfg, #{}, new_b()),
             Pids = (maps:get(pids, B))#{Root => true},
@@ -1083,7 +1083,7 @@ membership(Pid, Confirmed, Masters) ->
         {ok, App} ->
             {<<"confirmed">>, App, <<"found in the supervision tree of the application">>};
         error ->
-            case mcp_store:member(Pid) of
+            case vscode_mcp_store:member(Pid) of
                 {App, _} ->
                     {<<"confirmed">>, App, <<"seen in a supervision tree observed earlier in this session">>};
                 _ ->
@@ -1104,7 +1104,7 @@ membership(Pid, Confirmed, Masters) ->
 %%------------------------------------------------------------------------------
 
 tool_process_info(Args, #{config := Config} = Ctx) ->
-    Started = mcp_store:now_ms(),
+    Started = vscode_mcp_store:now_ms(),
     case resolve_target(Args) of
         {error, _, _} = E -> E;
         {ok, Pid} ->
@@ -1122,7 +1122,7 @@ tool_process_info(Args, #{config := Config} = Ctx) ->
     end.
 
 build_process_info(Pid, Info, Started, Args, #{enc := Enc} = Ctx, Config) ->
-    Max = mcp_policy:limit(max_items, Config),
+    Max = vscode_mcp_policy:limit(max_items, Config),
     {Conf, App, Evidence} = membership(Pid, #{}, masters(Ctx)),
     Fields = #{<<"role">> => <<"unknown">>,
                <<"status">> => bin(proplists:get_value(status, Info, unknown)),
@@ -1175,7 +1175,7 @@ peers(Peers, Type, Evidence, FromId, Max, B) ->
                        false -> Acc
                    end;
               (P, Acc) when is_port(P) ->
-                   PId = mcp_store:entity_id(process, {port, P}),
+                   PId = vscode_mcp_store:entity_id(process, {port, P}),
                    Acc1 = add_entity(Acc, PId, #{<<"kind">> => <<"process">>, <<"role">> => <<"port">>,
                                                  <<"pid">> => null, <<"name">> => null, <<"alive">> => true}),
                    add_rel(Acc1, Type, FromId, PId, Evidence, <<"confirmed">>);
@@ -1188,7 +1188,7 @@ mfa_text({M, F, A}) when is_atom(M), is_atom(F), is_integer(A) ->
 mfa_text(_) -> <<"unknown">>.
 
 resolve_target(#{<<"id">> := Id}) ->
-    case mcp_store:resolve_id(Id) of
+    case vscode_mcp_store:resolve_id(Id) of
         {ok, {process, Pid}} when is_pid(Pid) -> {ok, Pid};
         {ok, _} -> {error, <<"invalid_id">>, <<"the id does not designate a live process">>};
         expired -> {error, <<"unknown_or_expired_id">>, <<"unknown or expired entity id">>}
@@ -1227,7 +1227,7 @@ topology_overview_build(Args, #{config := Config} = Ctx) ->
         {error, _, _} = E -> E;
         {ok, App} ->
             AppId = app_id(App),
-            Allowed = fun(Tool) -> mcp_policy:tool_allowed(Tool, Config) end,
+            Allowed = fun(Tool) -> vscode_mcp_policy:tool_allowed(Tool, Config) end,
             Part = fun(Tool, Build, PArgs, C) ->
                            case Allowed(Tool) of
                                true -> Build(PArgs, C);
@@ -1340,13 +1340,13 @@ merge_owned_tables(B, EtsB) ->
                    <<"ets_tables">>, <<"top_processes">>, <<"topology_overview">>]).
 
 changes_since_build(Args, #{config := Config} = Ctx) ->
-    case mcp_store:fetch_collection_by_id(maps:get(<<"collectionId">>, Args)) of
+    case vscode_mcp_store:fetch_collection_by_id(maps:get(<<"collectionId">>, Args)) of
         {error, _} ->
             {error, <<"baseline_expired">>,
              <<"the baseline collection is unknown or no longer retained (collection_ttl_ms, max_collections); "
                "call the tool again to get a new baseline">>};
         {ok, #{tool := OldTool, ctx := #{args := OldArgs} = OldCtx, meta := OldMeta, items := OldItems}} ->
-            case lists:member(OldTool, ?DIFFABLE) andalso mcp_policy:tool_allowed(OldTool, Config) of
+            case lists:member(OldTool, ?DIFFABLE) andalso vscode_mcp_policy:tool_allowed(OldTool, Config) of
                 false ->
                     {error, <<"invalid_baseline">>, <<"this collection cannot be used as a baseline">>};
                 true ->
@@ -1412,7 +1412,7 @@ diff_collections(Tool, BaseId, OldMeta, OldItems, NewMeta, NewItems) ->
     Scope = #{<<"tool">> => <<"changes_since">>,
               <<"baselineCollectionId">> => BaseId,
               <<"baselineTool">> => Tool,
-              <<"baselineFinishedAt">> => mcp_encoder:iso8601(maps:get(finished_at, OldMeta)),
+              <<"baselineFinishedAt">> => vscode_mcp_encoder:iso8601(maps:get(finished_at, OldMeta)),
               <<"summary">> => #{<<"added">> => length(Added), <<"removed">> => length(Removed),
                                  <<"replaced">> => length(Pairs), <<"unchanged">> => Unchanged},
               <<"limitations">> =>
@@ -1434,7 +1434,7 @@ change_key(_) -> undefined.
 
 %%------------------------------------------------------------------------------
 %% Developer tier (never enabled by default; the project names them in allowed_tools):
-%% bounded samples of application data. Values go through mcp_encoder: depth/item/size
+%% bounded samples of application data. Values go through vscode_mcp_encoder: depth/item/size
 %% limits, values of secret-looking keys replaced, credentials in URLs scrubbed.
 %%------------------------------------------------------------------------------
 
@@ -1451,10 +1451,10 @@ dev_target(Args) ->
 
 dev_header(Pid) ->
     #{<<"schemaVersion">> => ?SV,
-      <<"sessionId">> => mcp_store:session_id(),
+      <<"sessionId">> => vscode_mcp_store:session_id(),
       <<"observedAt">> => now_iso(),
       <<"process">> => pid_id(Pid),
-      <<"pid">> => mcp_encoder:pid_text(Pid),
+      <<"pid">> => vscode_mcp_encoder:pid_text(Pid),
       <<"name">> => case erlang:process_info(Pid, registered_name) of
                         {registered_name, N} -> bin(N);
                         _ -> null
@@ -1480,7 +1480,7 @@ process_state(Args, #{enc := Enc} = Ctx) ->
                         {ok, State} ->
                             {ok, (dev_header(Pid))#{<<"behaviour">> => bin(Behaviour),
                                                     <<"callbackModule">> => bin(Callback),
-                                                    <<"state">> => mcp_encoder:term(State, Enc),
+                                                    <<"state">> => vscode_mcp_encoder:term(State, Enc),
                                                     <<"redaction">> => <<"best effort: values of keys named like a secret and credentials in URLs are replaced; a record without keys cannot be redacted">>}};
                         timeout ->
                             {error, <<"timeout">>,
@@ -1531,7 +1531,7 @@ mailbox_sample(Args, #{enc := Enc} = Ctx) ->
                     T = max(100, min(2000, remaining(Ctx))),
                     case bounded(fun() -> erlang:process_info(Pid, messages) end, T) of
                         {ok, {messages, Msgs}} ->
-                            {ok, Head#{<<"sample">> => [mcp_encoder:term(M, Enc) || M <- lists:sublist(Msgs, Limit)],
+                            {ok, Head#{<<"sample">> => [vscode_mcp_encoder:term(M, Enc) || M <- lists:sublist(Msgs, Limit)],
                                        <<"truncated">> => length(Msgs) > Limit,
                                        <<"redaction">> => <<"best effort: values of keys named like a secret and credentials in URLs are replaced">>}};
                         timeout -> {error, <<"timeout">>, <<"the process did not answer in time">>};
@@ -1544,7 +1544,7 @@ mailbox_sample(Args, #{enc := Enc} = Ctx) ->
 ets_sample(Args, #{enc := Enc, config := Config} = Ctx) ->
     Name = maps:get(<<"table">>, Args),
     Limit = min(maps:get(<<"limit">>, Args, 5), ?MAX_SAMPLE),
-    case mcp_policy:ets_table_allowed(Name, Config) of
+    case vscode_mcp_policy:ets_table_allowed(Name, Config) of
         false -> {error, <<"policy_denied">>, <<"the table is not approved by allowed_ets_tables">>};
         true ->
             Atom = try binary_to_existing_atom(Name, utf8) catch _:_ -> undefined end,
@@ -1561,13 +1561,13 @@ ets_sample(Args, #{enc := Enc, config := Config} = Ctx) ->
                                  end, T) of
                         {ok, {Objects, Size, Type}} ->
                             {ok, #{<<"schemaVersion">> => ?SV,
-                                   <<"sessionId">> => mcp_store:session_id(),
+                                   <<"sessionId">> => vscode_mcp_store:session_id(),
                                    <<"observedAt">> => now_iso(),
                                    <<"table">> => Name,
                                    <<"protection">> => bin(P),
                                    <<"type">> => bin(Type),
                                    <<"size">> => Size,
-                                   <<"sample">> => [mcp_encoder:term(O, Enc) || O <- Objects],
+                                   <<"sample">> => [vscode_mcp_encoder:term(O, Enc) || O <- Objects],
                                    <<"truncated">> => Size > length(Objects),
                                    <<"redaction">> => <<"best effort: values of keys named like a secret and credentials in URLs are replaced">>}};
                         timeout -> {error, <<"timeout">>, <<"the table did not answer in time">>};
@@ -1686,7 +1686,7 @@ top_entity(Pid, Info, SortBy, Rank, Masters, B) ->
 %%------------------------------------------------------------------------------
 
 process_groups(Args, #{enc := Enc} = Ctx) ->
-    Started = mcp_store:now_ms(),
+    Started = vscode_mcp_store:now_ms(),
     SortBy = case maps:get(<<"sortBy">>, Args, <<"count">>) of
                  <<"memory">> -> memory;
                  <<"reductions">> -> reductions;
@@ -1718,8 +1718,8 @@ process_groups(Args, #{enc := Enc} = Ctx) ->
               <<"message">> => <<"more distinct initial calls than the group limit; the rest are counted in <other>">>}
             || Other > 0],
     {ok, #{<<"schemaVersion">> => ?SV,
-           <<"sessionId">> => mcp_store:session_id(),
-           <<"observedAt">> => mcp_encoder:iso8601(Started),
+           <<"sessionId">> => vscode_mcp_store:session_id(),
+           <<"observedAt">> => vscode_mcp_encoder:iso8601(Started),
            <<"sortBy">> => atom_to_binary(case SortBy of queue -> message_queue_len; _ -> SortBy end, utf8),
            <<"totals">> => #{<<"processCount">> => Total, <<"scanned">> => Scanned,
                              <<"registered">> => Registered, <<"unregistered">> => Scanned - Registered,
@@ -1812,7 +1812,7 @@ group_json(#{key := Key, count := C, memory := M, reductions := R, queue := Q, r
     AppList = lists:sublist(lists:reverse(lists:keysort(2, [{A, N} || {A, N} <- maps:to_list(Apps), A =/= undefined])), 5),
     Unattributed = maps:get(undefined, Apps, 0),
     #{<<"rank">> => Rank,
-      <<"initialCall">> => mcp_encoder:safe_binary(Text, maps:get(max_binary_bytes, Enc)),
+      <<"initialCall">> => vscode_mcp_encoder:safe_binary(Text, maps:get(max_binary_bytes, Enc)),
       <<"module">> => Mod,
       <<"count">> => C,
       <<"countPercent">> => percent(C, Scanned),
@@ -1877,7 +1877,7 @@ port_entry(Port, SortBy, Rank, B) ->
     case erlang:port_info(Port, name) of
         undefined -> gone;
         _ ->
-            PId = mcp_store:entity_id(process, {port, Port}),
+            PId = vscode_mcp_store:entity_id(process, {port, Port}),
             Fields = #{<<"kind">> => <<"process">>, <<"role">> => <<"port">>, <<"pid">> => null,
                        <<"name">> => case lists:keyfind(registered_name, 1, Info) of
                                          {registered_name, N} when is_atom(N) -> bin(N);
@@ -2067,7 +2067,7 @@ ets_entry(NameBin, B, Denied, Gone) ->
                         undefined -> {B, Denied, Gone + 1};
                         {Owner, Facts} ->
                             TabIdent = ets_identity(Atom, Owner),
-                            TId = mcp_store:entity_id(ets_table, {ets, Atom, TabIdent}),
+                            TId = vscode_mcp_store:entity_id(ets_table, {ets, Atom, TabIdent}),
                             B1 = add_entity(B, TId, Facts#{<<"kind">> => <<"ets_table">>}),
                             {OwnerId, B2} = process_entity(Owner, #{<<"role">> => <<"unknown">>}, B1),
                             B3 = add_rel(B2, <<"owns_table">>, OwnerId, TId, <<"ets:info owner">>, <<"confirmed">>),

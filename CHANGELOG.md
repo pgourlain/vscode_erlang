@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+* Fix #362: Erlang modules loaded into the debugged/tested VM (debug bridge, MCP inspector, eunit and common_test hooks) are now prefixed with `vscode_` to avoid name clashes with the user's own modules (e.g. `mcp_sup`, `mcp_store`, `mcp_tools`)
 * Display warning on extension activation when Erlang doesn't exists.
 
 

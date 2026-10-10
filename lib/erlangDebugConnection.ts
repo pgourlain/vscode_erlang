@@ -7,9 +7,9 @@ export class ErlangDebugConnection extends ErlangConnection {
     protected get_ErlangFiles(): string[] {
         // mcp/* is the embedded MCP inspector: compiled here (debugger bridge beams),
         // never loaded by the LSP node, only started on request for an enabled debug session
-        return ["gen_connection.erl", "vscode_connection.erl", "vscode_jsone.erl", "vscode_jsone_decode.erl",
-            "mcp/mcp_policy.erl", "mcp/mcp_encoder.erl", "mcp/mcp_audit.erl", "mcp/mcp_store.erl",
-            "mcp/mcp_tools.erl", "mcp/mcp_runtime.erl", "mcp/mcp_server.erl", "mcp/mcp_sup.erl"];
+        return ["vscode_gen_connection.erl", "vscode_connection.erl", "vscode_jsone.erl", "vscode_jsone_decode.erl",
+            "mcp/vscode_mcp_policy.erl", "mcp/vscode_mcp_encoder.erl", "mcp/vscode_mcp_audit.erl", "mcp/vscode_mcp_store.erl",
+            "mcp/vscode_mcp_tools.erl", "mcp/vscode_mcp_runtime.erl", "mcp/vscode_mcp_server.erl", "mcp/vscode_mcp_sup.erl"];
     }
 
     protected handle_erlang_event(url: string, body : any) : void {

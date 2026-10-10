@@ -1,6 +1,6 @@
 /**
  * Internal, folder-resolved MCP settings handed to the debug adapter (never a
- * user-facing launch/attach block). Validation is authoritative in Erlang (mcp_policy).
+ * user-facing launch/attach block). Validation is authoritative in Erlang (vscode_mcp_policy).
  */
 export interface ErlangMcpSettings {
 	enabled: boolean;

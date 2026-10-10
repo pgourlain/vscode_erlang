@@ -256,7 +256,7 @@ run_next(#state{running = undefined, background = [{File, Mode} | Rest],
                 background_socket = Socket} = State) ->
     case gen_lsp_doc_server:get_document_contents(File) of
         undefined ->
-            worker:start(fun () -> lsp_handlers:validate_closed_file(Socket, File, Mode) end,
+            vscode_lsp_worker:start(fun () -> lsp_handlers:validate_closed_file(Socket, File, Mode) end,
                          {background, File}),
             State#state{running = File, background = Rest};
         _Open ->

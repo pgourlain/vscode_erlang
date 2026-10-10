@@ -1,5 +1,5 @@
 -module(vscode_connection).
--behaviour(gen_connection).
+-behaviour(vscode_gen_connection).
 
 -export([start/0, set_breakpoint/2]).
 %% attach to a running node (task 7.6)
@@ -7,14 +7,14 @@
 %% exported for vscode_connection_SUITE, which plays the helper node itself
 -export([attach/3]).
 
-% export for gen_connection behaviour
+% export for vscode_gen_connection behaviour
 -export([get_port/0, init/1, decode_request/1]).
 
 
 %%called with "erl -s vscode_connection -vscode_port 1234"
 start() ->
     configure(compile_argumentsfile()),
-    gen_connection:start(?MODULE).
+    vscode_gen_connection:start(?MODULE).
 
 %% In attach mode the port lives in the target node's application env (set
 %% by start_attached/2): the target was not started with -vscode_port.
@@ -76,11 +76,11 @@ configure(no_compiled_args_file) ->
 %% adapter sees, and posts its events to the adapter on 127.0.0.1.
 %%------------------------------------------------------------------------------
 
--define(ATTACH_MODULES, [vscode_jsone, gen_connection, vscode_connection]).
+-define(ATTACH_MODULES, [vscode_jsone, vscode_gen_connection, vscode_connection]).
 %% Pushed to the target only when the embedded MCP inspector is enabled for
 %% this debug session (the helper is then started with -vscode_mcp).
--define(MCP_MODULES, [vscode_jsone_decode, mcp_policy, mcp_encoder, mcp_audit, mcp_store,
-                      mcp_tools, mcp_runtime, mcp_server, mcp_sup]).
+-define(MCP_MODULES, [vscode_jsone_decode, vscode_mcp_policy, vscode_mcp_encoder, vscode_mcp_audit, vscode_mcp_store,
+                      vscode_mcp_tools, vscode_mcp_runtime, vscode_mcp_server, vscode_mcp_sup]).
 
 attach() ->
     {ok, [[NodeString]]} = init:get_argument(vscode_attach_node),
@@ -171,7 +171,7 @@ start_attached(Port, ArgsModule) ->
         _ ->
             ok
     end,
-    gen_connection:start(?MODULE).
+    vscode_gen_connection:start(?MODULE).
 
 %% Leave the target node as it was before the attach: no breakpoint, no
 %% interpreted module, no process left waiting at a break, no connection
@@ -192,7 +192,7 @@ stop_attached() ->
         undefined -> ok;
         Pid -> exit(Pid, kill)
     end,
-    gen_connection:stop(?MODULE).
+    vscode_gen_connection:stop(?MODULE).
 
 init(Port) ->
     init_subscribe(Port).
@@ -303,16 +303,16 @@ decode_request(Data) ->
 %%------------------------------------------------------------------------------
 
 mcp_start(Body) ->
-    case code:which(mcp_sup) of
+    case code:which(vscode_mcp_sup) of
         non_existing -> mcp_error(<<"the MCP inspector is not available in the debugged node">>);
         _ ->
             try vscode_jsone_decode:decode(unicode:characters_to_binary(Body)) of
                 {ok, Map, _} when is_map(Map) ->
-                    case mcp_policy:from_json_map(Map) of
+                    case vscode_mcp_policy:from_json_map(Map) of
                         {ok, Config} ->
                             Fixed = maps:get(<<"authToken">>, Map, undefined),
-                            Notify = fun(Meta) -> gen_connection:send_message_to_vscode(port_int(), "mcp_call", Meta) end,
-                            case mcp_sup:start_session(Config, mcp_mode(Map), Fixed, #{notify => Notify}) of
+                            Notify = fun(Meta) -> vscode_gen_connection:send_message_to_vscode(port_int(), "mcp_call", Meta) end,
+                            case vscode_mcp_sup:start_session(Config, mcp_mode(Map), Fixed, #{notify => Notify}) of
                                 {ok, #{host := Host, port := Port, path := Path, sessionId := Sid, token := Token}} ->
                                     #{ok => true, host => list_to_binary(Host), port => Port,
                                       path => Path, sessionId => Sid, token => Token};
@@ -338,15 +338,15 @@ mcp_mode(_) -> launch.
 mcp_error(Msg) -> #{ok => false, error => Msg}.
 
 mcp_renew() ->
-    case code:which(mcp_sup) of
+    case code:which(vscode_mcp_sup) of
         non_existing -> #{ok => false};
-        _ -> case mcp_sup:renew() of ok -> #{ok => true}; _ -> #{ok => false} end
+        _ -> case vscode_mcp_sup:renew() of ok -> #{ok => true}; _ -> #{ok => false} end
     end.
 
 stop_mcp() ->
-    case code:is_loaded(mcp_sup) of
+    case code:is_loaded(vscode_mcp_sup) of
         false -> ok;
-        _ -> catch mcp_sup:stop_session(), ok
+        _ -> catch vscode_mcp_sup:stop_session(), ok
     end.
 
 debugger_eval_error(Message) ->
@@ -367,7 +367,7 @@ set_breakpoint(Module, {line, Line}) ->
     end;
 set_breakpoint(Module, {function, Name, Arity}) ->
     case int:break_in(Module, Name, Arity) of
-        ok -> gen_connection:send_message_to_vscode(list_to_integer(get_port()), to_string(fbp_verified), #{module => Module, name => Name, arity => Arity});
+        ok -> vscode_gen_connection:send_message_to_vscode(list_to_integer(get_port()), to_string(fbp_verified), #{module => Module, name => Name, arity => Arity});
         {error,function_not_found} -> function_not_found; %it will be signalled to the user as non-verified breakpoint
         Error -> io:format("Cannot set brakepoint ~p:~p/~p by ~p~n", [Module, Name, Arity, Error])
     end.
@@ -540,17 +540,17 @@ decode_debugger_message(VsCodePort, M) ->
     {break_options, _Data} ->
         ok;
     {Verb, Data} ->
-        gen_connection:send_message_to_vscode(VsCodePort,to_string(Verb), to_json(Verb, Data));
+        vscode_gen_connection:send_message_to_vscode(VsCodePort,to_string(Verb), to_json(Verb, Data));
     {new_status,Pid,idle,_} ->
-        gen_connection:send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, idle}));        
+        vscode_gen_connection:send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, idle}));        
     {new_status,Pid,exit,_} ->
-        gen_connection:send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, exit})); 
+        vscode_gen_connection:send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, exit})); 
     {new_status,Pid,break,ModuleAndLine} ->
         %{new_status,<0.3.0>,break,{myapp,11}}   
-        gen_connection:send_message_to_vscode(VsCodePort,to_string(on_break), to_json(on_break, {Pid, break, ModuleAndLine}));
+        vscode_gen_connection:send_message_to_vscode(VsCodePort,to_string(on_break), to_json(on_break, {Pid, break, ModuleAndLine}));
     {new_status,Pid,running,_} ->
         %{new_status,<0.3.0>,running,{}}
-        gen_connection:send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, running}));
+        vscode_gen_connection:send_message_to_vscode(VsCodePort,to_string(new_status), to_json(new_status, {Pid, running}));
     {new_status,_,waiting,_} ->
         %{new_status,<0.3.0>,waiting,{}}: no output not to pollute the console
         ok;

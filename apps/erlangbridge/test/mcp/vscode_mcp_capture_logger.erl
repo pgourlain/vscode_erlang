@@ -1,5 +1,5 @@
 %% Test-only logger handler: forwards every log event to the test process.
--module(mcp_capture_logger).
+-module(vscode_mcp_capture_logger).
 
 -export([log/2]).
 

@@ -17,7 +17,7 @@
 %%    syntax tree, guarded by `-ifdef(TEST). ... -endif.` - the normal,
 %%    preprocessed tree drops it entirely since TEST isn't defined here.
 %%  - sample_SUITE.erl: a Common Test suite whose `all/0` lists one passing
-%%    and one failing test case, to exercise lsp_testing_ct_hook.erl.
+%%    and one failing test case, to exercise vscode_lsp_testing_ct_hook.erl.
 %%  - codepath_dep_src/codepath_dep.erl + codepath_project/dep_user_tests.erl:
 %%    a test module that calls a *separate* project module, to pin
 %%    lsp_testing:add_project_ebin_paths/0 - see that test case's own comment.

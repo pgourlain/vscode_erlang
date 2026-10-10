@@ -10,7 +10,7 @@
 %% token required on every request *before* the body is read, body size cap,
 %% header/body/connection timeouts, bounded connections and concurrent tool
 %% calls. Tokens and parameters are never logged.
--module(mcp_server).
+-module(vscode_mcp_server).
 -behaviour(gen_server).
 
 -export([start_link/2, info/0, renew/0]).
@@ -52,15 +52,15 @@ init({Config, Token}) ->
     case gen_tcp:listen(maps:get(port, Config), Opts) of
         {ok, L} ->
             {ok, Port} = inet:port(L),
-            Max = mcp_policy:limit(max_concurrency, Config) * 4,
+            Max = vscode_mcp_policy:limit(max_concurrency, Config) * 4,
             State = #state{listen = L, port = Port, host = Host, token = Token, config = Config,
                            lease_deadline = mono() + ?LEASE_MS, max_conns = Max},
             spawn_link(?MODULE, acceptor, [L, self(), Token]),
             erlang:send_after(?LEASE_CHECK_MS, self(), lease_check),
-            mcp_audit:event(listening, #{port => Port}),
+            vscode_mcp_audit:event(listening, #{port => Port}),
             {ok, State};
         {error, Reason} ->
-            mcp_audit:event(listen_failed, #{reason => Reason}),
+            vscode_mcp_audit:event(listen_failed, #{reason => Reason}),
             {stop, {listen_failed, Reason}}
     end.
 
@@ -85,7 +85,7 @@ handle_cast(_, S) ->
 handle_info(lease_check, #state{lease_deadline = D} = S) ->
     case mono() > D of
         true ->
-            mcp_audit:event(lease_expired, #{}),
+            vscode_mcp_audit:event(lease_expired, #{}),
             {stop, lease_expired, S};
         false ->
             erlang:send_after(?LEASE_CHECK_MS, self(), lease_check),
@@ -151,7 +151,7 @@ conn_main(Sock, {Server, Token}) ->
     gen_tcp:close(Sock).
 
 handle_connection(Sock, Token) ->
-    Config = mcp_store:config(),
+    Config = vscode_mcp_store:config(),
     #{port := Port} = ?MODULE:info(),
     Limits = maps:get(limits, Config),
     MaxBody = maps:get(max_request_bytes, Limits),
@@ -219,7 +219,7 @@ check_head(Method, Path, Headers, Port, Config, Token, MaxBody) ->
     case run_checks(Checks) of
         ok -> length_of(maps:get(<<"content-length">>, Headers, undefined), MaxBody);
         Reject ->
-            mcp_audit:event(rejected, #{code => element(2, Reject)}),
+            vscode_mcp_audit:event(rejected, #{code => element(2, Reject)}),
             journal(#{method => <<"http">>, status => integer_to_binary(element(2, Reject))}),
             Reject
     end.
@@ -325,7 +325,7 @@ handle_rpc(Body, Config) ->
 rpc(Obj, Method, Params) ->
     {200, encode(Obj), journal_meta(Method, Params, Obj)}.
 
-%% Request journal (see mcp_store:notify/1): request metadata only - never the
+%% Request journal (see vscode_mcp_store:notify/1): request metadata only - never the
 %% arguments, the result content or the token. The tool name is only kept when
 %% it is a known tool, so a client cannot inject text in the journal.
 journal_meta(Method, Params, Obj) ->
@@ -334,7 +334,7 @@ journal_meta(Method, Params, Obj) ->
              <<"tools/call">> ->
                  Tool = maps:get(<<"name">>, Params, undefined),
                  Args = maps:get(<<"arguments">>, Params, #{}),
-                 M0#{tool => case is_binary(Tool) andalso mcp_tools:known(Tool) of
+                 M0#{tool => case is_binary(Tool) andalso vscode_mcp_tools:known(Tool) of
                                  true -> Tool;
                                  false -> <<"?">>
                              end,
@@ -371,7 +371,7 @@ outcome(_) ->
     #{status => <<"ok">>}.
 
 journal(Meta) ->
-    catch mcp_store:notify(Meta),
+    catch vscode_mcp_store:notify(Meta),
     ok.
 
 decode(Body) ->
@@ -423,13 +423,13 @@ dispatch(<<"initialize">>, Params, Id, Config) ->
 dispatch(<<"ping">>, _, Id, _) ->
     result_obj(Id, #{});
 dispatch(<<"tools/list">>, _, Id, Config) ->
-    result_obj(Id, #{<<"tools">> => mcp_tools:list(Config)});
+    result_obj(Id, #{<<"tools">> => vscode_mcp_tools:list(Config)});
 dispatch(<<"tools/call">>, Params, Id, Config) ->
     tools_call(Params, Id, Config);
 dispatch(<<"prompts/list">>, _, Id, _) ->
-    result_obj(Id, #{<<"prompts">> => mcp_tools:prompts()});
+    result_obj(Id, #{<<"prompts">> => vscode_mcp_tools:prompts()});
 dispatch(<<"prompts/get">>, Params, Id, Config) ->
-    case mcp_tools:prompt(maps:get(<<"name">>, Params, undefined), maps:get(<<"arguments">>, Params, #{}), Config) of
+    case vscode_mcp_tools:prompt(maps:get(<<"name">>, Params, undefined), maps:get(<<"arguments">>, Params, #{}), Config) of
         {ok, Result} -> result_obj(Id, Result);
         {error, Msg} -> error_obj(Id, -32602, Msg)
     end;
@@ -439,9 +439,9 @@ dispatch(_, _, Id, _) ->
 %% Tells the agent (and the user reading its explanation) why a tool is missing: the
 %% project policy narrows the default set, or the developer tier is not enabled.
 disabled_note(Config) ->
-    Allowed = fun(T) -> mcp_policy:tool_allowed(T, Config) end,
-    Off = [T || T <- mcp_policy:default_tools(), not Allowed(T)],
-    Dev = [T || T <- mcp_policy:all_tools() -- mcp_policy:default_tools(), not Allowed(T)],
+    Allowed = fun(T) -> vscode_mcp_policy:tool_allowed(T, Config) end,
+    Off = [T || T <- vscode_mcp_policy:default_tools(), not Allowed(T)],
+    Dev = [T || T <- vscode_mcp_policy:all_tools() -- vscode_mcp_policy:default_tools(), not Allowed(T)],
     Note1 = case Off of
                 [] -> <<>>;
                 _ -> iolist_to_binary([" Not available in this session (disabled by allowed_tools in the project's rebar.config; "
@@ -456,30 +456,30 @@ disabled_note(Config) ->
 tools_call(Params, Id, Config) ->
     Name = maps:get(<<"name">>, Params, undefined),
     Args = maps:get(<<"arguments">>, Params, #{}),
-    Known = is_binary(Name) andalso mcp_tools:known(Name) andalso mcp_policy:tool_allowed(Name, Config),
+    Known = is_binary(Name) andalso vscode_mcp_tools:known(Name) andalso vscode_mcp_policy:tool_allowed(Name, Config),
     case Known of
         false ->
             error_obj(Id, -32602, <<"unknown tool">>);
         true ->
-            case mcp_tools:validate_args(Name, Args) of
+            case vscode_mcp_tools:validate_args(Name, Args) of
                 {error, Msg} -> error_obj(Id, -32602, Msg);
                 ok -> run_tool(Name, Args, Id, Config)
             end
     end.
 
 run_tool(Name, Args, Id, Config) ->
-    case mcp_store:acquire_slot(self()) of
+    case vscode_mcp_store:acquire_slot(self()) of
         busy ->
-            mcp_audit:event(tool_call, #{tool => Name, status => busy}),
+            vscode_mcp_audit:event(tool_call, #{tool => Name, status => busy}),
             error_obj(Id, -32000, <<"inspector busy: too many concurrent requests, retry later">>);
         ok ->
             T0 = erlang:monotonic_time(millisecond),
-            Timeout = mcp_policy:limit(request_timeout_ms, Config),
+            Timeout = vscode_mcp_policy:limit(request_timeout_ms, Config),
             Ctx = #{config => Config, timeout_ms => Timeout},
-            Res = mcp_runtime:bounded(fun() -> mcp_runtime:call(Name, Args, Ctx) end, Timeout),
-            mcp_store:release_slot(self()),
+            Res = vscode_mcp_runtime:bounded(fun() -> vscode_mcp_runtime:call(Name, Args, Ctx) end, Timeout),
+            vscode_mcp_store:release_slot(self()),
             {Status, Result} = tool_result(Res, Config),
-            mcp_audit:event(tool_call, #{tool => Name, status => Status,
+            vscode_mcp_audit:event(tool_call, #{tool => Name, status => Status,
                                          duration_ms => erlang:monotonic_time(millisecond) - T0}),
             result_obj(Id, Result)
     end.
@@ -488,7 +488,7 @@ tool_result({ok, {ok, Structured}}, Config) ->
     Result = #{<<"content">> => [#{<<"type">> => <<"text">>, <<"text">> => encode(Structured)}],
                <<"structuredContent">> => Structured,
                <<"isError">> => false},
-    Max = mcp_policy:limit(max_result_bytes, Config),
+    Max = vscode_mcp_policy:limit(max_result_bytes, Config),
     case byte_size(encode(result_obj(0, Result))) =< Max of
         true -> {ok, Result};
         false -> {result_too_large, tool_error(<<"result_too_large">>,

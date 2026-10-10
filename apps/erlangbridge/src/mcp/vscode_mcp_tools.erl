@@ -1,6 +1,6 @@
 %% The eight read-only tools: descriptions, strict input schemas, output
 %% schemas and the argument validator. Unknown arguments are rejected.
--module(mcp_tools).
+-module(vscode_mcp_tools).
 
 -export([list/1, known/1, validate_args/2, structured_error_schema/0]).
 -export([prompts/0, prompt/3]).
@@ -11,9 +11,9 @@ schema_version() -> ?SCHEMA_VERSION.
 
 %% tools/list result entries for the allowed tools.
 list(Config) ->
-    [tool_def(Name) || Name <- mcp_policy:all_tools(), mcp_policy:tool_allowed(Name, Config)].
+    [tool_def(Name) || Name <- vscode_mcp_policy:all_tools(), vscode_mcp_policy:tool_allowed(Name, Config)].
 
-known(Name) -> lists:member(Name, mcp_policy:all_tools()).
+known(Name) -> lists:member(Name, vscode_mcp_policy:all_tools()).
 
 tool_def(Name) ->
     {Title, Desc, In, Out} = def(Name),
@@ -62,7 +62,7 @@ prompt(_, _, _) ->
     {error, <<"unknown prompt">>}.
 
 map_application_text(App, Config) ->
-    Allowed = fun(Tool) -> mcp_policy:tool_allowed(Tool, Config) end,
+    Allowed = fun(Tool) -> vscode_mcp_policy:tool_allowed(Tool, Config) end,
     Steps = case Allowed(<<"topology_overview">>) of
                 true ->
                     ["1. topology_overview(name=\"", App, "\"): the application, its supervision tree, registered "

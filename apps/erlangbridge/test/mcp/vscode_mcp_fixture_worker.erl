@@ -1,6 +1,6 @@
 %% Test-only worker of the MCP fixture; holds forbidden sentinel data everywhere
 %% the inspector must never look (state, dictionary, ETS objects, mailbox).
--module(mcp_fixture_worker).
+-module(vscode_mcp_fixture_worker).
 -behaviour(gen_server).
 
 -export([start_link/1, start_link/2]).

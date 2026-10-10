@@ -1,6 +1,6 @@
 %% Test-only module interpreted by the debugger so that a process can be stopped
-%% at a breakpoint (see mcp_server_SUITE:paused_process_is_reported_from_debugger_evidence).
--module(mcp_fixture_paused).
+%% at a breakpoint (see vscode_mcp_server_SUITE:paused_process_is_reported_from_debugger_evidence).
+-module(vscode_mcp_fixture_paused).
 
 -export([run/0, handler/1, break_line/0]).
 

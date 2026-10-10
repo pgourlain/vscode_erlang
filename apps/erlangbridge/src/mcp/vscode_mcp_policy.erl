@@ -17,7 +17,7 @@
 %%     allowed_ets_tables => [<<"orders_index">>],
 %%     limits => #{max_items => 500, ...}}
 %% and its JSON form (camelCase binary keys) which crosses to the target.
--module(mcp_policy).
+-module(vscode_mcp_policy).
 
 -include_lib("kernel/include/file.hrl").
 
@@ -504,7 +504,7 @@ token_of(#{<<"authToken">> := T}) -> validate_token(T);
 token_of(_) -> ok.
 
 %%------------------------------------------------------------------------------
-%% Helper VM entry point: erl -noshell -pa ebin -s mcp_policy cli
+%% Helper VM entry point: erl -noshell -pa ebin -s vscode_mcp_policy cli
 %% Reads one JSON line from stdin, prints one JSON line, halts.
 %%------------------------------------------------------------------------------
 

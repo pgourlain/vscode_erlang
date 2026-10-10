@@ -254,7 +254,7 @@ start_lsp_peer() ->
 
 %% gen_lsp_sup listens on port 0 (OS-assigned) unless started with a
 %% -vscode_port argument. Discover the assigned port the same way
-%% gen_connection_SUITE does for the sibling debugger command server: find
+%% vscode_gen_connection_SUITE does for the sibling debugger command server: find
 %% the loopback TCP listener among erlang:ports/0. The peer node is freshly
 %% started for this test case alone, so no before/after diff is needed -
 %% any bound, peerless tcp_inet port on it is the LSP listener.

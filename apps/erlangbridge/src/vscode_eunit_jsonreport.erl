@@ -1,5 +1,5 @@
 % inspired from 'https://github.com/robertoaloi/eunit_terms/blob/master/eunit_terms.erl'
--module(eunit_jsonreport).
+-module(vscode_eunit_jsonreport).
 
 -behaviour(eunit_listener).
 

@@ -1,4 +1,4 @@
--module(worker).
+-module(vscode_lsp_worker).
 -export([start/2]).
 
 -define(KILL_AFTER, 10 * 60000).

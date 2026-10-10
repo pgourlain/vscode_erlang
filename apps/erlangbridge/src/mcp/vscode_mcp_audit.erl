@@ -1,7 +1,7 @@
 %% Structured lifecycle/security events of the MCP inspector.
 %% Only event names and bounded, non-sensitive fields are logged: never the
 %% token, request parameters or returned runtime data.
--module(mcp_audit).
+-module(vscode_mcp_audit).
 
 -export([event/2]).
 

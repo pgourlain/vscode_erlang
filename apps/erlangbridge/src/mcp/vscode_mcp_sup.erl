@@ -6,9 +6,9 @@
 %% (listener failure, lease expiry, crash) shuts the whole subtree down; it is
 %% never restarted with a different port or token.
 %%
-%% A `mcp_holder` process owns the supervisor link so that the subtree outlives
+%% A `vscode_mcp_holder` process owns the supervisor link so that the subtree outlives
 %% the (rpc) process that requested it.
--module(mcp_sup).
+-module(vscode_mcp_sup).
 -behaviour(supervisor).
 
 -export([start_session/2, start_session/3, start_session/4, stop_session/0, renew/0, active/0]).
@@ -32,10 +32,10 @@ start_session(Config, Mode, FixedToken) ->
 %% map per MCP request (method, tool, status, duration, sizes); never arguments,
 %% results or the token.
 start_session(Config, Mode, FixedToken, Opts) ->
-    case mcp_policy:validate_config(Config) of
+    case vscode_mcp_policy:validate_config(Config) of
         {error, Msg} -> {error, list_to_binary(Msg)};
         ok ->
-            case whereis(mcp_holder) of
+            case whereis(vscode_mcp_holder) of
                 undefined ->
                     Token = case FixedToken of undefined -> new_token(); _ -> FixedToken end,
                     Ref = make_ref(),
@@ -54,7 +54,7 @@ start_session(Config, Mode, FixedToken, Opts) ->
     end.
 
 stop_session() ->
-    case whereis(mcp_holder) of
+    case whereis(vscode_mcp_holder) of
         undefined -> ok;
         Pid ->
             Ref = erlang:monitor(process, Pid),
@@ -68,12 +68,12 @@ stop_session() ->
     end.
 
 renew() ->
-    case whereis(mcp_server) of
+    case whereis(vscode_mcp_server) of
         undefined -> {error, not_running};
-        _ -> mcp_server:renew(), ok
+        _ -> vscode_mcp_server:renew(), ok
     end.
 
-active() -> whereis(mcp_holder) =/= undefined.
+active() -> whereis(vscode_mcp_holder) =/= undefined.
 
 %%------------------------------------------------------------------------------
 
@@ -85,15 +85,15 @@ url_safe($+) -> $-;
 url_safe($/) -> $_;
 url_safe(C) -> C.
 
-describe({shutdown, {failed_to_start_child, mcp_server, {listen_failed, eaddrinuse}}}) ->
+describe({shutdown, {failed_to_start_child, vscode_mcp_server, {listen_failed, eaddrinuse}}}) ->
     <<"the configured erlang.mcp.port is already in use; MCP is disabled for this session">>;
-describe({shutdown, {failed_to_start_child, mcp_server, {listen_failed, Reason}}}) ->
+describe({shutdown, {failed_to_start_child, vscode_mcp_server, {listen_failed, Reason}}}) ->
     iolist_to_binary(io_lib:format("the MCP listener cannot bind (~w)", [Reason]));
 describe(_) ->
     <<"the MCP inspector could not start">>.
 
 holder(Caller, Ref, Config, Mode, Token, Opts) ->
-    try register(mcp_holder, self()) of
+    try register(vscode_mcp_holder, self()) of
         true -> holder_start(Caller, Ref, Config, Mode, Token, Opts)
     catch error:badarg ->
             Caller ! {Ref, {error, already_started}}
@@ -103,8 +103,8 @@ holder_start(Caller, Ref, Config, Mode, Token, Opts) ->
     process_flag(trap_exit, true),
     case supervisor:start_link({local, ?MODULE}, ?MODULE, {Config, Mode, Token, maps:get(notify, Opts, undefined)}) of
         {ok, Sup} ->
-            Info = mcp_server:info(),
-            Caller ! {Ref, {ok, Info#{sessionId => mcp_store:session_id()}}},
+            Info = vscode_mcp_server:info(),
+            Caller ! {Ref, {ok, Info#{sessionId => vscode_mcp_store:session_id()}}},
             holder_loop(Sup);
         {error, Reason} ->
             Caller ! {Ref, {error, Reason}}
@@ -116,14 +116,14 @@ holder_loop(Sup) ->
             exit(Sup, shutdown),
             receive {'EXIT', Sup, _} -> ok after 3000 -> ok end;
         {'EXIT', Sup, Reason} ->
-            mcp_audit:event(supervisor_exit, #{reason => Reason});
+            vscode_mcp_audit:event(supervisor_exit, #{reason => Reason});
         _ ->
             holder_loop(Sup)
     end.
 
 init({Config, Mode, Token, Notify}) ->
-    Children = [#{id => mcp_store, start => {mcp_store, start_link, [Config, Mode, Notify]},
-                  restart => permanent, shutdown => 2000, type => worker, modules => [mcp_store]},
-                #{id => mcp_server, start => {mcp_server, start_link, [Config, Token]},
-                  restart => permanent, shutdown => 2000, type => worker, modules => [mcp_server]}],
+    Children = [#{id => vscode_mcp_store, start => {vscode_mcp_store, start_link, [Config, Mode, Notify]},
+                  restart => permanent, shutdown => 2000, type => worker, modules => [vscode_mcp_store]},
+                #{id => vscode_mcp_server, start => {vscode_mcp_server, start_link, [Config, Token]},
+                  restart => permanent, shutdown => 2000, type => worker, modules => [vscode_mcp_server]}],
     {ok, {#{strategy => one_for_all, intensity => 0, period => 1}, Children}}.

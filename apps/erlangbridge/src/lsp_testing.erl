@@ -311,7 +311,7 @@ run_eunit(Socket, Targets, Table, Coverage) ->
             _ -> [{M, F} || F <- Fns]
         end
     end, Targets),
-    catch eunit:test(Specs, [{report, {lsp_testing_eunit_report, [{socket, Socket}, {result_table, Table}]}}]),
+    catch eunit:test(Specs, [{report, {vscode_lsp_testing_eunit_report, [{socket, Socket}, {result_table, Table}]}}]),
     ok.
 
 run_ct(_Socket, [], _Table, _Coverage) ->
@@ -325,7 +325,7 @@ run_ct(Socket, Targets, Table, Coverage) ->
     %% started - see lspclientextension.ts/ErlangShellLSP) no longer
     %% resolves once cwd has moved. Force-loading it up front sidesteps
     %% that entirely.
-    code:ensure_loaded(lsp_testing_ct_hook),
+    code:ensure_loaded(vscode_lsp_testing_ct_hook),
     code:ensure_loaded(gen_lsp_server),
     code:ensure_loaded(lsp_utils),
     code:ensure_loaded(vscode_jsone),
@@ -347,7 +347,7 @@ run_ct(Socket, Targets, Table, Coverage) ->
             %% CT (OTP 28+) tries to `make` it in the cwd and aborts with
             %% {make_failed, ...} before running any case.
             {auto_compile, false},
-            {ct_hooks, [{lsp_testing_ct_hook, [{result_table, Table}]}]}
+            {ct_hooks, [{vscode_lsp_testing_ct_hook, [{result_table, Table}]}]}
         ] ++ case Fns of
             [] -> [];
             _ -> [{testcase, Fns}]

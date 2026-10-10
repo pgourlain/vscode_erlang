@@ -1,4 +1,4 @@
-%% Task 6.3: the Common Test equivalent of lsp_testing_eunit_report.erl - a
+%% Task 6.3: the Common Test equivalent of vscode_lsp_testing_eunit_report.erl - a
 %% ct_hooks callback module that streams `erlang/testRunProgress`
 %% notifications per test case and records the final status in an ETS
 %% table.
@@ -12,7 +12,7 @@
 %% is reported through the *separate* `on_tc_fail/4` / `on_tc_skip/4`
 %% callbacks, called an instant later - the same optimistic-then-corrected
 %% ordering (and the same reason for it) as upstream.
--module(lsp_testing_ct_hook).
+-module(vscode_lsp_testing_ct_hook).
 
 -export([init/2, pre_init_per_testcase/4, post_end_per_testcase/5, on_tc_fail/4, on_tc_skip/4, terminate/1]).
 

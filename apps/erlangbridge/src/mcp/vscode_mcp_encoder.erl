@@ -1,7 +1,7 @@
 %% Bounded conversion of Erlang terms to JSON-encodable terms (binary keys,
 %% binaries, numbers, booleans, null, lists, maps). Never creates atoms, never
 %% exposes an executable handle: funs, ports, references and pids become text.
--module(mcp_encoder).
+-module(vscode_mcp_encoder).
 
 -export([term/2, text/2, safe_binary/2, hex/1, iso8601/1, pid_text/1, scrub/1]).
 

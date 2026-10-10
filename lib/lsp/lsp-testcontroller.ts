@@ -6,8 +6,8 @@ import { client } from './lspclientextension';
 
 // Task 6.1-6.5 (Phase 6, tasks.md): a thin TS shell over three custom LSP
 // requests/notifications - all test discovery and execution happens in
-// Erlang (lsp_testing.erl, lsp_testing_eunit_report.erl,
-// lsp_testing_ct_hook.erl), matching this codebase's rule that Erlang does
+// Erlang (lsp_testing.erl, vscode_lsp_testing_eunit_report.erl,
+// vscode_lsp_testing_ct_hook.erl), matching this codebase's rule that Erlang does
 // the analysis and TS is only a wrapper.
 namespace protocol {
     export interface ErlangTestCase {
