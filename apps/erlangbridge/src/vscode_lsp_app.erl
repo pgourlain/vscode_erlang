@@ -12,26 +12,26 @@
 %%%  |
 %%% vscode_lsp_app_sup [sup]
 %%%  |
-%%%  +--gen_lsp_sup [sup]
+%%%  +--vscode_gen_lsp_sup [sup]
 %%%  |   |
-%%%  |   +--gen_lsp_server [gen_server]
+%%%  |   +--vscode_gen_lsp_server [gen_server]
 %%%  |
-%%%  +--gen_lsp_doc_sup [sup]
+%%%  +--vscode_gen_lsp_doc_sup [sup]
 %%%  |   |  - (D)ETS document_contents
 %%%  |   |  - (D)ETS document_inlayhints
 %%%  |   |  - (D)ETS dodged_syntax_tree
 %%%  |   |  - ETS references
 %%%  |   |  - (D)ETS syntax_tree
 %%%  |   |
-%%%  |   +--gen_lsp_doc_server [gen_server]
+%%%  |   +--vscode_gen_lsp_doc_server [gen_server]
 %%%  |
-%%%  +--gen_lsp_config_sup [sup]
+%%%  +--vscode_gen_lsp_config_sup [sup]
 %%%  |   |
-%%%  |   +--gen_lsp_config_server [gen_server]
+%%%  |   +--vscode_gen_lsp_config_server [gen_server]
 %%%  |
-%%%  +--gen_lsp_help_sup [sup]
+%%%  +--vscode_gen_lsp_help_sup [sup]
 %%%      |
-%%%      +--gen_lsp_help_server [gen_server]
+%%%      +--vscode_gen_lsp_help_server [gen_server]
 %%% '''
 %%%
 %%% @end
@@ -50,11 +50,11 @@ get_port() ->
 
 start(_Type, _Args) ->
     % Setup LSP logging format
-    lsp_log:setup(),
+    vscode_lsp_log:setup(),
     application:start(inets),
     %uncomment to monitor erlang processes
     %spawn(fun() -> observer:start() end),
-    gen_lsp_doc_server:persist_cache_mgmt_opts(),
+    vscode_gen_lsp_doc_server:persist_cache_mgmt_opts(),
     Port = get_port(),
     case vscode_lsp_app_sup:start_link(Port) of
         {ok, Pid} -> {ok, Pid};

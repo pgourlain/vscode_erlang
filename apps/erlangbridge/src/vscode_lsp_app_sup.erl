@@ -20,38 +20,38 @@ init(VsCodePort) ->
     {ok, StartSpecs}.
 
 socket_spec(VsCodePort) ->
-    #{id => gen_lsp_sup,
-    start => {gen_lsp_sup, start_link, [VsCodePort]},
+    #{id => vscode_gen_lsp_sup,
+    start => {vscode_gen_lsp_sup, start_link, [VsCodePort]},
     restart => permanent,
-    modules => [gen_lsp_sup],
+    modules => [vscode_gen_lsp_sup],
     type => supervisor}.
 
 doc_spec() ->
-    #{id => gen_lsp_doc_sup,
-    start => {gen_lsp_doc_sup, start_link, []},
+    #{id => vscode_gen_lsp_doc_sup,
+    start => {vscode_gen_lsp_doc_sup, start_link, []},
     restart => permanent,
-    modules => [gen_lsp_doc_sup],
+    modules => [vscode_gen_lsp_doc_sup],
     type => supervisor}.
 
 config_spec() ->
-    #{id => gen_lsp_config_sup,
-    start => {gen_lsp_config_sup, start_link, []},
+    #{id => vscode_gen_lsp_config_sup,
+    start => {vscode_gen_lsp_config_sup, start_link, []},
     restart => permanent,
-    modules => [gen_lsp_config_sup],
+    modules => [vscode_gen_lsp_config_sup],
     type => supervisor}.
 
 diagnostics_spec() ->
-    #{id => lsp_diagnostics,
-    start => {lsp_diagnostics, start_link, []},
+    #{id => vscode_lsp_diagnostics,
+    start => {vscode_lsp_diagnostics, start_link, []},
     restart => permanent,
-    modules => [lsp_diagnostics],
+    modules => [vscode_lsp_diagnostics],
     type => worker}.
 
 help_spec() ->
-    #{id => gen_lsp_help_sup,
-    start => {gen_lsp_help_sup, start_link, []},
+    #{id => vscode_gen_lsp_help_sup,
+    start => {vscode_gen_lsp_help_sup, start_link, []},
     restart => permanent,
-    modules => [gen_lsp_help_sup],
+    modules => [vscode_gen_lsp_help_sup],
     type => supervisor}.
 
 start_sup_socket(VsCodePort) ->

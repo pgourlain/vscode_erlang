@@ -143,7 +143,7 @@ export class ErlangShellForDebugging extends GenericShell {
     /**
      * Resolve `erlang.mcp.*` + the project's rebar.config policy in a short-lived
      * helper VM (the policy reader interns atoms, so it never runs in the LSP or
-     * target VM). Erlang (mcp_policy) is authoritative; only its normalized,
+     * target VM). Erlang (vscode_mcp_policy) is authoritative; only its normalized,
      * non-secret result comes back.
      */
     public ResolveMcpPolicy(erlPath: string, cwd: string, bridgePath: string, mcp: ErlangMcpSettings): Promise<{ status: string, config?: any, message?: string }> {
@@ -154,7 +154,7 @@ export class ErlangShellForDebugging extends GenericShell {
                 if (this.erlangPath) {
                     env = { ...process.env, PATH: this.erlangPath + (process.platform == 'win32' ? ";" : ":") + process.env.PATH };
                 }
-                const child = spawn(erlPath, ["-noshell", "-pa", this.shellQuote(bridgePath), "-s", "mcp_policy", "cli"],
+                const child = spawn(erlPath, ["-noshell", "-pa", this.shellQuote(bridgePath), "-s", "vscode_mcp_policy", "cli"],
                     { cwd: cwd, shell: this.useShell, stdio: 'pipe', env });
                 let out = "";
                 const timer = setTimeout(() => { child.kill(); fail("MCP policy resolution timed out"); }, 20000);

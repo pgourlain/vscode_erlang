@@ -23,7 +23,7 @@ jobs:
         os: [ubuntu-latest]
         node:
           - 20
-        # apps/erlangbridge branches on OTP_RELEASE (e.g. lsp_handlers.erl
+        # apps/erlangbridge branches on OTP_RELEASE (e.g. vscode_lsp_handlers.erl
         # picks vscode_erlfmt on OTP >= 21, erl_tidy otherwise), so pin
         # exact releases via erlef/setup-beam rather than "whatever apt/
         # brew currently ships" - the previous ad-hoc install had no

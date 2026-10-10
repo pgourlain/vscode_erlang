@@ -1,0 +1,290 @@
+-module(vscode_lsp_parse).
+-export([parse_source_file/2, parse_config_file/2, get_include_path/1, get_include_path_no_build/1, scan_source_file/2]).
+-export([get_parse_transforms_from_rebar_config/1]).
+-compile(nowarn_deprecated_catch).
+
+%% @doc
+%% @param File is a reference to the real file (file opened by editor)
+%% @param ContentsFile is used for parsing (can be a temp file)
+scan_source_file(File, ContentsFile) ->
+    case epp_scan_file(ContentsFile, get_include_path(File), get_define_from_rebar_config(File)) of
+        {ok, FileSyntaxTree} ->
+            UpdatedSyntaxTree = update_file_in_forms(File, ContentsFile, FileSyntaxTree),
+            {UpdatedSyntaxTree, undefined};
+        _ ->
+            io:format("epp:scan_file could not parse ~p~n", [File]),
+            {undefined, undefined}
+    end.
+
+parse_source_file(File, ContentsFile) ->
+    case epp_parse_file(ContentsFile, get_include_path(File), get_define_from_rebar_config(File)) of
+        {ok, FileSyntaxTree} ->
+            UpdatedSyntaxTree = update_file_in_forms(File, ContentsFile, FileSyntaxTree),
+            case epp_dodger_parse_file(ContentsFile) of
+                {ok, Forms} ->
+                    {UpdatedSyntaxTree, Forms};
+                _ ->
+                    io:format("epp_dodger:parse_file could not parse ~p~n", [File]),
+                    {UpdatedSyntaxTree, undefined}
+            end;
+        _ ->
+            io:format("epp:parse_file could not parse ~p~n", [File]),
+            {undefined, undefined}
+    end.
+
+%% in order to have LMine and column information in syntax tree, we need to parse file with epp_dodger
+epp_dodger_parse_file(File) ->
+    case file:open(File, [read]) of
+        {ok, Handle} ->
+            R = epp_dodger:parse(Handle, {1,1}),
+            file:close(Handle),            
+            R;
+        Error -> Error
+    end.
+
+parse_config_file(File, ContentsFile) ->
+    case file:path_consult(filename:dirname(ContentsFile), ContentsFile) of
+      {ok,_, _} -> #{parse_result => true};
+      {error, Reason} -> #{
+            parse_result => true,
+            errors_warnings => [#{type => <<"error">>,
+            file => list_to_binary(File),
+		    info => extract_info(Reason)}] }
+    end.
+
+get_include_path(File) ->
+    Candidates = get_file_include_paths(File) ++
+        get_settings_include_paths() ++
+        get_include_paths_from_rebar_config(File) ++
+        get_standard_include_paths(),
+    Paths = lists:filter(fun filelib:is_dir/1, Candidates),
+    % activate it only for debugging, on big projects it can generate a lot of logs
+    %vscode_gen_lsp_server:vscode_lsp_log("get_include_path: ~p", [Paths]),
+    Paths.
+
+get_standard_include_paths() ->
+    RootDir = vscode_gen_lsp_config_server:root(),
+    [
+        filename:join([RootDir, "apps"]),
+        filename:join([RootDir, "lib"]),
+        filename:join([RootDir, "_build", "default", "lib"]),
+        filename:join([RootDir, "_build", "default", "plugins"])
+    ].
+
+get_include_path_no_build(File) ->
+    RootDir = vscode_gen_lsp_config_server:root(),
+    StandardIncludePathsNoBuild = 
+    [
+        filename:join([RootDir, "apps"]),
+        filename:join([RootDir, "lib"])
+    ],
+    Candidates = get_file_include_paths(File) ++
+        get_settings_include_paths() ++
+        get_include_paths_from_rebar_config(File) ++
+        StandardIncludePathsNoBuild,
+    Paths = lists:filter(fun filelib:is_dir/1, Candidates),
+    % activate it only for debugging, on big projects it can generate a lot of logs
+    %vscode_gen_lsp_server:vscode_lsp_log("get_include_path: ~p", [Paths]),
+    Paths.
+
+get_settings_include_paths() ->
+    SettingPaths = vscode_gen_lsp_config_server:includePaths(),
+    RootDir = vscode_gen_lsp_config_server:root(),
+    lists:map(fun (Path) -> 
+        vscode_lsp_utils:absolute_path(RootDir, Path) 
+    end, SettingPaths).
+
+get_file_include_paths(File) ->
+    Paths = [filename:dirname(File), filename:rootname(File)],
+    case get_file_include_directory(File) of
+        undefined -> 
+            Paths;
+        Path -> 
+            [Path|Paths]
+    end.
+
+get_file_include_directory(File) ->
+    case lists:reverse(filename:split(filename:dirname(File))) of
+        [DirName|Rest] when DirName =:= "src" orelse DirName =:= "test" ->
+	        filename:join(lists:reverse(["include"|Rest]));
+        [_, DirName|Rest] when DirName =:= "src" orelse DirName =:= "test" ->
+	        filename:join(lists:reverse(["include"|Rest]));
+        _Other -> 
+            undefined
+    end.
+
+get_include_paths_from_rebar_config(File) ->
+    RebarConfig = find_rebar_config(filename:dirname(File)),
+    case RebarConfig of
+      undefined ->
+          [];
+      _ ->
+	  Consult = file:consult(RebarConfig),
+	  ErlOptsPaths = case Consult of
+			   {ok, Terms} ->
+			       ErlOpts = proplists:get_value(erl_opts, Terms, []),
+			       IncludePaths = proplists:get_all_values(i, ErlOpts),
+			       lists:map(fun (Path) ->
+						 filename:absname(Path, filename:dirname(RebarConfig))
+					 end, IncludePaths);
+			   _ -> 
+                   []
+			 end,
+        Deps = [],
+        %TODO: if include of each rebar dependency should be add to include paths, uncomment below 
+    %   Deps = case Consult of
+    %       {ok, DepsTerms} ->
+    %         Profiles = proplists:get_value(profiles, DepsTerms, []),
+    %         ErlDeps = lists:flatmap(fun({_,Opts})-> proplists:get_value(deps,Opts) end, Profiles),
+    %         RootDir = vscode_gen_lsp_config_server:root(),
+    %         [filename:join([RootDir, "_build", "default", "plugins", X, "include"]) || X <- ErlDeps ];
+    %       _ -> 
+    %         []
+    %       end,
+	  DefaultPaths = [filename:dirname(RebarConfig), filename:join([filename:dirname(RebarConfig), "include"])],
+	  ErlOptsPaths ++ Deps ++ DefaultPaths
+    end.
+
+extract_info({Line, Module, MessageBody}) when is_number(Line) ->
+    extract_info({{Line, 1}, Module, MessageBody});
+extract_info({{Line, Column}, Module, MessageBody}) ->
+    % samples of X
+    %{20,erl_parse,["syntax error before: ","load_xy"]}
+    %{11,erl_lint,{undefined_function,{load_xy,1}}}]}
+    #{
+        line => Line, 
+        character => Column,
+        message => erlang:list_to_binary(lists:flatten(apply(Module, format_error, [MessageBody]), []))
+    }.
+
+get_define_from_rebar_config(File) ->
+    RebarConfig = find_rebar_config(filename:dirname(File)),
+    case RebarConfig of
+        undefined -> 
+            [];
+        _ ->
+	        Consult = file:consult(RebarConfig),
+	        ErlOptsDefines = case Consult of
+			    {ok, Terms} ->
+				ErlOpts = proplists:get_value(erl_opts, Terms, []),
+				 Defines = rebar_define_to_epp_define(proplists:lookup_all(d, ErlOpts)),
+				 vscode_gen_lsp_server:vscode_lsp_log("get_defines: ~p", [Defines]),
+				 Defines;
+			     _ -> 
+                     []
+			   end,
+	  DefaultDefines = [],
+	  ErlOptsDefines ++ DefaultDefines
+    end.
+
+%% @doc `-compile({parse_transform, M})` in the source file itself is picked
+%% up by vscode_lsp_syntax:parse_transforms/1 straight from the syntax tree. This
+%% covers the other common way to declare one - `{parse_transform, M}` inside
+%% `erl_opts` in rebar.config, with no attribute in the module at all (#216).
+get_parse_transforms_from_rebar_config(File) ->
+    RebarConfig = find_rebar_config(filename:dirname(File)),
+    case RebarConfig of
+        undefined ->
+            [];
+        _ ->
+            case file:consult(RebarConfig) of
+                {ok, Terms} ->
+                    ErlOpts = proplists:get_value(erl_opts, Terms, []),
+                    proplists:get_all_values(parse_transform, ErlOpts);
+                _ ->
+                    []
+            end
+    end.
+
+find_rebar_config(Dir) ->
+    RebarConfig = filename:join(Dir, "rebar.config"),
+    case filelib:is_file(RebarConfig) of
+      true ->
+          RebarConfig;
+      _ ->
+	  Elements = filename:split(Dir),
+	  case Elements of
+	    [_] ->
+            undefined;
+	    _ ->
+		find_rebar_config(filename:join(lists:droplast(Elements)))
+	  end
+    end.
+
+
+epp_scan_file(File, IncludePath, Defines) ->
+    case otp_24_or_newer() of
+        true ->
+            case epp:scan_file(as_string(File), [{includes, IncludePath}, {macros, Defines}, {location, {1, 1}}]) of
+                {ok, Result, _Extra} ->
+                    {ok, Result};
+                _Err -> 
+                    vscode_gen_lsp_server:vscode_lsp_log("epp_parse_file error : ~p", [_Err]),
+                    {error, file_could_not_scanned}
+            end;
+        false ->
+            {error, scan_notimplemented_before_otp24}
+    end.
+
+epp_parse_file(File, IncludePath, Defines) ->
+    case otp_24_or_newer() of
+        true ->
+            case epp:parse_file(as_string(File), [{includes, IncludePath}, {macros, Defines}, {location, {1, 1}}]) of
+                {ok, Result} ->
+                    {ok, Result};
+                _Err -> 
+                    vscode_gen_lsp_server:vscode_lsp_log("epp_parse_file error : ~p", [_Err]),
+                    {error, file_could_not_parsed}
+            end;
+        false ->
+            case file:open(File, [read]) of
+                {ok, FIO} ->
+                    Ret = do_epp_parse_file(File, FIO, IncludePath, Defines),
+                    file:close(FIO),
+                    Ret;
+                _Err -> 
+                    vscode_gen_lsp_server:vscode_lsp_log("epp_parse_file error : ~p", [_Err]),
+                    {error, file_could_not_opened}
+            end
+    end.
+
+do_epp_parse_file(File, FIO, IncludePath, Defines) ->
+    case epp:open(as_string(File), FIO, {1,1}, IncludePath, Defines) of
+        {ok, Epp} -> {ok, epp:parse_file(Epp)};
+        {error, _Err} -> {error, _Err}
+    end.
+
+as_string(Text) when is_binary(Text) ->
+    binary_to_list(Text);
+as_string(Text) -> 
+    Text.
+
+rebar_define_to_epp_define([]) -> 
+    [];
+rebar_define_to_epp_define([none]) -> 
+    [];
+rebar_define_to_epp_define([H|T]) ->
+    case H of
+      {d, Atom, Value} -> [{Atom, Value}] ++ rebar_define_to_epp_define(T);
+      {d, Atom} -> [Atom] ++ rebar_define_to_epp_define(T);
+      _ -> rebar_define_to_epp_define(T)
+    end.
+
+update_file_in_forms(File, File, FileSyntaxTree) ->
+    FileSyntaxTree;
+%% epp names files with strings, while ContentsFile is a binary whenever
+%% erlang.tmpdir came from the client (a JSON string): compare them as strings,
+%% or the temporary copy's name stays in the tree and its problems are taken
+%% for an included file's.
+update_file_in_forms(File, ContentsFile, FileSyntaxTree) ->
+    ContentsFileName = unicode:characters_to_list(ContentsFile),
+    lists:map(fun 
+        ({attribute, A1, file, {FunContentsFile, A2}}) when FunContentsFile =:= ContentsFileName ->
+		      {attribute, A1, file, {File, A2}};
+		  (Form) ->
+              Form
+	      end, FileSyntaxTree).
+
+otp_24_or_newer() ->
+    VersionNumber = (catch list_to_integer(erlang:system_info(otp_release))),
+    is_integer(VersionNumber) andalso VersionNumber >= 24.

@@ -6,7 +6,7 @@ import { sanitizeArguments } from '../../../lib/erlangDebugSession';
 import { ErlangDebugConnection } from '../../../lib/erlangDebugConnection';
 
 // erlang.mcp.* is the only activation switch of the MCP inspector; these tests cover the
-// TypeScript hooks (Erlang validates authoritatively: see mcp_policy_SUITE / mcp_server_SUITE).
+// TypeScript hooks (Erlang validates authoritatively: see vscode_mcp_policy_SUITE / vscode_mcp_server_SUITE).
 suite('MCP: debug configuration hook', () => {
     const folder: WorkspaceFolder = workspace.workspaceFolders![0];
 
@@ -86,10 +86,10 @@ suite('MCP: secrets never reach logs', () => {
         assert.deepStrictEqual(out, ['-noshell', '-setcookie', '<redacted>', '-s', 'x']);
     });
 
-    test('the debugger bridge compiles the MCP inspector modules, all prefixed mcp_', () => {
+    test('the debugger bridge compiles the MCP inspector modules, all prefixed vscode_mcp_', () => {
         const files: string[] = (<any>ErlangDebugConnection.prototype).get_ErlangFiles.call({});
         const mcp = files.filter(f => f.startsWith('mcp/'));
         assert.strictEqual(mcp.length, 8);
-        assert.ok(mcp.every(f => /^mcp\/mcp_[a-z_]+\.erl$/.test(f)));
+        assert.ok(mcp.every(f => /^mcp\/vscode_mcp_[a-z_]+\.erl$/.test(f)));
     });
 });

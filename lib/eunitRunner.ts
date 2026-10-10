@@ -275,15 +275,15 @@ function compile(compileArgs: CompileArgs): Thenable<string[]> {
     if (!fs.existsSync(eunitDir)) {
         fs.mkdirSync(eunitDir);
     }
-    fs.createReadStream(path.resolve(erlangBridgePath, 'eunit_jsonreport.erl'))
-        .pipe(fs.createWriteStream(path.resolve(eunitDir, 'eunit_jsonreport.erl')));
+    fs.createReadStream(path.resolve(erlangBridgePath, 'vscode_eunit_jsonreport.erl'))
+        .pipe(fs.createWriteStream(path.resolve(eunitDir, 'vscode_eunit_jsonreport.erl')));
     return findIncludeDirectories()
         .then(iDirs => {
             compileArgs.IncludeDirs = compileArgs.IncludeDirs.concat(iDirs);
             return compileArgs;
         }).then(args => {
             return findErlangFiles("{" + compileArgs.TestDirs.join(",") + "}").then(erlFiles => {
-                args.ErlangFiles = erlFiles.concat(['./.eunit/eunit_jsonreport.erl']);
+                args.ErlangFiles = erlFiles.concat(['./.eunit/vscode_eunit_jsonreport.erl']);
                 return args;
             });
         }).then(args => {
@@ -355,7 +355,7 @@ function runTests(filenames: string[]): Thenable<TestResults> {
                     r("Erlang shell that run tests failed with exitcode :" + exitCode);
                 });
             //send command to current erlang shell  
-            erlangShell.Send('eunit:test([' + moduleNames.join(',') + '],[{report,{eunit_jsonreport,[{dir,"' + eunitDirectory + '"}]}}]),q().');
+            erlangShell.Send('eunit:test([' + moduleNames.join(',') + '],[{report,{vscode_eunit_jsonreport,[{dir,"' + eunitDirectory + '"}]}}]),q().');
         });
     });
 }

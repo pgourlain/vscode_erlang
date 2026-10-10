@@ -9,13 +9,13 @@
 
 %% Guards vscode_lsp_entry:compile_needed_modules/0's hardcoded module list
 %% (apps/erlangbridge/src/vscode_lsp_entry.erl:28-35) against the real
-%% src/ directory: every src/lsp_*.erl and src/gen_lsp_*.erl file must be
+%% src/ directory: every src/vscode_lsp_*.erl and src/vscode_gen_lsp_*.erl file must be
 %% in that list, or the dev-time hot-load path (used when the extension
 %% recompiles the bridge in memory) runs it stale or missing while `rebar3
 %% compile`/`rebar3 ct`, which compile the whole src/ directory regardless
 %% of this list, hide the gap completely.
 %%
-%% EXPECTED TO FAIL right now: lsp_fun_utils and lsp_signature_doc_layout
+%% EXPECTED TO FAIL right now: vscode_lsp_fun_utils and vscode_lsp_signature_doc_layout
 %% both exist in src/ but are missing from the list. That failure is the
 %% point of this suite (task 0.14) - it is fixed in task 1.0, which simply
 %% adds the two missing entries. Until 1.0 lands, `./rebar3 ct` for this
@@ -27,9 +27,9 @@ all() -> [every_lsp_module_is_in_compile_needed_modules].
 every_lsp_module_is_in_compile_needed_modules(_Config) ->
     SrcDir = filename:join([code:lib_dir(vscode_lsp), "..", "..", "..", "..", "apps", "erlangbridge", "src"]),
     SourceModules = lists:usort(
-        [module_name(F) || F <- filelib:wildcard(filename:join(SrcDir, "lsp_*.erl"))] ++
-        [module_name(F) || F <- filelib:wildcard(filename:join(SrcDir, "gen_lsp_*.erl"))]
-    ),
+        [module_name(F) || F <- filelib:wildcard(filename:join(SrcDir, "vscode_lsp_*.erl"))] ++
+        [module_name(F) || F <- filelib:wildcard(filename:join(SrcDir, "vscode_gen_lsp_*.erl"))]
+    ) -- ["vscode_lsp_entry"],
     ?assert(length(SourceModules) > 0),
     CompiledModules = lists:usort(compile_needed_modules_list()),
     Missing = SourceModules -- CompiledModules,

@@ -6,8 +6,8 @@ import { client } from './lspclientextension';
 
 // Task 6.1-6.5 (Phase 6, tasks.md): a thin TS shell over three custom LSP
 // requests/notifications - all test discovery and execution happens in
-// Erlang (lsp_testing.erl, lsp_testing_eunit_report.erl,
-// lsp_testing_ct_hook.erl), matching this codebase's rule that Erlang does
+// Erlang (vscode_lsp_testing.erl, vscode_lsp_testing_eunit_report.erl,
+// vscode_lsp_testing_ct_hook.erl), matching this codebase's rule that Erlang does
 // the analysis and TS is only a wrapper.
 namespace protocol {
     export interface ErlangTestCase {
@@ -222,7 +222,7 @@ async function runTests(controller: vscode.TestController, request: vscode.TestR
     }
 }
 
-// Task 6.6: turn the per-line call counts lsp_testing.erl's `cover:analyse`
+// Task 6.6: turn the per-line call counts vscode_lsp_testing.erl's `cover:analyse`
 // call returned into a vscode.FileCoverage (the file-level summary shown
 // directly in the Test Coverage view) plus the vscode.StatementCoverage[]
 // detail `loadDetailedCoverage` above hands back on demand (the per-line
