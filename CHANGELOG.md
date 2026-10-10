@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-* Fix #362: Erlang modules loaded into the debugged/tested VM (debug bridge, MCP inspector, eunit and common_test hooks) are now prefixed with `vscode_` to avoid name clashes with the user's own modules (e.g. `mcp_sup`, `mcp_store`, `mcp_tools`)
+* Fix #362: all Erlang modules of the extension (language server, debug bridge, MCP inspector, eunit and common_test hooks) are now prefixed with `vscode_` to avoid name clashes with the user's own modules (e.g. `mcp_sup`, `mcp_store`, `mcp_tools`)
+  - If you hit an error after updating, run `rebar3 clean` on your project to remove stale beams (e.g. an old `.eunit/eunit_jsonreport.beam`) built with the previous names
 * Display warning on extension activation when Erlang doesn't exists.
 
 
