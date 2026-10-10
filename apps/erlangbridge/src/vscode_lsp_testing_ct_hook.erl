@@ -30,12 +30,12 @@ post_end_per_testcase(Suite, TestCase, _Config, Result, State) ->
     {Result, State}.
 
 on_tc_fail(Suite, TestCase, Result, State) ->
-    Message = lsp_utils:to_binary(io_lib:format("~p", [Result])),
+    Message = vscode_lsp_utils:to_binary(io_lib:format("~p", [Result])),
     record_and_notify(State, Suite, normalize_tc(TestCase), <<"failed">>, Message),
     State.
 
 on_tc_skip(Suite, TestCase, Result, State) ->
-    Message = lsp_utils:to_binary(io_lib:format("~p", [Result])),
+    Message = vscode_lsp_utils:to_binary(io_lib:format("~p", [Result])),
     record_and_notify(State, Suite, normalize_tc(TestCase), <<"skipped">>, Message),
     State.
 
@@ -56,12 +56,12 @@ record(#{table := Table}, Suite, TestCase, StatusBin, Message) ->
     ets:insert(Table, {{Suite, TestCase, 0}, StatusBin, Message, undefined}).
 
 notify(#{socket := Socket}, Suite, TestCase, StatusBin, Message) ->
-    gen_lsp_server:send_to_client(Socket, <<"erlang/testRunProgress">>, #{
+    vscode_gen_lsp_server:send_to_client(Socket, <<"erlang/testRunProgress">>, #{
         method => <<"erlang/testRunProgress">>,
         params => #{
             kind => <<"ct">>,
-            module => lsp_utils:to_binary(Suite),
-            function => lsp_utils:to_binary(TestCase),
+            module => vscode_lsp_utils:to_binary(Suite),
+            function => vscode_lsp_utils:to_binary(TestCase),
             arity => 0,
             status => StatusBin,
             message => optional(Message),

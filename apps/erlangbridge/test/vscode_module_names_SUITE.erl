@@ -6,8 +6,9 @@
 
 %% Modules loaded into the user's VM (debugger bridge, MCP inspector, test
 %% hooks) share its flat module namespace (issue #362). Every bridge module
-%% must therefore carry an extension-specific prefix. Only the language server
-%% modules, which run in their own VM, keep their lsp_/gen_lsp_ names.
+%% must therefore carry the extension-specific `vscode_` prefix. The language
+%% server VM is not exempt: it loads and runs user modules too (lsp_testing,
+%% lsp_syntax).
 
 all() -> [every_bridge_module_is_prefixed].
 
@@ -21,7 +22,4 @@ every_bridge_module_is_prefixed(_Config) ->
     [] = Bad.
 
 allowed("vscode_" ++ _) -> true;
-allowed("lsp_" ++ _) -> true;
-allowed("gen_lsp_" ++ _) -> true;
-allowed("hover_doc_layout") -> true;
 allowed(_) -> false.

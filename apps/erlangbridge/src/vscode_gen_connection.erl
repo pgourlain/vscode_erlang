@@ -82,9 +82,9 @@ loop_handle_command(Socket, Module) ->
 	  gen_tcp:close(Socket),
 	  loop_handle_command(Socket, Module);
       {tcp_closed, Socket} ->
-      lsp_log:info(<<"LSP">>, "Socket ~p closed~n", [Socket]);
+      vscode_lsp_log:info(<<"LSP">>, "Socket ~p closed~n", [Socket]);
       {tcp_error, Socket, Reason} ->
-      lsp_log:error(<<"LSP">>, "Error on socket ~p reason: ~p~n",
+      vscode_lsp_log:error(<<"LSP">>, "Error on socket ~p reason: ~p~n",
 		    [Socket, Reason])
     end.
 

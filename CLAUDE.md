@@ -28,8 +28,8 @@ Single tests:
 
 ```bash
 npm run compile && npx vscode-test --grep "Extension should be present"   # also: --run out/test/test-suite/x.test.js
-./rebar3 ct --suite apps/erlangbridge/test/lsp_navigation_SUITE
-./rebar3 ct --suite apps/erlangbridge/test/lsp_navigation_SUITE --case some_case
+./rebar3 ct --suite apps/erlangbridge/test/vscode_lsp_navigation_SUITE
+./rebar3 ct --suite apps/erlangbridge/test/vscode_lsp_navigation_SUITE --case some_case
 ```
 
 TS tests: `.vscode-test.mjs` runs `out/test/**/*.test.js` (mocha `tdd` ui) against workspace `test/test-fixtures/`. `test/test-suite/index.ts` is the older mocha runner, used only by the `Launch Tests` config in `.vscode/launch.json`. Interactive debugging: `Launch Extension` / `Launch Tests` in the Run sidebar.
@@ -47,11 +47,11 @@ CI (`.github/workflows/pr-verify.yml`) runs `xvfb-run -a npm test` then `./rebar
 1. `lib/lsp/lspclientextension.ts` compiles the bridge on activation with the *bundled* `./rebar3` (`RebarShell`), picks a free TCP port, then `ErlangShellLSP.Start` spawns `erl -noshell -pa src -pa ebin -s int -s vscode_lsp_entry start <port>` with cwd `_build/default/lib/vscode_lsp`.
 2. Client and server speak LSP over a plain TCP socket (`StreamInfo` reader/writer), not stdio.
 3. `vscode_lsp_entry:compile_needed_modules/0` **recompiles and hot-loads a hardcoded list of `src/*.erl` modules in memory** before starting the app. Editing an existing bridge module only needs an LSP restart; **adding a new module means adding it to that list** or it will run stale/missing.
-4. `gen_lsp_server` maps the LSP method name to an atom (`textDocument/hover` -> `textDocument_hover`) and `apply(lsp_handlers, F, [Socket, ArgsMap])`. A method whose handler isn't exported from `lsp_handlers` is silently unsupported — new LSP features start with an export there.
+4. `vscode_gen_lsp_server` maps the LSP method name to an atom (`textDocument/hover` -> `textDocument_hover`) and `apply(vscode_lsp_handlers, F, [Socket, ArgsMap])`. A method whose handler isn't exported from `vscode_lsp_handlers` is silently unsupported — new LSP features start with an export there.
 
-Supervision: `vscode_lsp_app` -> `vscode_lsp_app_sup` -> `gen_lsp_sup` plus `gen_lsp_doc_server` (open documents, syntax trees, references/inlay-hint caches), `gen_lsp_config_server` (settings pushed from the client, standard modules/BIFs), `gen_lsp_help_server` (OTP doc lookup). Analysis lives in `lsp_navigation`, `lsp_syntax`, `lsp_parse`, `lsp_completion`, `lsp_signature`, `lsp_inlayhints`, `lsp_rename`.
+Supervision: `vscode_lsp_app` -> `vscode_lsp_app_sup` -> `vscode_gen_lsp_sup` plus `vscode_gen_lsp_doc_server` (open documents, syntax trees, references/inlay-hint caches), `vscode_gen_lsp_config_server` (settings pushed from the client, standard modules/BIFs), `vscode_gen_lsp_help_server` (OTP doc lookup). Analysis lives in `vscode_lsp_navigation`, `vscode_lsp_syntax`, `vscode_lsp_parse`, `vscode_lsp_completion`, `vscode_lsp_signature`, `vscode_lsp_inlayhints`, `vscode_lsp_rename`.
 
-Settings cross the boundary through the client middleware `Configuration.computeConfiguration` (`lspclientextension.ts`), which answers `workspace/configuration` for section `erlang` (via `resolveErlangSettings`) and a synthetic `<computed>` section (autosave, tmpdir, username). `erlang.cacheManagement` is passed on the `erl` command line as `-vscode_cache_mgmt ...` and read by `gen_lsp_doc_server`.
+Settings cross the boundary through the client middleware `Configuration.computeConfiguration` (`lspclientextension.ts`), which answers `workspace/configuration` for section `erlang` (via `resolveErlangSettings`) and a synthetic `<computed>` section (autosave, tmpdir, username). `erlang.cacheManagement` is passed on the `erl` command line as `-vscode_cache_mgmt ...` and read by `vscode_gen_lsp_doc_server`.
 
 ### Debugger path
 
@@ -63,9 +63,10 @@ Settings cross the boundary through the client middleware `Configuration.compute
 
 ## Conventions
 
-- New user-facing setting: add to `contributes.configuration` in `package.json`, surface it in `ErlangConfigurationProvider`/`erlangSettings.ts`, and read it in Erlang via `gen_lsp_config_server`.
+- New user-facing setting: add to `contributes.configuration` in `package.json`, surface it in `ErlangConfigurationProvider`/`erlangSettings.ts`, and read it in Erlang via `vscode_gen_lsp_config_server`.
 - New command: `contributes.commands` in `package.json` + registration in the matching runner (`RebarRunner`, `EunitRunner`).
 - `erlang.verbose` enables the `Erlang Language Server` output channel and technical traces; `erlang.verboseExcludeFilter` filters noisy methods.
 - Grammar edits go through the `grammar` submodule (upstream repo), not this one; see `syntaxes/README.md` for the plist/yaml workflow.
 - use always rg instead of grep
 
+- Every Erlang module under `apps/erlangbridge/src` must be prefixed `vscode_`: bridge code is loaded into the user's VMs (debuggee, test runs), which share one flat module namespace (#362). `vscode_module_names_SUITE` enforces it.

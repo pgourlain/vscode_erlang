@@ -1,0 +1,21 @@
+-module(vscode_gen_lsp_doc_sup).
+-behaviour(supervisor).
+
+%% API
+-export([start_link/0]).
+
+%% Supervisor callbacks
+-export([init/1]).
+
+start_link() ->
+    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+
+init(_Args) ->
+    % because vscode_lsp_log use another gen_server we can't use it here
+    UserSpec = #{id => vscode_gen_lsp_doc_server,
+        start => {vscode_gen_lsp_doc_server, start_link, []},
+        restart => permanent,
+        modules => [vscode_gen_lsp_doc_server],
+        type => worker},
+    StartSpecs = {{one_for_one, 60, 3600}, [UserSpec]},
+    {ok, StartSpecs}.

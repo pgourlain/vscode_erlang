@@ -1,6 +1,6 @@
 %% Task 6.3: an eunit_listener that streams per-test progress to the LSP
 %% client as `erlang/testRunProgress` notifications, and records the final
-%% per-test status in an ETS table so the caller (lsp_testing:run_tests/2)
+%% per-test status in an ETS table so the caller (vscode_lsp_testing:run_tests/2)
 %% can read it back once eunit:test/2 returns.
 %%
 %% This is a sibling of vscode_eunit_jsonreport.erl (same behaviour, same `Data`
@@ -43,7 +43,7 @@ handle_end(_Kind, _Data, State) ->
     State.
 
 handle_cancel(test, Data, State) ->
-    Message = lsp_utils:to_binary(io_lib:format("~p", [proplists:get_value(reason, Data)])),
+    Message = vscode_lsp_utils:to_binary(io_lib:format("~p", [proplists:get_value(reason, Data)])),
     record(State, Data, <<"skipped">>, Message),
     notify(State, Data, <<"skipped">>, Message),
     State;
@@ -56,7 +56,7 @@ terminate(_Result, _State) ->
 classify(ok) ->
     {<<"passed">>, undefined};
 classify({error, Exception}) ->
-    {<<"failed">>, lsp_utils:to_binary(io_lib:format("~p", [Exception]))};
+    {<<"failed">>, vscode_lsp_utils:to_binary(io_lib:format("~p", [Exception]))};
 classify(_Other) ->
     {<<"failed">>, undefined}.
 
@@ -75,12 +75,12 @@ notify(#state{socket = Socket}, Data, StatusBin, Message) ->
             ok;
         {Module, Function, Arity} ->
             Line = proplists:get_value(line, Data),
-            gen_lsp_server:send_to_client(Socket, <<"erlang/testRunProgress">>, #{
+            vscode_gen_lsp_server:send_to_client(Socket, <<"erlang/testRunProgress">>, #{
                 method => <<"erlang/testRunProgress">>,
                 params => #{
                     kind => <<"eunit">>,
-                    module => lsp_utils:to_binary(Module),
-                    function => lsp_utils:to_binary(Function),
+                    module => vscode_lsp_utils:to_binary(Module),
+                    function => vscode_lsp_utils:to_binary(Function),
                     arity => Arity,
                     status => StatusBin,
                     message => optional(Message),
