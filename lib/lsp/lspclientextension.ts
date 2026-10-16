@@ -40,7 +40,11 @@ import { findErl } from '../erlangInstallation';
 
 // import { ErlangSettings } from '../erlangSettings';
 import RebarShell from '../RebarShell';
-import { ErlangOutputAdapter } from '../vscodeAdapter';
+import { ErlangOutput, ErlangOutputAdapter } from '../vscodeAdapter';
+import {
+	BRIDGE_DIAGNOSTICS_COMMAND, BridgeCompileError, BridgeReport,
+	collectBridgeDiagnostics, reportBridgeIssue, showBridgeReport
+} from './bridgeDiagnostics';
 import { getElangConfigConfiguration, resolveErlangSettings } from '../ErlangConfigurationProvider';
 import { ErlangLanguageClient, erlangDocumentSelector } from './lsp-context';
 
@@ -61,6 +65,8 @@ https://tomassetti.me/language-server-dot-visual-studio/
 export let client: LanguageClient;
 let clients: Map<string, LanguageClient> = new Map();
 let lspOutputChannel: LogOutputChannel;
+// Diagnostics of the last failed bridge compilation (erlang.showBridgeDiagnostics).
+let lastBridgeReport: BridgeReport | undefined;
 
 namespace Configuration {
 
@@ -201,15 +207,24 @@ function waitForSocket(options: any, callback: any, _tries: any) {
  * @returns Promise resolved or rejected when compilation is complete.
  */
 async function compileErlangBridge(extensionPath: string): Promise<string> {
-	const { exitCode, output } = await new RebarShell([getElangConfigConfiguration().rebarPath], extensionPath, ErlangOutputAdapter())
-		.compile(extensionPath, getElangConfigConfiguration().erlangPath);
+	const shell = newBridgeRebarShell(extensionPath);
+	const { exitCode, output } = await shell.compile(extensionPath, getElangConfigConfiguration().erlangPath);
 	// vscode_lsp_entry recompiles the bridge sources in memory at startup, so a
 	// failed rebar3 compile only matters when no previous build exists.
 	if (exitCode !== 0 && !fs.existsSync(path.join(erlangBridgePath, 'ebin', 'vscode_lsp_entry.beam'))) {
 		const tail = output.trim().split('\n').slice(-5).join('\n');
-		throw new Error(`compiling the Erlang bridge with rebar3 failed (exit code ${exitCode})${tail ? ':\n' + tail : ''}`);
+		const report = await collectBridgeDiagnostics(shell, { exitCode, output });
+		lastBridgeReport = report;
+		ErlangOutput().appendLine(report.markdown);
+		const hint = report.hints.length ? `\nProbable cause: ${report.hints[0]}` : '';
+		throw new BridgeCompileError(
+			`compiling the Erlang bridge with rebar3 failed (exit code ${exitCode})${tail ? ':\n' + tail : ''}${hint}`, report);
 	}
 	return output;
+}
+
+function newBridgeRebarShell(extensionPath: string): RebarShell {
+	return new RebarShell([getElangConfigConfiguration().rebarPath], extensionPath, ErlangOutputAdapter());
 }
 
 function getPort(callback) {
@@ -231,6 +246,10 @@ export function activate(context: ExtensionContext) {
 
 	const status = new LspStatus();
 	context.subscriptions.push(status);
+	context.subscriptions.push(commands.registerCommand(BRIDGE_DIAGNOSTICS_COMMAND, async () => {
+		lastBridgeReport ??= await collectBridgeDiagnostics(newBridgeRebarShell(context.extensionPath));
+		await showBridgeReport(lastBridgeReport);
+	}));
 	context.subscriptions.push(commands.registerCommand(SHOW_OUTPUT_COMMAND, () => client?.outputChannel.show()));
 	context.subscriptions.push(commands.registerCommand(RESTART_COMMAND,
 		() => startIfErlangFound(() => client.state === State.Stopped ? client.start() : client.restart(), true)));
@@ -242,8 +261,15 @@ export function activate(context: ExtensionContext) {
 		starting.catch(error => {
 			startFailure = error instanceof Error ? error.message : String(error);
 			status.failed(startFailure);
-			Window.showErrorMessage(`Erlang language server failed to start: ${startFailure}`, 'Show Output')
-				.then(choice => { if (choice) { client.outputChannel.show(); } });
+			const report = error instanceof BridgeCompileError ? error.report : undefined;
+			const diagnostics = 'Show Diagnostics', issue = 'Report Issue', output = 'Show Output';
+			Window.showErrorMessage(`Erlang language server failed to start: ${startFailure}`,
+				...(report ? [diagnostics, issue] : []), output)
+				.then(choice => {
+					if (choice === diagnostics) { showBridgeReport(report); }
+					else if (choice === issue) { reportBridgeIssue(report); }
+					else if (choice === output) { client.outputChannel.show(); }
+				});
 		});
 	};
 

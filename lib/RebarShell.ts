@@ -10,6 +10,12 @@ import { getElangConfigConfiguration } from './ErlangConfigurationProvider';
  */
 export default class RebarShell extends GenericShell {
     protected shellOutput: RebarShellOutput;
+    private _lastRun: RebarRun | undefined;
+
+    /** The command line of the last `runScript`, for diagnostics. */
+    public get lastRun(): RebarRun | undefined {
+        return this._lastRun;
+    }
 
     constructor(private rebarSearchPaths: string[], private defaultRebarSearchPath: string, outputChannel: ILogOutput) {
         super(outputChannel, new RebarShellOutput(), getElangConfigConfiguration());
@@ -47,6 +53,7 @@ export default class RebarShell extends GenericShell {
             rebarFileName = ('"' + rebarFileName + '"');
         }
         let args = [rebarFileName].concat(commands);
+        this._lastRun = { command: escript, args: args.slice(), cwd };
 
         this.shellOutput.clear();
 
@@ -65,41 +72,58 @@ export default class RebarShell extends GenericShell {
      * @returns Full path to rebar executable
      */
     public async getRebarFullPath(): Promise<string> {
-        const rebarSearchPaths = this.rebarSearchPaths.slice();
-        const onSearchPaths = this.findBestFile(rebarSearchPaths, ['rebar3', 'rebar'], '');
-        if (onSearchPaths !== '') {
-            return onSearchPaths;
-        }
-        const onPATH = await this.findExecutable('rebar3');
-        if (onPATH) {
-            return onPATH;
-        }
-        return this.findBestFile([this.defaultRebarSearchPath], ['rebar3', 'rebar'], 'rebar3');
+        return (await this.getRebarResolution()).path;
     }
 
     /**
-     * Find the rebar executable to be used based on the order of `dirs` and `filenames` provided.
-     * The order defines the priority. `defaultResult` will be used if no executable could be found.
+     * Same lookup as `getRebarFullPath`, but also reports where the executable
+     * came from and every location that was tried (for diagnostics).
+     */
+    public async getRebarResolution(): Promise<RebarResolution> {
+        const candidates: RebarCandidate[] = [];
+        const names = ['rebar3', 'rebar'];
+
+        const onSearchPaths = this.findBestFile(this.rebarSearchPaths, names, 'search-path', candidates);
+        if (onSearchPaths !== '') {
+            return { path: onSearchPaths, source: 'search-path', candidates };
+        }
+        const onPATH = await this.findExecutable('rebar3');
+        candidates.push({ path: onPATH ?? 'rebar3', exists: !!onPATH, origin: 'PATH' });
+        if (onPATH) {
+            return { path: onPATH, source: 'PATH', candidates };
+        }
+        const inDefaultDir = this.findBestFile([this.defaultRebarSearchPath], names, 'default-dir', candidates);
+        if (inDefaultDir !== '') {
+            return { path: inDefaultDir, source: 'default-dir', candidates };
+        }
+        return { path: 'rebar3', source: 'fallback', candidates };
+    }
+
+    /**
+     * Find the first existing one of `fileNames` in `dirs`, in order of priority
+     * (empty entries are skipped). Returns '' when none exists; every location
+     * looked at is appended to `candidates`.
      *
      * @param dirs - Directories to search for one of `fileNames`, in order of priority
      * @param fileNames - Filenames to search in each directory, in order of priority
-     * @param defaultResult - Fallback executable path or command if rebar not found
-     * @returns Preferred rebar executable path or command
+     * @param origin - Where `dirs` come from, recorded in `candidates`
+     * @param candidates - Collects the locations that were tried
      */
-    private findBestFile(dirs : string[], fileNames : string[], defaultResult : string) : string
+    private findBestFile(dirs : string[], fileNames : string[], origin : string, candidates : RebarCandidate[]) : string
     {
-        var result = defaultResult;
-        for (var i=0; i < dirs.length; i++)
+        for (const dir of dirs.filter(d => !!d))
         {
-            for (var j=0; j < fileNames.length; j++)
+            for (const fileName of fileNames)
             {
-                var fullPath = path.normalize(path.join(dirs[i], fileNames[j]));
-                if (fs.existsSync(fullPath)) {
+                const fullPath = path.normalize(path.join(dir, fileName));
+                const exists = fs.existsSync(fullPath);
+                candidates.push({ path: fullPath, exists, origin });
+                if (exists) {
                     return fullPath;
                 }
             }
         }
-        return result;
+        return '';
     }
 
     private async findExecutable(name: string): Promise<string | null> {
@@ -120,6 +144,27 @@ export default class RebarShell extends GenericShell {
         }
         return null;
     }
+}
+
+/** Where `getRebarResolution` found the rebar executable. */
+export type RebarSource = 'search-path' | 'PATH' | 'default-dir' | 'fallback';
+
+export interface RebarCandidate {
+    path: string,
+    exists: boolean,
+    origin: string
+}
+
+export interface RebarResolution {
+    path: string,
+    source: RebarSource,
+    candidates: RebarCandidate[]
+}
+
+export interface RebarRun {
+    command: string,
+    args: string[],
+    cwd: string
 }
 
 export interface RebarShellResult {

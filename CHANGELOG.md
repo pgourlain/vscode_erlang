@@ -1,5 +1,9 @@
 # Change log
 
+## Version 1.2.8 (October 16, 2026)
+
+* Fix #[364](https://github.com/pgourlain/vscode_erlang/issues/364): When the Erlang bridge cannot be compiled, the failure popup now offers **Show Diagnostics** and **Report Issue**. The report lists the `erl`/`escript`/OTP found, which rebar3 was picked and why, whether it is a real escript (a shell-script `rebar3` such as some distro packages fails with `syntax error before: '#'`, #364), the relevant `erlang.*` settings, unknown `erlang.*` settings with a "did you mean", and the full rebar3 output, with the probable causes first. Also available as **Erlang: Show Language Server Diagnostics**
+
 ## Version 1.2.7 (October 10, 2026)
 
 * Fix #362: all Erlang modules of the extension (language server, debug bridge, MCP inspector, eunit and common_test hooks) are now prefixed with `vscode_` to avoid name clashes with the user's own modules (e.g. `mcp_sup`, `mcp_store`, `mcp_tools`)

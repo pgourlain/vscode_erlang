@@ -5,13 +5,16 @@ if none matches, see [Reporting a bug](#reporting-a-bug).
 
 ## First, check this
 
-Three commands answer most questions (`Ctrl+Shift+P` / `Cmd+Shift+P`):
+Four commands answer most questions (`Ctrl+Shift+P` / `Cmd+Shift+P`):
 
 - **`Erlang: Check Erlang/OTP and rebar3 installation`** - shows which `erl` and
   which `rebar3` the extension actually uses.
 - **`Erlang: Show Language Server Output`** - the server's log. Set
   `"erlang.verbose": true` for technical traces (noisy methods are filtered by
   `erlang.verboseExcludeFilter`).
+- **`Erlang: Show Language Server Diagnostics`** - a report of the environment
+  the language server starts in (see
+  [The language server fails to compile](#the-language-server-fails-to-compile-rebar3-errors)).
 - **`Erlang: Restart Language Server`** - after changing a path setting or
   installing another OTP version.
 
@@ -36,6 +39,39 @@ installation`, then open the output channel.
 
 rebar3 is looked up in `erlang.rebarPath`, then in the project folder, then on
 the `PATH`, and finally falls back to the rebar3 bundled with the extension.
+
+## The language server fails to compile (rebar3 errors)
+
+At startup the extension compiles its Erlang bridge with rebar3. When that
+fails, the error popup offers **Show Diagnostics** and **Report Issue**. The
+same report is available at any time with `Erlang: Show Language Server
+Diagnostics`. It lists, with the probable causes first:
+
+- the `erl`, `escript` and OTP version found;
+- which rebar3 was picked, where it came from (`erlang.rebarPath`, `PATH` or
+  the one bundled with the extension), every location tried, and whether it is a
+  real escript;
+- the exact command, the exit code and the rebar3 output;
+- the `erlang.*` settings that matter, and unknown `erlang.*` settings (a typo
+  such as `erlang.rebar3Path`, which is silently ignored, comes with a
+  "did you mean").
+
+Frequent causes:
+
+- **`syntax error before: '#'`**: the `rebar3` found is a shell script (some
+  distribution packages install one), not an escript, and the extension runs
+  rebar3 with `escript`. Put a real `rebar3` escript (from
+  [rebar3.org](https://rebar3.org)) in a directory and set `erlang.rebarPath`
+  to that **directory**; it must contain a file named `rebar3` or `rebar`. Or
+  leave `erlang.rebarPath` empty and make sure a real escript comes first on the
+  `PATH`.
+- **`erlang.rebarPath` is a file**: it must be the directory holding `rebar3`.
+- **`escript` not found**: it ships with Erlang/OTP, see `erlang.erlangPath`
+  above.
+
+**Report Issue** opens VS Code's issue reporter with the report filled in, so
+you can review it before sending. It contains local paths and your user name:
+check it before sharing.
 
 ## `spawn /bin/sh ENOENT`, or nothing starts in a sandbox or a VS Code fork
 
@@ -382,7 +418,9 @@ Open an issue at
 [pgourlain/vscode_erlang/issues](https://github.com/pgourlain/vscode_erlang/issues)
 and include:
 
-- the output of `Erlang: Check Erlang/OTP and rebar3 installation`;
+- the output of `Erlang: Check Erlang/OTP and rebar3 installation`, and, if the
+  language server did not start, the report of `Erlang: Show Language Server
+  Diagnostics`;
 - OTP version, extension version, VS Code (or fork) version and OS;
 - the `Erlang Language Server` output with `"erlang.verbose": true`;
 - the smallest rebar3 project that reproduces the problem.
