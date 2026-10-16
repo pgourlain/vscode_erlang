@@ -1,7 +1,7 @@
 {
 	"name": "erlang",
 	"description": "Erlang language extension for Visual Studio Code",
-	"version": "1.2.7",
+	"version": "1.2.8",
 	"icon": "images/icon.png",
 	"publisher": "pgourlain",
 	"engines": {
@@ -239,6 +239,10 @@
 			{
 				"command": "erlang.mcp.showConnectionDetails",
 				"title": "Erlang MCP: Show Connection Details"
+			},
+			{
+				"command": "erlang.showBridgeDiagnostics",
+				"title": "Erlang: Show Language Server Diagnostics"
 			},
 			{
 				"command": "extension.rebarBuild",
