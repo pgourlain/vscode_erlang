@@ -10,17 +10,18 @@ export class ErlangShellLSP extends GenericShell {
         var debugStartArgs = [];
         // Start as distributed node to be able to connect to the Erlang VM for investigation.
         // Bind distribution to loopback: a network-reachable distribution port plus the
-        // predictable cookie below is the classic Erlang RCE (rpc:call/4 os:cmd/1). Use
+        // guessable cookie is the classic Erlang RCE (rpc:call/4 os:cmd/1). Use
         // -name <node>@127.0.0.1 so local remsh still connects over loopback (a short name
         // resolves to the LAN address, which the loopback-bound listener refuses), and
         // confine both the distribution listener (inet_dist_use_interface) and epmd
         // (ERL_EPMD_ADDRESS) to 127.0.0.1. this.shellQuote double-quotes the
         // {127,0,0,1} tuple when this shell is spawned through one (see
         // erlang.useShell) so it re-parses as one argument.
+        // No -setcookie: the node reads ~/.erlang.cookie, and only its owner can read it.
+        // The cookie does not come from the port and does not show in the process list.
         if (this.erlangDistributedNode) {
             debugStartArgs.push(
                 "-name", "vscode_" + listen_port.toString() + "@127.0.0.1",
-                "-setcookie", "vscode_" + listen_port.toString(),
                 "-kernel", "inet_dist_use_interface", this.shellQuote("{127,0,0,1}"),
                 "-env", "ERL_EPMD_ADDRESS", "127.0.0.1");
         }
