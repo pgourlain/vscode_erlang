@@ -221,7 +221,7 @@ For Erlang files the extension sets 4-space indentation (erlfmt's), enables sema
 
 - `erlang.erlangPath` - Directory location of erl/escript
 - `erlang.erlangArgs` - Arguments passed to Erlang backend
-- `erlang.erlangDistributedNode` - Start the Erlang backend in a distributed Erlang node for extension development
+- `erlang.erlangDistributedNode` - Start the Erlang backend in a distributed Erlang node for extension development. The node uses the cookie in `~/.erlang.cookie`
 - `erlang.rebarPath` - Directory location of rebar/rebar3
 - `erlang.rebarBuildArgs` - Arguments to provide to rebar/rebar3 build command
 - `erlang.includePaths` - Include paths are read from rebar.config, and also standard set of paths is used. This setting is for special cases when the default behaviour is not enough
