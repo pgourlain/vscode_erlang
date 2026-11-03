@@ -231,12 +231,9 @@ test_definition_record(Config) ->
     [{DefFile, DefLine, _, _}] = vscode_lsp_navigation:definition(TargetFile, Line, Column),
     ?assertEqual(TargetFile, DefFile),
     {DeclLine, _} = nav_ext_position_of(TargetContent, "-record(item"),
-    %% CHARACTERIZATION: for a record (unlike function/macro/variable),
-    %% the returned "Line" is itself a {Line, Column} tuple, not a plain
-    %% integer - find_definition_in_file/4's record clause destructures
-    %% the dodged tree's {attr, Line, _, _} node and forwards that inner
-    %% tuple as-is (vscode_lsp_navigation.erl:686-690).
-    ?assertMatch({DeclLine, _}, DefLine).
+    %% Line must be a plain integer (a {Line, Column} tuple made
+    %% vscode_lsp_utils:client_range/3 crash with badarith, #374).
+    ?assertEqual(DeclLine, DefLine).
 
 test_definition_macro(Config) ->
     {TargetFile, _CallerFile} = nav_ext_setup(Config),

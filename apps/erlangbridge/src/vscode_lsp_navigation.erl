@@ -1127,7 +1127,7 @@ find_definition_in_file(macro, MacroName, File,
 find_definition_in_file(record, RecordName, File,
                         [{tree, attribute, _,
                           {attribute, {tree, atom, _, record},
-                           [{tree, atom, {attr, Line, _, _}, RecordName}, _]}}
+                           [{tree, atom, {attr, {Line,_C}, _, _}, RecordName}, _]}}
                          | _Forms]) ->
     {File, Line, 1, 1};
 find_definition_in_file(field, {RecordName, FieldName}, File,
