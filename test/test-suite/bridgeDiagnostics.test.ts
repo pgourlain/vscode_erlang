@@ -97,6 +97,20 @@ suite('bridge diagnostics', () => {
 			assert.match(hints[0], /Did you mean `erlang\.rebarPath`/);
 		});
 
+		test('rebar3 beams incompatible with the installed OTP (#371)', () => {
+			const hints = buildHints(baseInfo({
+				otpVersion: '29.0.2',
+				failure: {
+					exitCode: 1,
+					output: 'beam/beam_load.c(604): Error loading function rebar_prv_deps:source_text/1:\n'
+						+ '  please re-compile this module with an Erlang/OTP 29 compiler or update your Erlang/OTP version'
+				}
+			}));
+			assert.strictEqual(hints.length, 1);
+			assert.match(hints[0], /OTP 29\.0\.2/);
+			assert.match(hints[0], /set `erlang\.rebarPath`/);
+		});
+
 		test('rebarPath set but not honoured', () => {
 			const hints = buildHints(baseInfo({ settings: { rebarPath: '/home/me/rebar3' }, rebarSource: 'PATH' }));
 			assert.strictEqual(hints.length, 1);

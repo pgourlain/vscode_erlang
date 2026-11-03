@@ -156,6 +156,12 @@ export function buildHints(info: BridgeDiagnosticsInfo): string[] {
 	} else if (info.rebarFile.kind === 'missing') {
 		hints.push(`rebar3 was not found (\`${info.rebarPath}\`). Leave \`erlang.rebarPath\` empty to use the one bundled with the extension.`);
 	}
+	if (info.failure && /beam_load\.c|please re-compile this module with an Erlang\/OTP/.test(info.failure.output)) {
+		hints.push(`The rebar3 in use (\`${info.rebarPath}\`) was built for another Erlang/OTP version than your installed one`
+			+ `${info.otpVersion ? ` (OTP ${info.otpVersion})` : ''} and cannot run on it. `
+			+ 'Install a rebar3 matching your Erlang/OTP (rebar3.org, or your package manager / asdf / mise) '
+			+ 'and set `erlang.rebarPath` to the directory holding it.');
+	}
 	const configured = info.settings['rebarPath'];
 	if (typeof configured === 'string' && configured !== '' && info.rebarSource !== 'search-path') {
 		hints.push(`\`erlang.rebarPath\` is "${configured}" but no \`rebar3\`/\`rebar\` file was found in it `
