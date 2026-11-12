@@ -87,8 +87,7 @@ export default class RebarShell extends GenericShell {
         if (onSearchPaths !== '') {
             return { path: onSearchPaths, source: 'search-path', candidates };
         }
-        const onPATH = await this.findExecutable('rebar3');
-        candidates.push({ path: onPATH ?? 'rebar3', exists: !!onPATH, origin: 'PATH' });
+        const onPATH = await this.findOnPath('rebar3', candidates);
         if (onPATH) {
             return { path: onPATH, source: 'PATH', candidates };
         }
@@ -126,22 +125,36 @@ export default class RebarShell extends GenericShell {
         return '';
     }
 
-    private async findExecutable(name: string): Promise<string | null> {
-        const envPath = process.env.PATH ?? '';
-        const dirs = envPath.split(path.delimiter);
-        const exts = process.platform === 'win32'
-            ? (process.env.PATHEXT ?? '.EXE;.CMD;.BAT').split(';')
-            : [''];
+    /**
+     * Find the rebar escript `name` on the PATH. Rebar is always run through
+     * `escript`, so only the extension-less escript itself is usable. On
+     * Windows, rebar3 is commonly installed as the escript plus a
+     * `rebar3.cmd`/`.bat`/`.exe` wrapper next to it (#375): escript cannot
+     * read the wrapper, so it is recorded as skipped and the lookup goes on.
+     */
+    private async findOnPath(name: string, candidates: RebarCandidate[]): Promise<string | null> {
+        const dirs = (process.env.PATH ?? '').split(path.delimiter).filter(d => !!d);
+        const wrapperExts = process.platform === 'win32'
+            ? (process.env.PATHEXT ?? '.EXE;.CMD;.BAT').split(';').filter(e => !!e)
+            : [];
 
         for (const dir of dirs) {
-            for (const ext of exts) {
-            const full = path.join(dir, name + ext);
+            const full = path.join(dir, name);
             try {
                 await fsPromises.access(full, fsPromises.constants.X_OK);
-                return full;
+                if ((await fsPromises.stat(full)).isFile()) {
+                    candidates.push({ path: full, exists: true, origin: 'PATH' });
+                    return full;
+                }
             } catch { /* keep looking */ }
+            for (const ext of wrapperExts) {
+                const wrapper = full + ext;
+                if (fs.existsSync(wrapper)) {
+                    candidates.push({ path: wrapper, exists: true, origin: 'PATH (wrapper, not an escript: skipped)' });
+                }
             }
         }
+        candidates.push({ path: name, exists: false, origin: 'PATH' });
         return null;
     }
 }
