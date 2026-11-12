@@ -34,6 +34,12 @@ suite('ErlangShellLSP distribution hardening', () => {
         assert.ok(args.includes('127.0.0.1'), 'epmd bound to loopback');
     });
 
+    test('distributed node passes no cookie on the command line', async () => {
+        const { args } = await captureStartArgs(true);
+        assert.ok(!args.includes('-setcookie'), 'no -setcookie: the node reads ~/.erlang.cookie');
+        assert.ok(!args.includes('vscode_12345'), 'no cookie derived from the port');
+    });
+
     test('non-distributed node adds no distribution flags', async () => {
         const { args } = await captureStartArgs(false);
         assert.ok(!args.includes('-name'), 'no -name when not distributed');
