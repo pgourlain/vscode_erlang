@@ -1,11 +1,15 @@
 # Change log
 
-## Version 1.2.9 (Unreleased)
+## Version 1.2.9 (November 12, 2026)
 
 * Fix #[374](https://github.com/pgourlain/vscode_erlang/issues/374): *Go to Definition* on a record failed with `badarith` in the language server (record definition line was read without its column)
 * Fix #[375](https://github.com/pgourlain/vscode_erlang/issues/375): on Windows, a `rebar3.cmd`/`.bat`/`.exe` wrapper found on the PATH broke the Erlang bridge compilation (`syntax error before: set`), since rebar3 is always run through `escript`. The `rebar3` escript next to the wrapper is now used; a wrapper alone is skipped (and listed in the diagnostics report) in favor of the bundled rebar3
 * Erlang bridge diagnostics: a clear hint when the rebar3 in use was built for another Erlang/OTP version than the installed one (`please re-compile this module with an Erlang/OTP ...`)
 * Add support for OTP 29: CI now also runs on OTP 29.1, and the bundled rebar3 is upgraded to 3.28.0 (3.24.0 beams cannot be loaded by OTP 29)
+* [#367](https://github.com/pgourlain/vscode_erlang/pull/367): with `erlang.erlangDistributedNode`, the language server node no longer gets a cookie derived from its port (`-setcookie vscode_<port>`, guessable and visible in the process list); it now uses `~/.erlang.cookie`, like the attach debugger
+
+Thanks to
+* [NoneSilva](https://github.com/NoneSilva)
 
 ## Version 1.2.8 (October 16, 2026)
 
