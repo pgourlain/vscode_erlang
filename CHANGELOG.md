@@ -1,5 +1,11 @@
 # Change log
 
+## Version 1.2.9 (Unreleased)
+
+* Fix #[374](https://github.com/pgourlain/vscode_erlang/issues/374): *Go to Definition* on a record failed with `badarith` in the language server (record definition line was read without its column)
+* Fix #[375](https://github.com/pgourlain/vscode_erlang/issues/375): on Windows, a `rebar3.cmd`/`.bat`/`.exe` wrapper found on the PATH broke the Erlang bridge compilation (`syntax error before: set`), since rebar3 is always run through `escript`. The `rebar3` escript next to the wrapper is now used; a wrapper alone is skipped (and listed in the diagnostics report) in favor of the bundled rebar3
+* Erlang bridge diagnostics: a clear hint when the rebar3 in use was built for another Erlang/OTP version than the installed one (`please re-compile this module with an Erlang/OTP ...`)
+
 ## Version 1.2.8 (October 16, 2026)
 
 * Fix #[364](https://github.com/pgourlain/vscode_erlang/issues/364): When the Erlang bridge cannot be compiled, the failure popup now offers **Show Diagnostics** and **Report Issue**. The report lists the `erl`/`escript`/OTP found, which rebar3 was picked and why, whether it is a real escript (a shell-script `rebar3` such as some distro packages fails with `syntax error before: '#'`, #364), the relevant `erlang.*` settings, unknown `erlang.*` settings with a "did you mean", and the full rebar3 output, with the probable causes first. Also available as **Erlang: Show Language Server Diagnostics**
