@@ -97,6 +97,20 @@ suite('bridge diagnostics', () => {
 			assert.match(hints[0], /Did you mean `erlang\.rebarPath`/);
 		});
 
+		test('rebar3 beams incompatible with the installed OTP (#371)', () => {
+			const hints = buildHints(baseInfo({
+				otpVersion: '29.0.2',
+				failure: {
+					exitCode: 1,
+					output: 'beam/beam_load.c(604): Error loading function rebar_prv_deps:source_text/1:\n'
+						+ '  please re-compile this module with an Erlang/OTP 29 compiler or update your Erlang/OTP version'
+				}
+			}));
+			assert.strictEqual(hints.length, 1);
+			assert.match(hints[0], /OTP 29\.0\.2/);
+			assert.match(hints[0], /set `erlang\.rebarPath`/);
+		});
+
 		test('rebarPath set but not honoured', () => {
 			const hints = buildHints(baseInfo({ settings: { rebarPath: '/home/me/rebar3' }, rebarSource: 'PATH' }));
 			assert.strictEqual(hints.length, 1);
@@ -140,6 +154,46 @@ suite('bridge diagnostics', () => {
 			const resolution = await new RebarShell([file], path.join(dir, 'empty'), noLog).getRebarResolution();
 			assert.notStrictEqual(resolution.source, 'search-path');
 			assert.ok(resolution.candidates.some(c => c.origin === 'search-path' && !c.exists));
+		});
+
+		suite('on the PATH', () => {
+			let savedPath: string | undefined;
+			let savedPathExt: string | undefined;
+			setup(() => {
+				savedPath = process.env.PATH;
+				savedPathExt = process.env.PATHEXT;
+				process.env.PATHEXT = '.EXE;.CMD;.BAT';
+			});
+			teardown(() => {
+				process.env.PATH = savedPath;
+				if (savedPathExt === undefined) { delete process.env.PATHEXT; } else { process.env.PATHEXT = savedPathExt; }
+			});
+			const onPath = (...dirs: string[]) => { process.env.PATH = dirs.join(path.delimiter); };
+
+			test('the escript next to a rebar3.cmd wrapper is used, not the wrapper (#375)', async () => {
+				const binDir = path.join(dir, 'bin');
+				fs.mkdirSync(binDir);
+				fs.writeFileSync(path.join(binDir, 'rebar3.CMD'), '@echo off\r\nsetlocal\r\n');
+				const escript = path.join(binDir, 'rebar3');
+				fs.writeFileSync(escript, '#!/usr/bin/env escript\n', { mode: 0o755 });
+				onPath(binDir);
+				const resolution = await new RebarShell([], path.join(dir, 'empty'), noLog).getRebarResolution();
+				assert.strictEqual(resolution.source, 'PATH');
+				assert.strictEqual(resolution.path, escript);
+			});
+
+			test('a lone wrapper is skipped and reported (#375)', async () => {
+				const binDir = path.join(dir, 'wrapperonly');
+				fs.mkdirSync(binDir);
+				const wrapper = path.join(binDir, 'rebar3.CMD');
+				fs.writeFileSync(wrapper, '@echo off\r\n');
+				onPath(binDir);
+				const resolution = await new RebarShell([], path.join(dir, 'empty'), noLog).getRebarResolution();
+				assert.notStrictEqual(resolution.path, wrapper);
+				if (process.platform === 'win32') {
+					assert.ok(resolution.candidates.some(c => c.path === wrapper && /skipped/.test(c.origin)));
+				}
+			});
 		});
 	});
 });
