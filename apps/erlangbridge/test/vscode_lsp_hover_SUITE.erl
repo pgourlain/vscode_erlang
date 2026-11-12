@@ -73,7 +73,22 @@ hover_on_otp_function_uses_eep48_docs(Config) ->
     ?assert(is_binary(Hover)),
     Text = binary_to_list(Hover),
     ?assert(string:str(Text, "-spec reverse(") > 0),
-    ?assert(string:str(Text, "reverse order") > 0).
+    %% Some OTP builds (e.g. minimal CI installs) ship doc chunks without the
+    %% prose (`none`/empty), so only require it when the chunk has it.
+    case otp_has_doc_text(lists, reverse, 1) of
+        true -> ?assert(string:str(Text, "reverse order") > 0);
+        false -> ok
+    end.
+
+otp_has_doc_text(Module, Function, Arity) ->
+    case code:get_doc(Module) of
+        {ok, {docs_v1, _, _, _, _, _, Docs}} ->
+            lists:any(fun({{function, F, A}, _, _, #{<<"en">> := _}, _}) ->
+                              F =:= Function andalso A =:= Arity;
+                         (_) -> false
+                      end, Docs);
+        _ -> false
+    end.
 
 hover_on_macro_returns_nothing(Config) ->
     {File, Content} = source(Config),
